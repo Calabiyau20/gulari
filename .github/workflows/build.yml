@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   macos:
     runs-on: macos-latest
@@ -36,6 +39,15 @@ jobs:
           ditto -c -k --keepParent AU/Synthgularity.component ../../../Synthgularity-mac-AU.zip
           ditto -c -k --keepParent CLAP/Synthgularity.clap ../../../Synthgularity-mac-CLAP.zip
           ditto -c -k --keepParent Standalone/Synthgularity.app ../../../Synthgularity-mac-Standalone.zip
+      - name: Publish build to the 'builds' branch
+        run: |
+          mkdir -p /tmp/out/mac && cp -R build/Synthgularity_artefacts/Release/VST3/Synthgularity.vst3 build/Synthgularity_artefacts/Release/AU/Synthgularity.component build/Synthgularity_artefacts/Release/CLAP/Synthgularity.clap /tmp/out/mac/
+          cp Synthgularity-mac-*.zip /tmp/out/
+          cd /tmp/out
+          git init -q -b builds
+          git config user.name "github-actions" && git config user.email "actions@github.com"
+          git add -A && git commit -q -m "macOS build ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
       - uses: actions/upload-artifact@v4
         with:
           name: Synthgularity-macOS
