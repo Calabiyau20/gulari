@@ -6,7 +6,7 @@ on:
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Fetch libraries
@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: bash setup.sh
       - name: Configure
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -A x64
       - name: Build VST3, CLAP, Standalone
         run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_CLAP Synthgularity_Standalone
       - uses: actions/upload-artifact@v4
