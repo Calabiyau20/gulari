@@ -12,7 +12,7 @@ jobs:
       - name: Fetch libraries
         run: bash setup.sh
       - name: Configure (universal arm64 + x86_64)
-        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
       - name: Build VST3, AU, CLAP, Standalone
         run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_AU Synthgularity_CLAP Synthgularity_Standalone -- -quiet
       - name: Ad-hoc sign
@@ -25,6 +25,10 @@ jobs:
           cp -R build/Synthgularity_artefacts/Release/AU/*.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
           auval -v aumu Sygy CbYu
+      - name: Check minimum macOS
+        run: |
+          vtool -show-build build/Synthgularity_artefacts/Release/AU/Synthgularity.component/Contents/MacOS/Synthgularity | grep -E "minos|version"
+          vtool -show-build build/Synthgularity_artefacts/Release/AU/Synthgularity.component/Contents/MacOS/Synthgularity | grep -E "minos 10\.15" || (echo "Wrong deployment target"; exit 1)
       - name: Package
         run: |
           cd build/Synthgularity_artefacts/Release
