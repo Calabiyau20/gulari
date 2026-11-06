@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: bash setup.sh
       - name: Configure
-        run: cmake -B build -A x64
+        run: cmake -B build -A x64 -T ClangCL
       - name: Build VST3, CLAP, Standalone
         run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_CLAP Synthgularity_Standalone
       - uses: actions/upload-artifact@v4
