@@ -213,11 +213,72 @@ void WavetableOsc::setup (int unison, float detune, float spread, float pan)
     norm = 1.0f / std::sqrt ((float) voices);
 }
 
+namespace
+{
+    enum Warp { W_Off, W_BendP, W_BendM, W_BendPM, W_BloatP, W_BloatM, W_Sync, W_SyncWin, W_Pulse, W_Fm, W_FmWin,
+                W_Flip, W_Mirror, W_Breed, W_Brew, W_Sinc, W_Crush, W_Smooth, W_Window };
+
+    inline float readTable (const float* t0, const float* t1, int len, float ft, float p)
+    {
+        p -= std::floor (p);
+        const float x = p * (float) len;
+        const int a = (int) x;
+        const float t = x - (float) a;
+        const float s0 = t0[a] + (t0[a + 1] - t0[a]) * t;
+        const float s1 = t1[a] + (t1[a + 1] - t1[a]) * t;
+        return s0 + (s1 - s0) * ft;
+    }
+
+    // Phase warps: map the oscillator phase p (0..1) to a new read position
+    inline float warpPhase (int mode, float a, float p)
+    {
+        const float e = 1.0f + 4.0f * a;
+        switch (mode)
+        {
+            case W_BendP:  return std::pow (p, e);
+            case W_BendM:  return 1.0f - std::pow (1.0f - p, e);
+            case W_BendPM: { const float u = 2.0f * p - 1.0f; return 0.5f + 0.5f * std::copysign (std::pow (std::abs (u), e), u); }
+            case W_BloatP: return std::pow (p, 1.0f / e);
+            case W_BloatM: return 1.0f - std::pow (1.0f - p, 1.0f / e);
+            case W_Sync: case W_SyncWin: case W_Sinc:
+            { const float q = p * (1.0f + 7.0f * a); return q - std::floor (q); }
+            case W_Pulse:
+            {
+                const float w = 0.5f - 0.47f * a;
+                return p < w ? p * 0.5f / w : 0.5f + (p - w) * 0.5f / (1.0f - w);
+            }
+            case W_Fm: case W_FmWin: return p + a * 0.35f * std::sin (kTwoPi * 2.0f * p);
+            case W_Mirror: { const float m = p < 0.5f ? 2.0f * p : 2.0f - 2.0f * p; return p + (m * 0.5f - p) * a; }
+            case W_Brew: return p + a * 0.12f * std::sin (kTwoPi * 5.0f * p) * std::sin (kPi * p);
+            case W_Crush:
+            {
+                const float steps = std::exp2 (10.0f - 7.0f * a);
+                return std::floor (p * steps) / steps;
+            }
+            default: return p;
+        }
+    }
+
+    // Extra harmonics a warp adds: read a smoother mip level to limit aliasing
+    inline int warpLevelBoost (int mode, float a)
+    {
+        switch (mode)
+        {
+            case W_Sync: case W_SyncWin: case W_Sinc: return (int) std::ceil (std::log2 (1.0f + 7.0f * a));
+            case W_Fm: case W_FmWin: case W_Brew: return a > 0.3f ? 1 : 0;
+            case W_Smooth: return (int) std::round (a * 7.0f);
+            default: return 0;
+        }
+    }
+}
+
 void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR)
 {
     const float maxHarm = (float) sr * 0.5f / juce::jmax (1.0f, freqHz);
     int lvl = 0;
     while (lvl < Wavetable::kLevels - 1 && (float) (1024 >> lvl) > maxHarm) ++lvl;
+    const bool warping = warpMode != W_Off && warpAmt > 0.0f;
+    if (warping) lvl = juce::jmin (Wavetable::kLevels - 1, lvl + warpLevelBoost (warpMode, warpAmt));
 
     const float fpos = clamp01 (pos) * (float) (wt.numFrames - 1);
     const int f0 = (int) fpos;
@@ -226,6 +287,7 @@ void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float pha
     const float* t0 = wt.level (f0, lvl);
     const float* t1 = wt.level (f1, lvl);
     const int len = Wavetable::levelLength (lvl);
+    const float a = warpAmt;
 
     float l = 0.0f, r = 0.0f;
     const float inc = freqHz / (float) sr;
@@ -233,12 +295,29 @@ void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float pha
     {
         float p = phase[i] + phaseMod;
         p -= std::floor (p);
-        const float x = p * (float) len;
-        const int a = (int) x;
-        const float t = x - (float) a;
-        const float s0 = t0[a] + (t0[a + 1] - t0[a]) * t;
-        const float s1 = t1[a] + (t1[a + 1] - t1[a]) * t;
-        const float s = s0 + (s1 - s0) * ft;
+        float s;
+        if (! warping) s = readTable (t0, t1, len, ft, p);
+        else
+        {
+            s = readTable (t0, t1, len, ft, warpPhase (warpMode, a, p));
+            switch (warpMode)
+            {
+                case W_SyncWin: s *= 1.0f - p; break;                                       // fade each sync burst
+                case W_Sinc:    s *= std::sin (kPi * p); break;                             // half-sine envelope
+                case W_FmWin:   s *= 0.5f - 0.5f * std::cos (kTwoPi * p); break;
+                case W_Flip:    if (p >= 0.5f) s *= 1.0f - 2.0f * a; break;                 // flip the second half
+                case W_Breed:   s = (s + a * readTable (t0, t1, len, ft, 2.0f * p)) / (1.0f + a);  // add the octave
+                                break;
+                case W_Crush:
+                {
+                    const float lv = std::exp2 (8.0f - 6.0f * a);
+                    s = std::round (s * lv) / lv;
+                    break;
+                }
+                case W_Window:  s *= std::pow (std::sin (kPi * p), a * 4.0f); break;
+                default: break;
+            }
+        }
         l += s * gainL[i];
         r += s * gainR[i];
         phase[i] += inc * detuneRatio[i];
@@ -248,6 +327,21 @@ void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float pha
     outL = l * norm;
     outR = r * norm;
     last = (outL + outR) * 0.7071f;
+}
+
+void WavetableOsc::renderCycle (const Wavetable& wt, float pos, int warpMode, float warpAmount, float* out, int n)
+{
+    WavetableOsc o;
+    o.prepare ((double) n * 100.0, 1);
+    o.setup (1, 0.0f, 0.0f, 0.0f);
+    o.setWarp (warpMode, warpAmount);
+    o.noteOn (false);
+    for (int i = 0; i < n; ++i)
+    {
+        float l, r;
+        o.tick (wt, 100.0f, pos, 0.0f, l, r);
+        out[i] = (l + r) * 0.7071f;
+    }
 }
 
 float BasicOsc::tick (int shape, float freqHz, float sampleRate, float phaseMod)

@@ -39,6 +39,7 @@ private:
     pg::ui::SampleView* sampleView = nullptr;
     pg::ui::WavetableView* tableViews[2] {};
     juce::OwnedArray<pg::ui::StepLaneEditor> lanes;
+    juce::Array<pg::ui::EnvelopeView*> envViews;
     pg::ui::ArpGrid* arpGrid = nullptr;
     pg::ui::OrbPad* orbPad = nullptr;
     juce::OwnedArray<juce::Component> owned;   // extra buttons etc.

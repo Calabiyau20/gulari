@@ -70,15 +70,28 @@ void GranularOsc::spawn (const SampleData& s)
     }
 
     const double srcRatio = s.sampleRate / sr;
-    float semis = prm.pitch + prm.pitchRand * rng.bi();
+    float semis = prm.pitch + prm.pitchRand * rng.bi() + prm.formant;
     if (prm.mode == 0 && prm.keytrack)
         semis += note - (float) prm.root;
+    if (prm.octRand > 0.0f && rng.uni() < prm.octRand)
+        semis += rng.uni() < 0.5f ? -12.0f : 12.0f;
+    if (prm.streams > 1)
+    {
+        // streams are spread symmetrically around the main pitch
+        const float k = (float) nextStream - 0.5f * (float) (prm.streams - 1);
+        semis += k * prm.streamDetune;
+        nextStream = (nextStream + 1) % prm.streams;
+    }
     double rate = srcRatio * (double) semisToRatio (semis);
     if (rng.uni() < prm.reverse) rate = -rate;
 
     const int len = juce::jmax (16, (int) (prm.sizeMs * 0.001f * (float) sr));
-    double start = prm.pos + scanOffset + prm.spray * 0.5f * rng.bi();
-    start -= std::floor (start);   // wrap 0..1
+    // positions are relative to the region [regionStart, regionEnd]
+    const double r0 = juce::jmin (prm.regionStart, prm.regionEnd), r1 = juce::jmax (prm.regionStart, prm.regionEnd);
+    const double width = juce::jmax (0.002, r1 - r0);
+    double rel = prm.pos + scanOffset + prm.spray * 0.5f * rng.bi();
+    rel -= std::floor (rel);   // wrap inside the region
+    const double start = r0 + rel * width;
     double startFrame = start * (double) s.length;
     if (rate < 0.0)   // reversed grains start at the far end so they play through 'start'
         startFrame += (double) len * -rate;
@@ -90,6 +103,7 @@ void GranularOsc::spawn (const SampleData& s)
     g->length = len;
     g->invLength = 1.0f / (float) len;
     g->window = juce::jlimit (0, GrainWindows::kShapes - 1, prm.window);
+    g->tiltExp = std::exp2 (-prm.tilt * 1.5f);
     const float pan = prm.stereo * rng.bi();
     panGains (pan, g->gainL, g->gainR);
     lastStart = (float) start;
@@ -106,14 +120,16 @@ void GranularOsc::tick (const SampleData& s, float& outL, float& outR)
         if (prm.mode == 1)
             interval = sr / (double) midiToHz (note);   // one grain per period of the played note
         else
-            interval = sr / (double) juce::jmax (0.5f, prm.density) * (1.0 + 0.3 * rng.bi());
+            interval = sr / (double) (juce::jmax (0.5f, prm.density) * (float) juce::jmax (1, prm.streams))
+                       * (1.0 + 0.95 * (double) prm.jitter * rng.bi());
         countdown += juce::jmax (1.0, interval);
     }
 
     // scan (moves the read position through the file)
-    if (prm.scan != 0.0f)
+    if (prm.scan != 0.0f && ! prm.freeze)
     {
-        scanOffset += (double) prm.scan * (s.sampleRate / sr) / (double) s.length;
+        const double width = juce::jmax (0.002, (double) std::abs (prm.regionEnd - prm.regionStart));
+        scanOffset += (double) prm.scan * (s.sampleRate / sr) / ((double) s.length * width);
         scanOffset -= std::floor (scanOffset);
     }
 
@@ -124,7 +140,9 @@ void GranularOsc::tick (const SampleData& s, float& outL, float& outR)
     {
         if (! g.active) continue;
         ++active;
-        const float ph = (float) g.age * g.invLength * (float) GrainWindows::kSize;
+        float age01 = (float) g.age * g.invLength;
+        if (g.tiltExp != 1.0f) age01 = std::pow (age01, g.tiltExp);
+        const float ph = age01 * (float) GrainWindows::kSize;
         const int wi = (int) ph;
         const float wf = ph - (float) wi;
         const float* wt = win.table[g.window];
@@ -149,7 +167,7 @@ void GranularOsc::tick (const SampleData& s, float& outL, float& outR)
     if (prm.mode == 1)
         overlap = prm.sizeMs * 0.001f * midiToHz (note);
     else
-        overlap = prm.sizeMs * 0.001f * prm.density;
+        overlap = prm.sizeMs * 0.001f * prm.density * (float) juce::jmax (1, prm.streams);
     const float norm = 1.0f / std::sqrt (juce::jmax (1.0f, overlap * 0.5f));
     outL = l * norm * 1.4f;
     outR = r * norm * 1.4f;

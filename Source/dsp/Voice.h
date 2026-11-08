@@ -61,6 +61,9 @@ private:
 
     Adsr amp, fenv, menv;
     Lfo lfo[4];
+    Lfo grainLfo;                 // Grain Mod 1: periodic
+    float grainRnd = 0.0f, grainRndTarget = 0.0f, grainRndPhase = 1.0f;   // Grain Mod 2: smooth random
+    Rng grainRng;
     float lfoVal[4] {};
     float mod[MD_Count] {};
 
@@ -86,6 +89,7 @@ private:
     float volL = 1, volR = 1;
     float cutoffBase = 1000.0f;
     int ctrlCounter = 0;
+    float dcX[2] {}, dcY[2] {};
     bool grOn = false, wtOn[2] {}, plOn = false, bitePost = false;
     int modWave = 0, subWave = 0, noiseType = 0;
 };

@@ -16,6 +16,8 @@ namespace choices
 {
     juce::StringArray voiceModes();
     juce::StringArray wavetables();
+    juce::StringArray warpModes();
+    juce::StringArray grainModShapes();
     juce::StringArray grainWindows();
     juce::StringArray grainModes();
     juce::StringArray modWaves();
@@ -67,6 +69,8 @@ namespace choices
     PB(wt##o##_on, "WT " #O " On", false) \
     PC(wt##o##_table, "WT " #O " Table", wavetables, 0) \
     PF(wt##o##_pos, "WT " #O " Position", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PC(wt##o##_warp, "WT " #O " Warp Mode", warpModes, 0) \
+    PF(wt##o##_wamt, "WT " #O " Warp Amount", 0.0f, 1.0f, 0.0f, 0.0f) \
     PI(wt##o##_oct, "WT " #O " Octave", -3, 3, 0) \
     PI(wt##o##_semi, "WT " #O " Semitone", -12, 12, 0) \
     PF(wt##o##_fine, "WT " #O " Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
@@ -114,6 +118,25 @@ namespace choices
     PF(gr_stereo, "Grain Stereo", 0.0f, 1.0f, 0.5f, 0.0f) \
     PF(gr_level, "Grain Level", 0.0f, 1.0f, 0.8f, 0.0f) \
     PF(gr_pan, "Grain Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gr_start, "Grain Region Start", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gr_end, "Grain Region End", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PF(gr_jitter, "Grain Timing Jitter", 0.0f, 1.0f, 0.3f, 0.0f) \
+    PF(gr_octrand, "Grain Octave Random", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gr_formant, "Grain Formant", -24.0f, 24.0f, 0.0f, 0.0f) \
+    PI(gr_streams, "Grain Streams", 1, 4, 1) \
+    PF(gr_sdetune, "Grain Stream Detune", 0.0f, 1.0f, 0.15f, 0.0f) \
+    PF(gr_tilt, "Grain Window Tilt", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PB(gr_freeze, "Grain Freeze", false) \
+    PC(gm1_shape, "Grain Mod 1 Shape", grainModShapes, 0) \
+    PF(gm1_rate, "Grain Mod 1 Rate", 0.01f, 20.0f, 0.3f, 1.0f) \
+    PF(gm1_pos, "Grain Mod 1 > Position", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gm1_size, "Grain Mod 1 > Size", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gm1_density, "Grain Mod 1 > Density", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gm2_rate, "Grain Mod 2 Rate", 0.01f, 20.0f, 1.5f, 1.0f) \
+    PF(gm2_smooth, "Grain Mod 2 Smooth", 0.0f, 1.0f, 0.6f, 0.0f) \
+    PF(gm2_pitch, "Grain Mod 2 > Pitch", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gm2_spray, "Grain Mod 2 > Spray", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(gm2_stereo, "Grain Mod 2 > Stereo", -1.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- wavetables ---- */ \
     PG_WT(PF, PI, PC, PB, A, A) \
     PG_WT(PF, PI, PC, PB, B, B) \
@@ -159,13 +182,15 @@ namespace choices
     PF(fm_n_b, "FM Noise>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_m, "FM Noise>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- bite ---- */ \
-    PF(bite_drive, "Bite Drive", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(bite_fold, "Bite Fold", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(bite_crush, "Bite Crush", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(bite_soft, "Bite Soft Clip", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(bite_asym, "Bite Asymmetry", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PB(bite_post, "Bite After Filter", false) \
-    PF(bite_mix, "Bite Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PF(bite_drive, "MultiDistortion Drive", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(bite_fold, "MultiDistortion Fold", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(bite_crush, "MultiDistortion Crush", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(bite_soft, "MultiDistortion Saturate", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(bite_asym, "MultiDistortion Asymmetry", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PB(bite_post, "MultiDistortion After Filter", false) \
+    PF(bite_mix, "MultiDistortion Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PF(bite_rect, "MultiDistortion Rectify", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(bite_tone, "MultiDistortion Tone", -1.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- filter ---- */ \
     PC(flt_type, "Filter Type", filterTypes, 0) \
     PC(flt_model, "Filter Model", filterModels, 0) \

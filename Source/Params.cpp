@@ -6,6 +6,12 @@ namespace choices
 {
     juce::StringArray voiceModes()    { return { "Poly", "Mono", "Legato" }; }
     juce::StringArray wavetables()    { return { "Basic", "PWM", "Harmonics", "Formant", "Sync", "FM", "Fold", "Digital", "User" }; }
+    juce::StringArray warpModes()
+    {
+        return { "Off", "Bend +", "Bend -", "Bend +/-", "Bloat +", "Bloat -", "Hard Sync", "Sync Window", "Pulse Width",
+                 "Phase FM", "FM Window", "Flip", "Mirror", "Breed", "Brew", "Sinc", "Crush", "Smooth", "Window" };
+    }
+    juce::StringArray grainModShapes() { return { "Sine", "Triangle", "Saw", "Square" }; }
     juce::StringArray grainWindows()  { return { "Hann", "Triangle", "Tukey", "Gauss", "Perc", "Swell" }; }
     juce::StringArray grainModes()    { return { "Cloud", "Pitched" }; }
     juce::StringArray modWaves()      { return { "Sine", "Triangle", "Saw", "Square" }; }
@@ -49,7 +55,7 @@ namespace choices
                  "Grain Position", "Grain Size", "Grain Density", "Grain Pitch", "Grain Spray", "Grain Level",
                  "Mod Osc Pitch", "Mod Osc Level", "FM Amount", "Sub Level", "Noise Level",
                  "Plaits Harmonics", "Plaits Timbre", "Plaits Morph", "Plaits Level",
-                 "Bite Drive", "Bite Fold", "Bite Crush",
+                 "Distortion Drive", "Distortion Fold", "Distortion Crush",
                  "Cutoff", "Resonance", "Pan", "Volume",
                  "FX Delay Mix", "FX Delay Feedback", "FX Resonator Structure", "FX Resonator Brightness",
                  "FX Resonator Position", "FX Clouds Position", "FX Clouds Size", "FX Clouds Density",

@@ -103,10 +103,10 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         {
             const String x = o == 0 ? "wtA_" : "wtB_";
             StringArray it;
-            for (auto s : { "on:On", "table:Table", "pos:Position", "oct:Octave", "semi:Semi", "fine:Fine",
-                            "unison:Unison", "detune:Detune", "spread:Spread", "level:Level", "pan:Pan", "rphase:Rnd Phase" })
+            for (auto s : { "on:On", "table:Table", "pos:Position", "warp:Warp Mode", "wamt:Warp", "oct:Octave", "semi:Semi",
+                            "fine:Fine", "unison:Unison", "detune:Detune", "spread:Spread", "level:Level", "pan:Pan", "rphase:Rnd Phase" })
                 it.add (x + s);
-            wt[o] = page->add (new Panel (st, o == 0 ? "Wavetable A" : "Wavetable B", it, 6, o == 0 ? colours::accent : colours::accent2));
+            wt[o] = page->add (new Panel (st, o == 0 ? "Wavetable A" : "Wavetable B", it, 7, o == 0 ? colours::accent : colours::accent2));
             wt[o]->extraHeight = 78;
             auto* view = page->add (new WavetableView (proc, o));
             tableViews[o] = view;
@@ -152,19 +152,29 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         };
         auto* load = makeButton (*page, "LOAD SAMPLE", [this] { loadSampleDialog(); }, "WAV, AIFF, FLAC, MP3 or OGG");
         auto* info = makeLabel (*page, "Cloud: grains at DENSITY per second, pitch follows the keys.   "
-                                       "Pitched: one grain per period of the note, so the sample keeps its formants.", 12.0f);
+                                       "Pitched: one grain per period of the note, so the sample keeps its formants. Gold lines = region.", 12.0f);
         auto* panel = page->add (new Panel (st, "Granular Oscillator", items ({ "gr_on:On", "gr_mode:Mode", "gr_pos:Position", "gr_scan:Scan",
                                            "gr_spray:Spray", "gr_size:Size", "gr_density:Density", "gr_window:Window",
                                            "gr_pitch:Pitch", "gr_prand:Pitch Rnd", "gr_keytrack:Keytrack", "gr_root:Root Note",
-                                           "gr_reverse:Reverse", "gr_stereo:Stereo", "gr_level:Level", "gr_pan:Pan" }), 8));
+                                           "gr_reverse:Reverse", "gr_stereo:Stereo", "gr_level:Level", "gr_pan:Pan", "gr_freeze:Freeze" }), 9));
+        auto* texture = page->add (new Panel (st, "Texture", items ({ "gr_start:Region In", "gr_end:Region Out", "gr_jitter:Jitter",
+                                             "gr_octrand:Octave Rnd", "gr_formant:Formant", "gr_streams:Streams", "gr_sdetune:Stream Det",
+                                             "gr_tilt:Win Tilt" }), 8, cosmos::orchid));
+        auto* gm1p = page->add (new Panel (st, "Grain Mod 1  (LFO)", items ({ "gm1_shape:Shape", "gm1_rate:Rate", "gm1_pos:> Position",
+                                          "gm1_size:> Size", "gm1_density:> Density" }), 5, cosmos::fuchsia));
+        auto* gm2p = page->add (new Panel (st, "Grain Mod 2  (Drift)", items ({ "gm2_rate:Rate", "gm2_smooth:Smooth", "gm2_pitch:> Pitch",
+                                          "gm2_spray:> Spray", "gm2_stereo:> Stereo" }), 5, cosmos::gold));
         page->layout = [=] (Rectangle<int> r)
         {
-            auto top = r.removeFromTop (r.getHeight() * 46 / 100);
-            auto bar = top.removeFromBottom (34);
+            auto top = r.removeFromTop (r.getHeight() * 32 / 100);
+            auto bar = top.removeFromBottom (30);
             sampleView->setBounds (top.reduced (3));
-            load->setBounds (bar.removeFromRight (130).reduced (3, 4));
+            load->setBounds (bar.removeFromRight (130).reduced (3, 3));
             info->setBounds (bar.reduced (6, 0));
-            panel->setBounds (r);
+            auto rows = split (r, { 1.55f, 1.0f }, false);
+            panel->setBounds (rows[0]);
+            auto bottom = split (rows[1], { 1.6f, 1.0f, 1.0f });
+            texture->setBounds (bottom[0]); gm1p->setBounds (bottom[1]); gm2p->setBounds (bottom[2]);
         };
         tabs.addTab ("GRAIN", Colours::transparentBlack, page, false);
     }
@@ -174,21 +184,30 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         auto* page = new Page(); pages.add (page);
         auto* flt = page->add (new Panel (st, "Filter", items ({ "flt_type:Type", "flt_model:Model", "flt_slope:Slope", "flt_drive:Drive",
                                          "flt_cutoff:Cutoff", "flt_res:Resonance", "flt_env:Env Amt", "flt_key:Keytrack" }), 4));
-        auto* bite = page->add (new Panel (st, "Bite", items ({ "bite_drive:Drive", "bite_fold:Fold", "bite_crush:Crush", "bite_soft:Soft Clip",
-                                          "bite_asym:Asymmetry", "bite_mix:Mix", "bite_post:After Filter" }), 4, colours::warn));
-        auto* ampE = page->add (new Panel (st, "Amp Envelope", items ({ "amp_a:Attack", "amp_d:Decay", "amp_s:Sustain", "amp_r:Release" }), 4));
-        auto* fltE = page->add (new Panel (st, "Filter Envelope", items ({ "fenv_a:Attack", "fenv_d:Decay", "fenv_s:Sustain", "fenv_r:Release" }), 4, colours::accent2));
-        auto* modE = page->add (new Panel (st, "Mod Envelope", items ({ "menv_a:Attack", "menv_d:Decay", "menv_s:Sustain", "menv_r:Release" }), 4, colours::accent2));
-        auto* voice = page->add (new Panel (st, "Voice", items ({ "voice_mode:Mode", "polyphony:Voices", "glide:Glide", "bend_range:Bend" }), 4));
+        auto* bite = page->add (new Panel (st, "MultiDistortion", items ({ "bite_drive:Drive", "bite_asym:Asymmetry", "bite_rect:Rectify",
+                                          "bite_fold:Fold", "bite_soft:Saturate", "bite_crush:Crush", "bite_tone:Tone", "bite_mix:Mix",
+                                          "bite_post:Post Filter" }), 5, colours::warn));
+        Panel* env[3];
+        const char* envNames[] = { "Amp Envelope", "Filter Envelope", "Mod Envelope" };
+        const char* envPre[] = { "amp_", "fenv_", "menv_" };
+        const Colour envCol[] = { cosmos::neon, cosmos::orchid, cosmos::fuchsia };
+        for (int e = 0; e < 3; ++e)
+        {
+            const String pre (envPre[e]);
+            env[e] = page->add (new Panel (st, envNames[e], StringArray { pre + "a:Attack", pre + "d:Decay", pre + "s:Sustain", pre + "r:Release" }, 4, envCol[e]));
+            env[e]->extraHeight = 92;
+            auto* view = page->add (new EnvelopeView (st, pre, envCol[e]));
+            envViews.add (view);
+            env[e]->layoutExtra = [view, panel = env[e]] (Rectangle<int> r) { view->setBounds (r + panel->getPosition()); };
+        }
+        auto* voice = page->add (new Panel (st, "Voice", items ({ "voice_mode:Mode", "polyphony:Voices", "glide:Glide", "bend_range:Bend" }), 2));
         page->layout = [=] (Rectangle<int> r)
         {
-            auto rows = split (r, { 1.6f, 1.0f, 1.0f }, false);
-            auto a = split (rows[0], { 1.0f, 1.0f });
-            flt->setBounds (a[0]); bite->setBounds (a[1]);
-            auto b = split (rows[1], { 1.0f, 1.0f });
-            ampE->setBounds (b[0]); fltE->setBounds (b[1]);
-            auto c = split (rows[2], { 1.0f, 1.0f });
-            modE->setBounds (c[0]); voice->setBounds (c[1]);
+            auto rows = split (r, { 1.0f, 1.25f }, false);
+            auto a = split (rows[0], { 0.9f, 1.15f, 0.55f });
+            flt->setBounds (a[0]); bite->setBounds (a[1]); voice->setBounds (a[2]);
+            auto b = split (rows[1], { 1.0f, 1.0f, 1.0f });
+            for (int e = 0; e < 3; ++e) env[e]->setBounds (b[(size_t) e]);
         };
         tabs.addTab ("FILTER / AMP", Colours::transparentBlack, page, false);
     }
@@ -452,6 +471,7 @@ void SynthgularityEditor::timerCallback()
     const int tab = tabs.getCurrentTabIndex();
     if (tab == 0) { for (auto* v : tableViews) if (v) v->repaint(); }
     if (tab == 1 && sampleView) sampleView->repaint();
+    if (tab == 2) for (auto* v : envViews) v->repaint();
     if (tab == 5) for (auto* l : lanes) l->repaint();
     if (tab == 6 && arpGrid) arpGrid->repaint();
     if (tab == 8 && orbPad) orbPad->repaint();

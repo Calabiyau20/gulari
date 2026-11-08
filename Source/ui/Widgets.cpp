@@ -130,10 +130,21 @@ void SampleView::paint (Graphics& g)
     auto s = proc.getSample();
     if (s == nullptr) return;
     const float* cache = proc.paramCache();
-    const float pos = cache[pg::gr_pos], spray = cache[pg::gr_spray];
+    const float regA = jmin (cache[pg::gr_start], cache[pg::gr_end]), regB = jmax (cache[pg::gr_start], cache[pg::gr_end]);
+    const float pos = regA + cache[pg::gr_pos] * jmax (0.002f, regB - regA), spray = cache[pg::gr_spray] * jmax (0.002f, regB - regA);
 
     // spray region
     const float w = r.getWidth(), x0 = r.getX();
+    {
+        // area outside the grain region is dimmed
+        const float a0 = jmin (cache[pg::gr_start], cache[pg::gr_end]), a1 = jmax (cache[pg::gr_start], cache[pg::gr_end]);
+        g.setColour (cosmos::voidC.withAlpha (0.65f));
+        g.fillRect (Rectangle<float> (x0, r.getY(), a0 * w, r.getHeight()));
+        g.fillRect (Rectangle<float> (x0 + a1 * w, r.getY(), (1.0f - a1) * w, r.getHeight()));
+        g.setColour (cosmos::gold);
+        g.fillRect (Rectangle<float> (x0 + a0 * w - 1.0f, r.getY(), 2.0f, r.getHeight()));
+        g.fillRect (Rectangle<float> (x0 + a1 * w - 1.0f, r.getY(), 2.0f, r.getHeight()));
+    }
     g.setColour (cosmos::neon.withAlpha (0.10f));
     const float sx = (pos - spray * 0.5f) * w, ex = (pos + spray * 0.5f) * w;
     g.fillRect (Rectangle<float> (x0 + sx, r.getY(), ex - sx, r.getHeight()));
@@ -256,10 +267,156 @@ void WavetableView::paint (Graphics& g)
         const int f = (int) ((float) k / 5.0f * (float) (frames - 1));
         drawFrame (f, cosmos::nebula, 1.0f, 0.0f);
     }
-    drawFrame (jlimit (0, frames - 1, (int) std::round (pos * (float) (frames - 1))), on ? cosmos::neon : cosmos::steel, 2.0f, 0.0f);
+    {
+        // the current cycle exactly as the oscillator plays it, warp included
+        const int warp = (int) cache[oscIndex == 0 ? pg::wtA_warp : pg::wtB_warp];
+        const float amt = cache[oscIndex == 0 ? pg::wtA_wamt : pg::wtB_wamt];
+        float cyc[256];
+        pg::WavetableOsc::renderCycle (*t, pos, warp, amt, cyc, 256);
+        float peak = 0.01f;
+        for (float v : cyc) peak = jmax (peak, std::abs (v));
+        Path p;
+        for (int i = 0; i < 256; ++i)
+        {
+            const float x = r.getX() + 8.0f + (float) i / 255.0f * (r.getWidth() - 16.0f);
+            const float y = r.getCentreY() - cyc[i] / peak * r.getHeight() * 0.36f;
+            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+        g.setColour (on ? cosmos::neon : cosmos::steel);
+        g.strokePath (p, PathStrokeType (2.0f));
+        if (warp > 0 && amt > 0.0f)
+        {
+            g.setColour (cosmos::gold);
+            g.setFont (fonts::label (9.5f));
+            g.drawText ("WARP " + pg::choices::warpModes()[warp].toUpperCase(), r.reduced (8.0f, 4.0f), Justification::topRight);
+        }
+    }
     g.setColour (colours::textDim);
     g.setFont (fonts::sans (10.5f));
     g.drawText (t->name + "  (" + String (frames) + " frames)", r.reduced (8.0f, 4.0f), Justification::topLeft);
+}
+
+// =============================================================================
+// EnvelopeView
+// =============================================================================
+EnvelopeView::EnvelopeView (APVTS& state, const String& prefix, Colour colour) : st (state), pre (prefix), col (colour)
+{
+    setRepaintsOnMouseActivity (true);
+}
+
+RangedAudioParameter* EnvelopeView::param (const char* suffix) const { return st.getParameter (pre + suffix); }
+float EnvelopeView::val (const char* suffix) const { return st.getRawParameterValue (pre + suffix)->load(); }
+void EnvelopeView::set (const char* suffix, float v)
+{
+    if (auto* p = param (suffix)) p->setValueNotifyingHost (p->convertTo0to1 (p->getNormalisableRange().snapToLegalValue (v)));
+}
+
+// times are drawn on a compressed scale so short and long settings both stay readable
+static float timeToWidth (float t) { return std::log1p (t * 20.0f) / std::log1p (15.0f * 20.0f); }
+static float widthToTime (float w) { return std::expm1 (jlimit (0.0f, 1.0f, w) * std::log1p (15.0f * 20.0f)) / 20.0f; }
+
+EnvelopeView::Geo EnvelopeView::geometry() const
+{
+    auto r = getLocalBounds().toFloat().reduced (10.0f, 8.0f);
+    const float seg = r.getWidth() / 3.6f;   // each time segment can use up to ~a quarter of the width
+    const float top = r.getY(), bottom = r.getBottom();
+    Geo g;
+    g.start = { r.getX(), bottom };
+    g.peak = { g.start.x + seg * timeToWidth (val ("a")), top };
+    const float susY = bottom - val ("s") * (bottom - top);
+    g.sus = { g.peak.x + seg * timeToWidth (val ("d")), susY };
+    g.rel = { jmax (g.sus.x + 12.0f, r.getRight() - seg * 1.05f), susY };
+    g.end = { g.rel.x + seg * timeToWidth (val ("r")), bottom };
+    return g;
+}
+
+void EnvelopeView::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (cosmos::voidC);
+    g.fillRoundedRectangle (r, 6.0f);
+    brand::perspectiveGrid (g, r.reduced (2.0f).withTrimmedTop (r.getHeight() * 0.55f), cosmos::nebula, 0.6f, 10, 4);
+    const auto geo = geometry();
+
+    Path curve;
+    curve.startNewSubPath (geo.start);
+    // analogue-style curves: convex attack, exponential decay and release
+    curve.quadraticTo ({ geo.start.x + (geo.peak.x - geo.start.x) * 0.25f, geo.peak.y + (geo.start.y - geo.peak.y) * 0.15f }, geo.peak);
+    curve.quadraticTo ({ geo.peak.x + (geo.sus.x - geo.peak.x) * 0.15f, geo.sus.y }, geo.sus);
+    curve.lineTo (geo.rel);
+    curve.quadraticTo ({ geo.rel.x + (geo.end.x - geo.rel.x) * 0.15f, geo.end.y }, geo.end);
+
+    Path fill (curve);
+    fill.lineTo (geo.start);
+    fill.closeSubPath();
+    g.setGradientFill (ColourGradient (col.withAlpha (0.45f), 0.0f, r.getY(), col.withAlpha (0.02f), 0.0f, r.getBottom(), false));
+    g.fillPath (fill);
+    g.setColour (col);
+    g.strokePath (curve, PathStrokeType (2.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    // dashed sustain hold
+    g.setColour (cosmos::steel.withAlpha (0.5f));
+    float dashes[] = { 3.0f, 3.0f };
+    g.drawDashedLine (Line<float> (geo.sus, geo.rel), dashes, 2, 1.0f);
+
+    const Point<float> nodes[] = { geo.peak, geo.sus, geo.end };
+    for (int i = 0; i < 3; ++i)
+        brand::bolt (g, nodes[i], (dragNode == i ? 7.0f : 5.5f), dragNode == i ? cosmos::starlight : col);
+
+    g.setColour (cosmos::steel);
+    g.setFont (fonts::sans (9.5f));
+    auto ms = [] (float t) { return t < 1.0f ? String (roundToInt (t * 1000.0f)) + " ms" : String (t, 2) + " s"; };
+    g.drawText ("A " + ms (val ("a")) + "   D " + ms (val ("d")) + "   S " + String (roundToInt (val ("s") * 100.0f)) + "%   R " + ms (val ("r")),
+                r.reduced (10.0f, 4.0f), Justification::topRight);
+}
+
+void EnvelopeView::mouseDown (const MouseEvent& e)
+{
+    const auto geo = geometry();
+    const Point<float> nodes[] = { geo.peak, geo.sus, geo.end };
+    dragNode = -1;
+    float best = 18.0f;
+    for (int i = 0; i < 3; ++i)
+    {
+        const float d = nodes[i].getDistanceFrom (e.position);
+        if (d < best) { best = d; dragNode = i; }
+    }
+    if (dragNode >= 0)
+        for (auto* sfx : { "a", "d", "s", "r" }) if (auto* p = param (sfx)) p->beginChangeGesture();
+    repaint();
+}
+
+void EnvelopeView::mouseDrag (const MouseEvent& e)
+{
+    if (dragNode < 0) return;
+    auto r = getLocalBounds().toFloat().reduced (10.0f, 8.0f);
+    const float seg = r.getWidth() / 3.6f;
+    const auto geo = geometry();
+    switch (dragNode)
+    {
+        case 0: set ("a", jmax (0.001f, widthToTime ((e.position.x - geo.start.x) / seg))); break;
+        case 1:
+            set ("d", jmax (0.001f, widthToTime ((e.position.x - geo.peak.x) / seg)));
+            set ("s", jlimit (0.0f, 1.0f, (r.getBottom() - e.position.y) / r.getHeight()));
+            break;
+        case 2: set ("r", jmax (0.001f, widthToTime ((e.position.x - geo.rel.x) / seg))); break;
+        default: break;
+    }
+    repaint();
+}
+
+void EnvelopeView::mouseUp (const MouseEvent&)
+{
+    if (dragNode >= 0)
+        for (auto* sfx : { "a", "d", "s", "r" }) if (auto* p = param (sfx)) p->endChangeGesture();
+    dragNode = -1;
+    repaint();
+}
+
+void EnvelopeView::mouseDoubleClick (const MouseEvent&)
+{
+    for (auto* sfx : { "a", "d", "s", "r" })
+        if (auto* p = param (sfx)) p->setValueNotifyingHost (p->getDefaultValue());
+    repaint();
 }
 
 // =============================================================================

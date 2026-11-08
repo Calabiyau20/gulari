@@ -24,6 +24,7 @@ void Voice::prepare (double sampleRate, int idx)
     wt[0].prepare (sr, 0x51u + (uint32_t) idx * 31u);
     wt[1].prepare (sr, 0x97u + (uint32_t) idx * 37u);
     noise.rng.seed (0xABCDu + (uint32_t) idx * 101u);
+    grainRng.seed (0x5EEDu + (uint32_t) idx * 977u);
     for (int i = 0; i < 4; ++i) lfo[i].rng.seed (0x777u + (uint32_t) (idx * 4 + i));
     plaits.prepare (sr);
     filter.reset();
@@ -49,6 +50,7 @@ void Voice::start (int midiNote, float vel, bool retrigger, const VoiceContext& 
         fenv.gateOn (! wasActive);
         menv.gateOn (! wasActive);
         grain.noteOn (true);
+        grainLfo.reset (0.0f);
         wt[0].noteOn (p[wtA_rphase] > 0.5f);
         wt[1].noteOn (p[wtB_rphase] > 0.5f);
         plaits.trigger();
@@ -164,20 +166,41 @@ void Voice::controlUpdate (const VoiceContext& ctx)
 
     // ---- granular ----
     grOn = p[gr_on] > 0.5f && ctx.sample != nullptr;
+
+    // two built-in grain modulators: an LFO and a smooth random walk
+    const float gm1 = grainLfo.advance ((int) p[gm1_shape], p[gm1_rate] * blockSecs);
+    grainRndPhase += p[gm2_rate] * blockSecs;
+    if (grainRndPhase >= 1.0f) { grainRndPhase -= std::floor (grainRndPhase); grainRndTarget = grainRng.bi(); }
+    {
+        const float a = std::exp (-blockSecs / (0.002f + p[gm2_smooth] * p[gm2_smooth] / juce::jmax (0.05f, p[gm2_rate])));
+        grainRnd = grainRndTarget + (grainRnd - grainRndTarget) * a;
+    }
+    const float gm2 = grainRnd;
+    const bool frozen = p[gr_freeze] > 0.5f;
+
     auto& gp = grainParams;
     gp.mode = (int) p[gr_mode];
-    gp.pos = p[gr_pos] + mod[MD_GrPos];
+    gp.pos = p[gr_pos] + mod[MD_GrPos] + (frozen ? 0.0f : 0.5f * gm1 * p[gm1_pos]);
     gp.scan = p[gr_scan];
-    gp.spray = clamp01 (p[gr_spray] + mod[MD_GrSpray]);
-    gp.sizeMs = clampf (p[gr_size] * std::exp2 (mod[MD_GrSize]), 2.0f, 2000.0f);
-    gp.density = clampf (p[gr_density] * std::exp2 (mod[MD_GrDensity]), 0.5f, 400.0f);
-    gp.pitch = p[gr_pitch] + mod[MD_GrPitch];
+    gp.spray = clamp01 (p[gr_spray] + mod[MD_GrSpray] + 0.5f * gm2 * p[gm2_spray]);
+    gp.sizeMs = clampf (p[gr_size] * std::exp2 (mod[MD_GrSize] + 2.0f * gm1 * p[gm1_size]), 2.0f, 2000.0f);
+    gp.density = clampf (p[gr_density] * std::exp2 (mod[MD_GrDensity] + 2.0f * gm1 * p[gm1_density]), 0.5f, 400.0f);
+    gp.pitch = p[gr_pitch] + mod[MD_GrPitch] + 12.0f * gm2 * p[gm2_pitch];
     gp.pitchRand = p[gr_prand];
     gp.keytrack = p[gr_keytrack] > 0.5f;
     gp.root = (int) p[gr_root];
     gp.window = (int) p[gr_window];
     gp.reverse = p[gr_reverse];
-    gp.stereo = p[gr_stereo];
+    gp.stereo = clamp01 (p[gr_stereo] + 0.5f * gm2 * p[gm2_stereo]);
+    gp.regionStart = p[gr_start];
+    gp.regionEnd = p[gr_end];
+    gp.jitter = p[gr_jitter];
+    gp.octRand = p[gr_octrand];
+    gp.formant = p[gr_formant];
+    gp.streams = (int) p[gr_streams];
+    gp.streamDetune = p[gr_sdetune];
+    gp.tilt = p[gr_tilt];
+    gp.freeze = frozen;
     grain.setParams (gp, pitch);
     grLevel = clamp01 (p[gr_level] + mod[MD_GrLevel]);
     panGains (p[gr_pan], grGainL, grGainR);
@@ -193,6 +216,7 @@ void Voice::controlUpdate (const VoiceContext& ctx)
         wtPos[o] = clamp01 (p[b + (wtA_pos - wtA_on)] + (o == 0 ? mod[MD_WtAPos] : mod[MD_WtBPos]));
         wtLevel[o] = clamp01 (p[b + (wtA_level - wtA_on)] + (o == 0 ? mod[MD_WtALevel] : mod[MD_WtBLevel]));
         wt[o].setup ((int) p[b + (wtA_unison - wtA_on)], p[b + (wtA_detune - wtA_on)], p[b + (wtA_spread - wtA_on)], p[b + (wtA_pan - wtA_on)]);
+        wt[o].setWarp ((int) p[b + (wtA_warp - wtA_on)], p[b + (wtA_wamt - wtA_on)]);
     }
 
     // ---- modulator, sub, noise ----
@@ -240,6 +264,8 @@ void Voice::controlUpdate (const VoiceContext& ctx)
     bite.soft = p[bite_soft];
     bite.asym = p[bite_asym];
     bite.mix = p[bite_mix];
+    bite.rect = p[bite_rect];
+    bite.setTone (p[bite_tone], rate);
     bitePost = p[bite_post] > 0.5f;
 
     const float octs = p[flt_env] * fenv.current() * 7.0f + p[flt_key] * (pitch - 60.0f) / 12.0f + mod[MD_Cutoff];
@@ -344,6 +370,9 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
             r += pl * plGainR * 1.4142f;
         }
 
+        // remove the DC that asymmetric warps (Bloat, Mirror, Pulse) add, before distortion and filter
+        { const float yl = l - dcX[0] + 0.9995f * dcY[0]; dcX[0] = l; dcY[0] = yl; l = yl; }
+        { const float yr = r - dcX[1] + 0.9995f * dcY[1]; dcX[1] = r; dcY[1] = yr; r = yr; }
         if (! bitePost) bite.process (l, r);
         l = filter.tick (0, l);
         r = filter.tick (1, r);

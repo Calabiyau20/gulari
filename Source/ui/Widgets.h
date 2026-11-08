@@ -79,6 +79,28 @@ private:
     int oscIndex;
 };
 
+// ADSR display; drag the nodes to edit attack, decay/sustain and release
+class EnvelopeView : public juce::Component
+{
+public:
+    EnvelopeView (APVTS& state, const juce::String& prefix, juce::Colour colour);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+private:
+    struct Geo { juce::Point<float> start, peak, sus, rel, end; };
+    Geo geometry() const;
+    float val (const char* suffix) const;
+    void set (const char* suffix, float v);
+    juce::RangedAudioParameter* param (const char* suffix) const;
+    APVTS& st;
+    juce::String pre;
+    juce::Colour col;
+    int dragNode = -1;
+};
+
 // Bar editor for one modulation lane (32 steps). Right-click locks a step.
 class StepLaneEditor : public juce::Component
 {

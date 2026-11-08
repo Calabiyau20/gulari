@@ -165,15 +165,21 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Bite: drive -> asymmetry -> fold -> soft clip -> bit/rate crush
+// MultiDistortion: drive -> asymmetry -> rectify -> fold -> saturate -> crush -> tone
 // ---------------------------------------------------------------------------
 struct Bite
 {
-    float drive = 0, fold = 0, crush = 0, soft = 0, asym = 0, mix = 1.0f;
+    float drive = 0, fold = 0, crush = 0, soft = 0, asym = 0, rect = 0, mix = 1.0f;
+    float tone = 0.0f, toneCoef = 0.0f, toneLp[2] {};
+    void setTone (float t, float sampleRate)
+    {
+        tone = t;
+        toneCoef = 1.0f - std::exp (-kTwoPi * 1500.0f / sampleRate);   // tilt pivot around 1.5 kHz
+    }
     float hold[2] {}, holdCount = 0.0f;
     float dcX[2] {}, dcY[2] {};
 
-    bool bypassed() const { return drive <= 0.0f && fold <= 0.0f && crush <= 0.0f && soft <= 0.0f && asym <= 0.0f; }
+    bool bypassed() const { return drive <= 0.0f && fold <= 0.0f && crush <= 0.0f && soft <= 0.0f && asym <= 0.0f && rect <= 0.0f && tone == 0.0f; }
 
     inline void process (float& l, float& r)
     {
@@ -184,6 +190,7 @@ struct Bite
         for (int c = 0; c < 2; ++c)
         {
             float v = x[c] + asym * 0.6f;
+            if (rect > 0.0f) v = v * (1.0f - rect) + std::abs (v) * rect * 1.6f;   // towards full-wave rectification
             if (fold > 0.0f)
                 v = std::sin (v * (1.0f + fold * 6.0f) * 1.5707963f) * fold + v * (1.0f - fold);
             if (soft > 0.0f)
@@ -206,6 +213,12 @@ struct Bite
             }
             x[0] = hold[0]; x[1] = hold[1];
         }
+        if (tone != 0.0f)
+            for (int c = 0; c < 2; ++c)
+            {
+                toneLp[c] += (x[c] - toneLp[c]) * toneCoef;
+                x[c] = tone < 0.0f ? x[c] + (toneLp[c] - x[c]) * (-tone) : x[c] + (x[c] - toneLp[c]) * tone;
+            }
         l = inL + (x[0] - inL) * mix;
         r = inR + (x[1] - inR) * mix;
     }
