@@ -124,9 +124,23 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         auto* sub = page->add (new Panel (st, "Sub + Noise", items ({ "sub_wave:Sub Wave", "sub_oct:Sub Oct", "sub_level:Sub Level", "noise_type:Noise", "noise_level:Noise Lvl" }), 3));
         auto* pl = page->add (new Panel (st, "Plaits (Mutable Instruments)", items ({ "pl_on:On", "pl_engine:Engine", "pl_oct:Octave", "pl_level:Level",
                                           "pl_harm:Harmonics", "pl_timbre:Timbre", "pl_morph:Morph", "pl_pan:Pan", "pl_lpg:LPG", "pl_decay:Decay", "pl_colour:Colour" }), 4, colours::warn));
-        auto* fm = page->add (new Panel (st, "FM Matrix  (row > column)", items ({ "fm_mode:Mode", "fm_amount:Amount", "fm_a_a:A>A",
+        auto* fm = page->add (new Panel (st, "Mod Matrix  FM / PD / AM  (row > column)", items ({ "fm_amount:Amount", "fm_a_a:A>A",
                                           "fm_a_b:A>B", "fm_a_m:A>Mod", "fm_b_a:B>A", "fm_b_b:B>B", "fm_b_m:B>Mod", "fm_m_a:Mod>A", "fm_m_b:Mod>B",
                                           "fm_m_m:Mod>Mod", "fm_g_a:Grain>A", "fm_g_b:Grain>B", "fm_g_m:Grain>Mod", "fm_n_a:Noise>A", "fm_n_b:Noise>B", "fm_n_m:Noise>Mod" }), 6, colours::accent2));
+        {
+            // one modulation type per destination, on its own row so the menus are readable
+            ParamControl* types[3];
+            const char* tid[] = { "fm_type_a", "fm_type_b", "fm_type_m" };
+            const char* tname[] = { "Type into A", "Type into B", "Type into Mod" };
+            for (int t = 0; t < 3; ++t) types[t] = page->add (new ParamControl (st, tid[t], tname[t]));
+            fm->extraHeight = 44;
+            fm->layoutExtra = [types, panel = fm] (Rectangle<int> r)
+            {
+                r += panel->getPosition();
+                const int w = r.getWidth() / 3;
+                for (int t = 0; t < 3; ++t) types[t]->setBounds (r.removeFromLeft (w));
+            };
+        }
         page->layout = [=] (Rectangle<int> r)
         {
             auto rows = split (r, { 1.0f, 1.25f }, false);

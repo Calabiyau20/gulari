@@ -83,7 +83,8 @@ private:
     float modFreqMul = 1, modLevel = 0, subLevel = 0, noiseLevel = 0;
     float plLevel = 0, plGainL = 1, plGainR = 1;
     float fm[5][3] {};   // [src a,b,m,g,n][dst a,b,m]
-    bool thruZero = false;
+    int fmType[3] {};    // per destination (A, B, Mod): choices::fmModes
+    float fmDepth[3] {}; // summed amounts per destination (for AM / ring depth)
     float tz[3] {};      // thru-zero accumulated phase
     float prevA = 0, prevB = 0, prevM = 0, prevG = 0, prevN = 0;
     float volL = 1, volR = 1;

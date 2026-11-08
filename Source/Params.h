@@ -164,7 +164,9 @@ namespace choices
     PF(pl_level, "Plaits Level", 0.0f, 1.0f, 0.7f, 0.0f) \
     PF(pl_pan, "Plaits Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- FM matrix: source -> destination (A, B, Mod) ---- */ \
-    PC(fm_mode, "FM Mode", fmModes, 0) \
+    PC(fm_type_a, "Mod Matrix Type A", fmModes, 0) \
+    PC(fm_type_b, "Mod Matrix Type B", fmModes, 0) \
+    PC(fm_type_m, "Mod Matrix Type Mod", fmModes, 0) \
     PF(fm_amount, "FM Amount", 0.0f, 1.0f, 1.0f, 0.0f) \
     PF(fm_a_a, "FM A>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_a_b, "FM A>B", 0.0f, 1.0f, 0.0f, 0.0f) \

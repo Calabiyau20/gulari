@@ -24,7 +24,7 @@ namespace choices
                  "Harmonic", "Wavetable", "Chords", "Speech", "Swarm", "Filtered Noise", "Particle Noise",
                  "Inharmonic String", "Modal Resonator", "Bass Drum", "Snare Drum", "Hi-Hat" };
     }
-    juce::StringArray fmModes()       { return { "Phase", "Thru-Zero" }; }
+    juce::StringArray fmModes()       { return { "Phase Mod", "Thru-Zero FM", "Phase Distortion", "Amplitude Mod", "Ring Mod" }; }
     juce::StringArray filterTypes()   { return { "Low Pass", "Band Pass", "High Pass", "Notch" }; }
     juce::StringArray filterModels()  { return { "Clean SVF", "Ladder" }; }
     juce::StringArray filterSlopes()  { return { "12 dB", "24 dB" }; }

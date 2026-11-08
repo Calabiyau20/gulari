@@ -44,7 +44,8 @@ public:
     void setup (int unison, float detune, float spread, float pan);
     // Warp modes (choices::warpModes): reshape the phase or the read sample of each cycle
     void setWarp (int mode, float amount) { warpMode = mode; warpAmt = clamp01 (amount); }
-    void tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR);
+    // pd: phase distortion (-0.95..0.95) bends each cycle around its middle, Casio-CZ style
+    void tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR, float pd = 0.0f);
     float lastMono() const { return last; }
     // One cycle as the oscillator plays it (warp included), for displays
     static void renderCycle (const Wavetable& wt, float pos, int warpMode, float warpAmount, float* out, int n);
@@ -67,6 +68,6 @@ private:
 struct BasicOsc
 {
     float phase = 0.0f, tri = 0.0f;
-    float tick (int shape, float freqHz, float sampleRate, float phaseMod);   // 0 sine 1 tri 2 saw 3 square
+    float tick (int shape, float freqHz, float sampleRate, float phaseMod, float pd = 0.0f);   // 0 sine 1 tri 2 saw 3 square
 };
 } // namespace pg

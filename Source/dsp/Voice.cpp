@@ -247,15 +247,17 @@ void Voice::controlUpdate (const VoiceContext& ctx)
     }
 
     // ---- FM matrix ----
-    thruZero = (int) p[fm_mode] == 1;
+    fmType[0] = (int) p[fm_type_a]; fmType[1] = (int) p[fm_type_b]; fmType[2] = (int) p[fm_type_m];
     const float fmAmt = clampf (p[fm_amount] + mod[MD_FmAmount], 0.0f, 2.0f);
     const int firstFm = fm_a_a;
     for (int s = 0; s < 5; ++s)
         for (int d = 0; d < 3; ++d)
         {
             const float v = p[firstFm + s * 3 + d];
-            fm[s][d] = v * v * fmAmt * (thruZero ? 8.0f : 1.5f);
+            fm[s][d] = v * v * fmAmt;
         }
+    for (int d = 0; d < 3; ++d)
+        fmDepth[d] = juce::jmin (1.0f, fm[0][d] + fm[1][d] + fm[2][d] + fm[3][d] + fm[4][d]);
 
     // ---- bite + filter ----
     bite.drive = clamp01 (p[bite_drive] + mod[MD_BiteDrive]);
@@ -307,24 +309,34 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
         // noise first (it is also an FM source)
         const float n = noise.tick (noiseType);
 
-        // FM inputs from the previous sample
-        float pmA = fm[0][0] * prevA + fm[1][0] * prevB + fm[2][0] * prevM + fm[3][0] * prevG + fm[4][0] * n;
-        float pmB = fm[0][1] * prevA + fm[1][1] * prevB + fm[2][1] * prevM + fm[3][1] * prevG + fm[4][1] * n;
-        float pmM = fm[0][2] * prevA + fm[1][2] * prevB + fm[2][2] * prevM + fm[3][2] * prevG + fm[4][2] * n;
-        if (thruZero)
+        // Modulation matrix inputs (previous sample of each source), one sum per destination
+        float sum[3];
+        for (int d = 0; d < 3; ++d)
+            sum[d] = fm[0][d] * prevA + fm[1][d] * prevB + fm[2][d] * prevM + fm[3][d] * prevG + fm[4][d] * n;
+        // turn each sum into the destination's kind of modulation
+        float pm[3] = {}, pd[3] = {}, gain[3] = { 1.0f, 1.0f, 1.0f };
+        const float destHz[3] = { baseHz * wtFreqMul[0], baseHz * wtFreqMul[1], baseHz * modFreqMul };
+        for (int d = 0; d < 3; ++d)
         {
-            // linear FM: integrate frequency deviation into an extra phase offset
-            tz[0] += pmA * baseHz * wtFreqMul[0] / rate;
-            tz[1] += pmB * baseHz * wtFreqMul[1] / rate;
-            tz[2] += pmM * baseHz * modFreqMul / rate;
-            for (auto& t : tz) t -= std::floor (t);
-            pmA = tz[0]; pmB = tz[1]; pmM = tz[2];
+            switch (fmType[d])
+            {
+                case 0: pm[d] = sum[d] * 1.5f; break;                                   // phase modulation
+                case 1:                                                                // thru-zero (linear) FM
+                    tz[d] += sum[d] * 8.0f * destHz[d] / rate;
+                    tz[d] -= std::floor (tz[d]);
+                    pm[d] = tz[d];
+                    break;
+                case 2: pd[d] = clampf (sum[d] * 1.2f, -0.95f, 0.95f); break;          // phase distortion
+                case 3: gain[d] = 1.0f - 0.5f * fmDepth[d] + 0.5f * sum[d]; break;    // amplitude modulation
+                default: gain[d] = 1.0f - fmDepth[d] + sum[d]; break;                  // ring modulation
+            }
         }
+        const float pmA = pm[0], pmB = pm[1], pmM = pm[2];
 
         float l = 0.0f, r = 0.0f;
 
         // modulator oscillator (always runs: it is an FM source even at level 0)
-        const float m = modOsc.tick (modWave, baseHz * modFreqMul, rate, pmM);
+        const float m = modOsc.tick (modWave, baseHz * modFreqMul, rate, pmM, pd[2]) * gain[2];
         prevM = m;
         l += m * modLevel * 0.7f;
         r += m * modLevel * 0.7f;
@@ -333,12 +345,12 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
         {
             if (! wtOn[o]) continue;
             float wl, wr;
-            wt[o].tick (*ctx.table[o], baseHz * wtFreqMul[o], wtPos[o], o == 0 ? pmA : pmB, wl, wr);
-            l += wl * wtLevel[o];
-            r += wr * wtLevel[o];
+            wt[o].tick (*ctx.table[o], baseHz * wtFreqMul[o], wtPos[o], o == 0 ? pmA : pmB, wl, wr, pd[o]);
+            l += wl * wtLevel[o] * gain[o];
+            r += wr * wtLevel[o] * gain[o];
         }
-        prevA = wtOn[0] ? wt[0].lastMono() : 0.0f;
-        prevB = wtOn[1] ? wt[1].lastMono() : 0.0f;
+        prevA = wtOn[0] ? wt[0].lastMono() * gain[0] : 0.0f;
+        prevB = wtOn[1] ? wt[1].lastMono() * gain[1] : 0.0f;
 
         if (grOn)
         {

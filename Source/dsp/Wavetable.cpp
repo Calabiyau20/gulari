@@ -272,7 +272,14 @@ namespace
     }
 }
 
-void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR)
+static inline float phaseDistort (float p, float pd)
+{
+    if (pd == 0.0f) return p;
+    const float w = 0.5f - 0.48f * clampf (pd, -0.95f, 0.95f);
+    return p < w ? p * 0.5f / w : 0.5f + (p - w) * 0.5f / (1.0f - w);
+}
+
+void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR, float pd)
 {
     const float maxHarm = (float) sr * 0.5f / juce::jmax (1.0f, freqHz);
     int lvl = 0;
@@ -295,6 +302,7 @@ void WavetableOsc::tick (const Wavetable& wt, float freqHz, float pos, float pha
     {
         float p = phase[i] + phaseMod;
         p -= std::floor (p);
+        p = phaseDistort (p, pd);
         float s;
         if (! warping) s = readTable (t0, t1, len, ft, p);
         else
@@ -344,11 +352,12 @@ void WavetableOsc::renderCycle (const Wavetable& wt, float pos, int warpMode, fl
     }
 }
 
-float BasicOsc::tick (int shape, float freqHz, float sampleRate, float phaseMod)
+float BasicOsc::tick (int shape, float freqHz, float sampleRate, float phaseMod, float pd)
 {
     const float dt = juce::jlimit (0.0f, 0.49f, freqHz / sampleRate);
     float p = phase + phaseMod;
     p -= std::floor (p);
+    p = phaseDistort (p, pd);
     float y = 0.0f;
     switch (shape)
     {
