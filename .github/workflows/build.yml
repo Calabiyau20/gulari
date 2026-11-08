@@ -64,6 +64,18 @@ jobs:
         run: cmake -B build -A x64 -T ClangCL
       - name: Build VST3, CLAP, Standalone
         run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_CLAP Synthgularity_Standalone
+      - name: Publish build to the 'builds-windows' branch
+        shell: bash
+        run: |
+          mkdir -p /tmp/out/win
+          cp -R build/Synthgularity_artefacts/Release/VST3/Synthgularity.vst3 /tmp/out/win/
+          cp build/Synthgularity_artefacts/Release/CLAP/Synthgularity.clap /tmp/out/win/
+          cp build/Synthgularity_artefacts/Release/Standalone/Synthgularity.exe /tmp/out/win/
+          cd /tmp/out
+          git init -q -b builds-windows
+          git config user.name "github-actions" && git config user.email "actions@github.com"
+          git add -A && git commit -q -m "Windows build ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds-windows
       - uses: actions/upload-artifact@v4
         with:
           name: Synthgularity-Windows
