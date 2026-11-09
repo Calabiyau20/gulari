@@ -95,29 +95,138 @@ struct OrbitShape
     float width = 0.6f;
 };
 
-// One point of the orbit: phase in cycles, layer offset (radians) for unison, spin rotation (radians).
-// Writes the left / right sample (centre = Re z1 + Re z2 + alpha projection, side = Re z1 - Re z2) and the raw point.
-inline void orbitSample (const OrbitShape& s, float phase, float layerOff, float spin, float& outL, float& outR,
-                         float* xyz = nullptr)
+// One point of the surface for patch angles k1, k2 (2 pi k / n), as a stereo pair:
+// centre = Re z1 + Re z2 plus the alpha projection, side = Re z1 - Re z2 scaled by width.
+inline void surfaceSample (const OrbitShape& s, float k1, float k2, float u, float v, float spin, float& outL, float& outR,
+                           float* xyz = nullptr)
 {
     using namespace fast;
-    const float u = 0.78539816f + s.ruA * cosCycles (phase);
-    const float v = s.rvA * sinR (s.ratio * kTwoPiF * phase + layerOff);
     const float cu = cosR (u), su = sinR (u);
     const float ev = expf (v), emv = 1.0f / ev;
     const float ch = 0.5f * (ev + emv), sh = 0.5f * (ev - emv);
     const float cr = cu * ch, ci = -su * sh, sr = su * ch, si = cu * sh;
     const float m1 = cr * cr + ci * ci + 1.0e-20f, m2 = sr * sr + si * si + 1.0e-20f;
     const float r1 = exp2f (log2f (m1) * s.pw * 0.5f), r2 = exp2f (log2f (m2) * s.pw * 0.5f);
-    const float t1 = atan2f (ci, cr) * s.pw + s.k1 + spin;
-    const float t2 = atan2f (si, sr) * s.pw + s.k2 - spin;
+    const float t1 = atan2f (ci, cr) * s.pw + k1 + spin;
+    const float t2 = atan2f (si, sr) * s.pw + k2 - spin;
     const float X = r1 * cosR (t1), Y = r2 * cosR (t2);
     const float Z = r1 * sinR (t1) * s.ca + r2 * sinR (t2) * s.sa;
-    // centre: both surface coordinates plus the alpha projection; side: their difference, scaled by width
     const float c = 0.5f * (X + Y) + 0.7f * Z, d = 0.5f * (X - Y) * s.width;
     outL = c + d;
     outR = c - d;
     if (xyz != nullptr) { xyz[0] = X; xyz[1] = Y; xyz[2] = Z; }
+}
+
+// ORBIT mode: a closed Lissajous loop (u, v) on one patch. phase in cycles, layerOff (radians) for unison.
+inline void orbitSample (const OrbitShape& s, float phase, float layerOff, float spin, float& outL, float& outR,
+                         float* xyz = nullptr)
+{
+    const float u = 0.78539816f + s.ruA * fast::cosCycles (phase);
+    const float v = s.rvA * fast::sinR (s.ratio * kTwoPiF * phase + layerOff);
+    surfaceSample (s, s.k1, s.k2, u, v, spin, outL, outR, xyz);
+}
+
+// SCAN mode: the whole manifold as a wavetable. Every patch is cut into kScanLines lines along u
+// (fixed v); all n x n patches in a row give n * n * kScanLines lines. One cycle of the note walks
+// 'count' consecutive lines starting at 'start', back and forth (a serpentine down, the same way back up),
+// so the loop is closed. Coverage 1 = every line of every patch in each cycle.
+constexpr int kScanLines = 8;
+constexpr float kScanUMin = 0.03f, kScanUMax = 1.5408f, kScanBridge = 0.12f;
+
+struct ScanShape
+{
+    int n = 5, total = 200;   // lines on the whole manifold
+    int count = 1;            // lines walked per cycle
+    float start = 0.0f;       // first line (fractional: lines glide between grid lines)
+};
+
+inline ScanShape makeScan (int n, float coverage, float position)
+{
+    ScanShape sc;
+    sc.n = n;
+    sc.total = n * n * kScanLines;
+    const float c = coverage < 0.0f ? 0.0f : (coverage > 1.0f ? 1.0f : coverage);
+    sc.count = 1 + (int) std::lround (c * (float) (sc.total - 1));
+    const float span = (float) (sc.total - sc.count);
+    sc.start = (position < 0.0f ? 0.0f : (position > 1.0f ? 1.0f : position)) * span;
+    return sc;
+}
+
+// line x (0..total) -> patch and v; the v of line j sits in the middle of its band
+inline void scanLine (const ScanShape& sc, float x, int& patch, float& v)
+{
+    const int maxLine = sc.total - 1;
+    x = x < 0.0f ? 0.0f : (x > (float) maxLine ? (float) maxLine : x);
+    patch = (int) (x / (float) kScanLines);
+    if (patch > sc.n * sc.n - 1) patch = sc.n * sc.n - 1;
+    const float j = x - (float) (patch * kScanLines);
+    v = -kHalfPiF + (j + 0.5f) * (kPiF / (float) kScanLines);
+}
+
+// Position along the scan: up to two surface points and the blend between them (bridges between patches)
+struct ScanPoint { int patchA, patchB; float uA, vA, uB, vB, w; };
+
+inline ScanPoint scanPoint (const ScanShape& sc, float phase)
+{
+    phase -= fast::floorf (phase);
+    const int slots = 2 * sc.count;
+    const float f = phase * (float) slots;
+    int k = (int) f;
+    if (k >= slots) k = slots - 1;
+    const float t = f - (float) k;
+    // slot k -> line index i and direction; the down pass alternates, the way back reverses each line
+    auto lineOf = [&] (int slot, int& i, bool& forward)
+    {
+        if (slot < sc.count) { i = slot; forward = (i % 2) == 0; }
+        else { i = slots - 1 - slot; forward = (i % 2) != 0; }
+    };
+    int i; bool fwd;
+    lineOf (k, i, fwd);
+    ScanPoint p;
+    float v;
+    scanLine (sc, sc.start + (float) i, p.patchA, v);
+    p.vA = v;
+    const float uEnd = fwd ? kScanUMax : kScanUMin;
+    if (t < 1.0f - kScanBridge)
+    {
+        const float q = t / (1.0f - kScanBridge);
+        p.uA = fwd ? kScanUMin + q * (kScanUMax - kScanUMin) : kScanUMax - q * (kScanUMax - kScanUMin);
+        p.patchB = p.patchA; p.uB = p.uA; p.vB = p.vA; p.w = 0.0f;
+        return p;
+    }
+    // bridge to the start of the next slot (which begins at the same u)
+    int i2; bool fwd2;
+    lineOf ((k + 1) % slots, i2, fwd2);
+    float v2;
+    int patch2;
+    scanLine (sc, sc.start + (float) i2, patch2, v2);
+    float q = (t - (1.0f - kScanBridge)) / kScanBridge;
+    q = q * q * (3.0f - 2.0f * q);
+    p.uA = uEnd;
+    if (patch2 == p.patchA)
+    {
+        p.vA = p.vA + (v2 - p.vA) * q;      // slide along v on the same patch
+        p.patchB = p.patchA; p.uB = p.uA; p.vB = p.vA; p.w = 0.0f;
+    }
+    else
+    {
+        p.patchB = patch2; p.uB = fwd2 ? kScanUMin : kScanUMax; p.vB = v2; p.w = q;   // crossfade to the next patch
+    }
+    return p;
+}
+
+inline void scanSample (const OrbitShape& s, const ScanShape& sc, float phase, float spin, float& outL, float& outR)
+{
+    const auto p = scanPoint (sc, phase);
+    const float step = kTwoPiF / (float) sc.n;
+    surfaceSample (s, step * (float) (p.patchA / sc.n), step * (float) (p.patchA % sc.n), p.uA, p.vA, spin, outL, outR);
+    if (p.w > 0.0f)
+    {
+        float l2, r2;
+        surfaceSample (s, step * (float) (p.patchB / sc.n), step * (float) (p.patchB % sc.n), p.uB, p.vB, spin, l2, r2);
+        outL += (l2 - outL) * p.w;
+        outR += (r2 - outR) * p.w;
+    }
 }
 
 // Exact complex evaluation for drawing the surface (double precision, not used on the audio path)

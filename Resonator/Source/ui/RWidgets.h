@@ -114,31 +114,6 @@ private:
     int l;
 };
 
-// Scope, FFT spectrum, goniometer and true-peak / LUFS meters of the output
-class AnalyzerStrip : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
-{
-public:
-    explicit AnalyzerStrip (ResonatorProcessor& p);
-    ~AnalyzerStrip() override { stopTimer(); }
-    void paint (juce::Graphics&) override;
-    void resized() override;
-    void mouseDown (const juce::MouseEvent&) override;
-private:
-    void timerCallback() override;
-    ResonatorProcessor& proc;
-    juce::Rectangle<int> scopeA, fftA, gonioA, meterA;
-    static constexpr int kOrder = 11, kSize = 1 << kOrder, kBands = 140, kScope = 220, kGonio = 1024;
-    juce::dsp::FFT fft { kOrder };
-    std::array<float, kSize * 2> fftData {};
-    std::array<float, kSize> window {};
-    std::array<float, kBands> bands {}, peaks {};
-    std::array<std::array<float, kScope>, 3> traces {};
-    int traceHead = 0;
-    std::array<float, kGonio> gl {}, gr {};
-    float correlation = 0.0f;
-    float tpL = -120, tpR = -120, tpMax = -120, lm = -120, ls = -120, li = -120;
-};
-
 // One row of the modulation list
 class ModSlotRow : public juce::Component
 {

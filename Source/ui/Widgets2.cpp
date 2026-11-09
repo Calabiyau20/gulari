@@ -404,4 +404,293 @@ void FxSlotRow::paint (Graphics& g)
     g.setColour (on ? cosmos::starlight : cosmos::steel.withAlpha (0.6f));
     g.drawEllipse (led, 1.0f);
 }
+// =============================================================================
+// AnalyzerStrip
+// =============================================================================
+AnalyzerStrip::AnalyzerStrip (ScopeFeed f) : feed (f)
+{
+    for (int i = 0; i < kSize; ++i) window[(size_t) i] = 0.5f - 0.5f * std::cos (pg::kTwoPi * (float) i / (float) (kSize - 1));
+    bands.fill (-100.0f);
+    peaks.fill (-100.0f);
+    setTooltip ("Oscilloscope, FFT spectrum, goniometer (stereo image, correlation) and true peak / LUFS. Click the meters to reset.");
+    startTimerHz (30);
+}
+
+void AnalyzerStrip::resized()
+{
+    auto r = getLocalBounds().reduced (6, 4);
+    meterA = r.removeFromRight (jmin (190, r.getWidth() / 6));
+    r.removeFromRight (6);
+    gonioA = r.removeFromRight (jmin (r.getHeight() + 10, r.getWidth() / 3));
+    r.removeFromRight (6);
+    scopeA = r.removeFromLeft (r.getWidth() * 2 / 5);
+    r.removeFromLeft (6);
+    fftA = r;
+}
+
+void AnalyzerStrip::mouseDown (const MouseEvent& e)
+{
+    if (meterA.contains (e.getPosition()) && feed.meter != nullptr) feed.meter->requestReset();
+}
+
+void AnalyzerStrip::timerCallback()
+{
+    if (feed.meter == nullptr) return;
+    auto& m = *feed.meter;
+    tpL = m.tpL.load(); tpR = m.tpR.load(); tpMax = m.tpMax.load();
+    lm = m.lufsM.load(); ls = m.lufsS.load(); li = m.lufsI.load();
+    const int N = feed.size, mask = N - 1;
+    const int wp = feed.pos->load (std::memory_order_acquire);
+    auto mono = [&] (int k) { return 0.5f * (feed.L[k & mask] + feed.R[k & mask]); };
+    // scope: rising zero crossing, ~25 ms
+    {
+        const int span = (int) (m.sampleRate() * 0.025);
+        int start = wp - span - 4;
+        for (int k = wp - span - 4; k > wp - 4000; --k)
+            if (mono (k - 1) <= 0.0f && mono (k) > 0.0f) { start = k; break; }
+        traceHead = (traceHead + 2) % 3;
+        auto& t = traces[(size_t) traceHead];
+        for (int i = 0; i < kScope; ++i) t[(size_t) i] = mono (start + i * span / kScope);
+    }
+    // FFT
+    for (int i = 0; i < kSize; ++i) fftData[(size_t) i] = mono (wp - kSize + i) * window[(size_t) i];
+    std::fill (fftData.begin() + kSize, fftData.end(), 0.0f);
+    fft.performFrequencyOnlyForwardTransform (fftData.data());
+    const float sr = (float) m.sampleRate();
+    for (int b = 0; b < kBands; ++b)
+    {
+        const float f0 = 20.0f * std::pow (1000.0f, (float) b / kBands), f1 = 20.0f * std::pow (1000.0f, (float) (b + 1) / kBands);
+        const int i0 = jlimit (1, kSize / 2 - 1, (int) (f0 / sr * kSize)), i1 = jlimit (i0, kSize / 2 - 1, (int) (f1 / sr * kSize));
+        float mx = 0.0f;
+        for (int i = i0; i <= i1; ++i) mx = jmax (mx, fftData[(size_t) i]);
+        const float db = Decibels::gainToDecibels (mx * 2.0f / (float) kSize * 2.0f, -100.0f) + 4.5f * std::log2 (f0 / 1000.0f) * 0.5f;
+        bands[(size_t) b] = jmax (db, bands[(size_t) b] - 2.5f);
+        peaks[(size_t) b] = jmax (db, peaks[(size_t) b] - 0.35f);
+    }
+    // goniometer: last 1024 samples, correlation
+    double sLR = 0, sLL = 0, sRR = 0;
+    for (int i = 0; i < kGonio; ++i)
+    {
+        const int k = (wp - kGonio + i) & mask;
+        gl[(size_t) i] = feed.L[k];
+        gr[(size_t) i] = feed.R[k];
+        sLR += gl[(size_t) i] * gr[(size_t) i]; sLL += gl[(size_t) i] * gl[(size_t) i]; sRR += gr[(size_t) i] * gr[(size_t) i];
+    }
+    const double den = std::sqrt (sLL * sRR);
+    const float c = den > 1e-9 ? (float) (sLR / den) : 0.0f;
+    correlation += (c - correlation) * 0.2f;
+    repaint();
+}
+
+static void panelBg (Graphics& g, Rectangle<int> a, const String& title)
+{
+    g.setColour (cosmos::voidC.withAlpha (0.85f));
+    g.fillRoundedRectangle (a.toFloat(), 7.0f);
+    g.setColour (cosmos::nebula);
+    g.drawRoundedRectangle (a.toFloat().reduced (0.5f), 7.0f, 1.0f);
+    g.setColour (colours::textDim);
+    g.setFont (fonts::label (8.5f));
+    g.drawText (title, a.reduced (8, 4), Justification::topLeft);
+}
+
+void AnalyzerStrip::paint (Graphics& g)
+{
+    // ---- scope with phosphor persistence ----
+    panelBg (g, scopeA, "SCOPE");
+    {
+        auto r = scopeA.toFloat().reduced (8.0f, 14.0f);
+        g.setColour (colours::outline.withAlpha (0.5f));
+        g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
+        for (int age = 2; age >= 0; --age)
+        {
+            const auto& t = traces[(size_t) ((traceHead + age) % 3)];
+            Path p;
+            for (int i = 0; i < kScope; ++i)
+            {
+                const float x = r.getX() + r.getWidth() * (float) i / (kScope - 1), y = r.getCentreY() - jlimit (-1.2f, 1.2f, t[(size_t) i]) * r.getHeight() * 0.45f;
+                if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            }
+            g.setColour (cosmos::neon.withAlpha (age == 0 ? 0.95f : 0.25f / (float) age));
+            g.strokePath (p, PathStrokeType (age == 0 ? 1.6f : 1.0f));
+        }
+    }
+    // ---- spectrum ----
+    panelBg (g, fftA, "SPECTRUM");
+    {
+        auto r = fftA.toFloat().reduced (8.0f, 14.0f);
+        g.setFont (fonts::sans (8.5f));
+        for (float f : { 100.0f, 1000.0f, 10000.0f })
+        {
+            const float x = r.getX() + r.getWidth() * std::log (f / 20.0f) / std::log (1000.0f);
+            g.setColour (colours::outline.withAlpha (0.45f));
+            g.drawVerticalLine ((int) x, r.getY(), r.getBottom());
+            g.setColour (colours::textDim);
+            g.drawText (f >= 1000.0f ? String ((int) (f / 1000.0f)) + "k" : String ((int) f), (int) x + 2, (int) r.getBottom() - 10, 30, 10, Justification::left);
+        }
+        auto yOf = [&] (float db) { return r.getBottom() - jlimit (0.0f, 1.0f, (db + 90.0f) / 90.0f) * r.getHeight(); };
+        Path fill, line, pk;
+        fill.startNewSubPath (r.getX(), r.getBottom());
+        for (int b = 0; b < kBands; ++b)
+        {
+            const float x = r.getX() + r.getWidth() * (float) b / (kBands - 1);
+            fill.lineTo (x, yOf (bands[(size_t) b]));
+            if (b == 0) { line.startNewSubPath (x, yOf (bands[0])); pk.startNewSubPath (x, yOf (peaks[0])); }
+            else { line.lineTo (x, yOf (bands[(size_t) b])); pk.lineTo (x, yOf (peaks[(size_t) b])); }
+        }
+        fill.lineTo (r.getRight(), r.getBottom());
+        fill.closeSubPath();
+        g.setGradientFill (ColourGradient (cosmos::fuchsia.withAlpha (0.55f), r.getX(), r.getY(), cosmos::electric.withAlpha (0.1f), r.getX(), r.getBottom(), false));
+        g.fillPath (fill);
+        g.setColour (cosmos::orchid);
+        g.strokePath (line, PathStrokeType (1.3f));
+        g.setColour (cosmos::gold.withAlpha (0.5f));
+        g.strokePath (pk, PathStrokeType (0.8f));
+    }
+    // ---- goniometer (M/S rotated 45 degrees) ----
+    panelBg (g, gonioA, "GONIOMETER");
+    {
+        auto r = gonioA.toFloat().reduced (8.0f, 14.0f);
+        auto sq = r.withSizeKeepingCentre (jmin (r.getWidth(), r.getHeight() - 12.0f), jmin (r.getWidth(), r.getHeight() - 12.0f)).translated (0.0f, -6.0f);
+        const auto c = sq.getCentre();
+        const float h = sq.getWidth() * 0.5f;
+        g.setColour (colours::outline.withAlpha (0.5f));
+        g.drawLine (c.x, sq.getY(), c.x, sq.getBottom(), 0.8f);
+        g.drawLine (sq.getX(), c.y, sq.getRight(), c.y, 0.8f);
+        g.drawLine (c.x - h * 0.7f, c.y - h * 0.7f, c.x + h * 0.7f, c.y + h * 0.7f, 0.6f);
+        g.drawLine (c.x + h * 0.7f, c.y - h * 0.7f, c.x - h * 0.7f, c.y + h * 0.7f, 0.6f);
+        g.setFont (fonts::sans (8.0f));
+        g.setColour (colours::textDim);
+        g.drawText ("L", (int) (c.x - h * 0.75f) - 8, (int) (c.y - h * 0.75f) - 8, 10, 10, Justification::centred);
+        g.drawText ("R", (int) (c.x + h * 0.75f), (int) (c.y - h * 0.75f) - 8, 10, 10, Justification::centred);
+        for (int i = 0; i < kGonio; ++i)
+        {
+            const float L = gl[(size_t) i], R = gr[(size_t) i];
+            const float x = (R - L) * 0.7071f, y = (L + R) * 0.7071f;
+            const float px = c.x + jlimit (-1.0f, 1.0f, x) * h, py = c.y - jlimit (-1.0f, 1.0f, y) * h;
+            g.setColour (cosmos::neon.withAlpha (0.08f + 0.5f * (float) i / kGonio));
+            g.fillRect (px, py, 1.5f, 1.5f);
+        }
+        // correlation bar
+        auto bar = Rectangle<float> (r.getX() + 6.0f, r.getBottom() - 6.0f, r.getWidth() - 12.0f, 4.0f);
+        g.setColour (colours::outline);
+        g.fillRoundedRectangle (bar, 2.0f);
+        const float cx = bar.getCentreX() + correlation * bar.getWidth() * 0.5f;
+        g.setColour (correlation < 0.0f ? Colour (0xffff5c5c) : cosmos::neon);
+        g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ cx, bar.getCentreY() }));
+    }
+    // ---- true peak + LUFS ----
+    panelBg (g, meterA, "OUTPUT");
+    {
+        auto r = meterA.toFloat().reduced (8.0f, 16.0f);
+        auto bars = r.removeFromLeft (34.0f);
+        auto yOf = [&] (float db) { return bars.getBottom() - jlimit (0.0f, 1.0f, (db + 60.0f) / 63.0f) * bars.getHeight(); };
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            auto b = bars.withWidth (12.0f).translated ((float) ch * 16.0f, 0.0f);
+            g.setColour (colours::outline);
+            g.fillRect (b);
+            const float v = ch == 0 ? tpL : tpR;
+            const float top = yOf (v);
+            g.setGradientFill (ColourGradient (Colour (0xffff5c5c), 0, yOf (0.0f), cosmos::neon, 0, yOf (-24.0f), false));
+            g.fillRect (b.withTop (top));
+        }
+        g.setColour (cosmos::gold);
+        g.drawHorizontalLine ((int) yOf (-1.0f), bars.getX(), bars.getRight());
+        r.removeFromLeft (8.0f);
+        g.setFont (fonts::sans (10.5f));
+        auto line = [&] (const String& k, float v, Colour c)
+        {
+            auto row = r.removeFromTop (r.getHeight() / 4.0f);
+            g.setColour (colours::textDim);
+            g.drawText (k, row.removeFromLeft (30.0f), Justification::centredLeft);
+            g.setColour (c);
+            g.drawText (v <= -99.0f ? String ("-inf") : String (v, 1), row, Justification::centredRight);
+        };
+        line ("TP", tpMax, tpMax > -1.0f ? Colour (0xffff5c5c) : colours::text);
+        line ("M", lm, colours::text);
+        line ("S", ls, colours::text);
+        line ("INT", li, cosmos::neon);
+    }
+}
+
+// =============================================================================
+// Goniometer (small, for headers)
+// =============================================================================
+GonioMini::GonioMini (ScopeFeed f) : feed (f)
+{
+    setTooltip ("Goniometer: vertical = mono, horizontal = stereo side. Red dot on the bar = phase problems.");
+}
+
+void GonioMini::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    g.setColour (cosmos::voidC.withAlpha (0.85f));
+    g.fillRoundedRectangle (r, 5.0f);
+    if (feed.L == nullptr) return;
+    auto sq = r.reduced (4.0f).withTrimmedBottom (6.0f);
+    sq = sq.withSizeKeepingCentre (jmin (sq.getWidth(), sq.getHeight()), jmin (sq.getWidth(), sq.getHeight()));
+    const auto c = sq.getCentre();
+    const float h = sq.getWidth() * 0.5f;
+    g.setColour (colours::outline.withAlpha (0.5f));
+    g.drawLine (c.x, sq.getY(), c.x, sq.getBottom(), 0.6f);
+    g.drawLine (sq.getX(), c.y, sq.getRight(), c.y, 0.6f);
+    const int N = feed.size, mask = N - 1, wp = feed.pos->load (std::memory_order_acquire);
+    double sLR = 0, sLL = 0, sRR = 0;
+    for (int i = 0; i < 512; ++i)
+    {
+        const int k = (wp - 512 + i) & mask;
+        const float L = feed.L[k], R = feed.R[k];
+        sLR += L * R; sLL += L * L; sRR += R * R;
+        const float px = c.x + jlimit (-1.0f, 1.0f, (R - L) * 0.7071f) * h, py = c.y - jlimit (-1.0f, 1.0f, (L + R) * 0.7071f) * h;
+        g.setColour (cosmos::neon.withAlpha (0.1f + 0.6f * (float) i / 512.0f));
+        g.fillRect (px, py, 1.4f, 1.4f);
+    }
+    const double den = std::sqrt (sLL * sRR);
+    corr += ((den > 1e-9 ? (float) (sLR / den) : 0.0f) - corr) * 0.2f;
+    auto bar = Rectangle<float> (r.getX() + 5.0f, r.getBottom() - 6.0f, r.getWidth() - 10.0f, 3.0f);
+    g.setColour (colours::outline);
+    g.fillRoundedRectangle (bar, 1.5f);
+    g.setColour (corr < 0.0f ? Colour (0xffff5c5c) : cosmos::neon);
+    g.fillEllipse (Rectangle<float> (6.0f, 6.0f).withCentre ({ bar.getCentreX() + corr * bar.getWidth() * 0.5f, bar.getCentreY() }));
+}
+
+// =============================================================================
+// SourceChip: drag a modulation source onto any knob
+// =============================================================================
+SourceChip::SourceChip (int s, const String& n, Colour c, std::function<float()> v, bool bip)
+    : src (s), name (n), col (c), value (std::move (v)), bipolar (bip)
+{
+    setTooltip ("Drag " + name + " onto any knob to modulate it");
+    setMouseCursor (MouseCursor::DraggingHandCursor);
+}
+
+void SourceChip::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.5f, 3.0f);
+    const float v = value ? value() : 0.0f;
+    const float act = jlimit (0.0f, 1.0f, std::abs (v));
+    g.setColour (cosmos::night.withAlpha (0.92f));
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (col.withAlpha (0.16f + 0.3f * act));
+    auto fill = r.reduced (1.5f);
+    g.fillRoundedRectangle (bipolar ? fill.withWidth (fill.getWidth() * (0.5f + 0.5f * jlimit (-1.0f, 1.0f, v))) : fill.withWidth (fill.getWidth() * act), 4.0f);
+    g.setColour (col.withAlpha (isMouseOver() ? 1.0f : 0.7f));
+    g.drawRoundedRectangle (r, 5.0f, isMouseOver() ? 1.6f : 1.0f);
+    g.setColour (cosmos::starlight);
+    g.setFont (fonts::label (8.5f));
+    g.drawFittedText (name, r.reduced (2.0f, 0.0f).toNearestInt(), Justification::centred, 1, 0.6f);
+}
+
+void SourceChip::mouseDrag (const MouseEvent& e)
+{
+    if (e.getDistanceFromDragStart() < 4) return;
+    if (auto* dc = DragAndDropContainer::findParentDragContainerFor (this))
+        if (! dc->isDragAndDropActive())
+        {
+            Image img (Image::ARGB, getWidth(), getHeight(), true);
+            Graphics g (img);
+            paint (g);
+            dc->startDragging ("mod:" + String (src), this, ScaledImage (img), true);
+        }
+}
 } // namespace pg::ui

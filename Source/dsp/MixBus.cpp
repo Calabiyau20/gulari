@@ -3,9 +3,12 @@
 
 namespace pg
 {
-void MixBus::prepare (double sampleRate)
+void MixBus::prepare (double sampleRate, int maxBlock)
 {
     sr = sampleRate;
+    dryL.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+    dryR.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+    wetInit = false;
     for (int c = 0; c < 2; ++c)
     {
         tapeLine[c].init ((int) (0.03 * sr));
@@ -25,21 +28,42 @@ void MixBus::process (float* L, float* R, int n, const float* p, const float* m,
         const int t = juce::jlimit (0, MB_Count - 1, (int) p[mb_slot1 + s]);
         if (t == MB_Empty || used[t]) continue;
         used[t] = true;
-        switch (t)
+        static const int onId[MB_Count] = { 0, mb_tp_on, mb_eq_on, mb_cp_on, mb_ch_on, mb_im_on, mb_tg_on, mb_dj_on, mb_bc_on, mb_tr_on, mb_lm_on };
+        const bool on = p[onId[t]] > 0.5f;
+        float& w = wet[t];
+        if (! wetInit) w = on ? 1.0f : 0.0f;
+        if (! on && w <= 0.0f) continue;
+        auto run = [&]
         {
-            case MB_Tape:      if (p[mb_tp_on] > 0.5f) tape (L, R, n, p, m[MD_MbTapeDrive]); break;
-            case MB_EQ:        if (p[mb_eq_on] > 0.5f) eq (L, R, n, p); break;
-            case MB_Comp:      if (p[mb_cp_on] > 0.5f) comp (L, R, n, p); break;
-            case MB_Chorus:    if (p[mb_ch_on] > 0.5f) chorus (L, R, n, p); break;
-            case MB_Imager:    if (p[mb_im_on] > 0.5f) imager (L, R, n, p, m[MD_MbWidth]); break;
-            case MB_Gate:      if (p[mb_tg_on] > 0.5f) gate (L, R, n, p, bpm, beat, m[MD_MbGateDepth]); break;
-            case MB_DJ:        if (p[mb_dj_on] > 0.5f) dj (L, R, n, p, m[MD_MbDjFilter]); break;
-            case MB_Crush:     if (p[mb_bc_on] > 0.5f) crush (L, R, n, p, m[MD_MbCrushBits]); break;
-            case MB_Transient: if (p[mb_tr_on] > 0.5f) transient (L, R, n, p); break;
-            case MB_Limiter:   if (p[mb_lm_on] > 0.5f) limiter (L, R, n, p); break;
-            default: break;
+            switch (t)
+            {
+                case MB_Tape:      tape (L, R, n, p, m[MD_MbTapeDrive]); break;
+                case MB_EQ:        eq (L, R, n, p); break;
+                case MB_Comp:      comp (L, R, n, p); break;
+                case MB_Chorus:    chorus (L, R, n, p); break;
+                case MB_Imager:    imager (L, R, n, p, m[MD_MbWidth]); break;
+                case MB_Gate:      gate (L, R, n, p, bpm, beat, m[MD_MbGateDepth]); break;
+                case MB_DJ:        dj (L, R, n, p, m[MD_MbDjFilter]); break;
+                case MB_Crush:     crush (L, R, n, p, m[MD_MbCrushBits]); break;
+                case MB_Transient: transient (L, R, n, p); break;
+                case MB_Limiter:   limiter (L, R, n, p); break;
+                default: break;
+            }
+        };
+        if (on && w >= 1.0f) { run(); continue; }
+        if ((int) dryL.size() < n) { dryL.resize ((size_t) n); dryR.resize ((size_t) n); }
+        std::copy (L, L + n, dryL.begin());
+        std::copy (R, R + n, dryR.begin());
+        run();
+        const float step = 1.0f / (0.01f * (float) sr), target = on ? 1.0f : 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            w = target > w ? std::min (target, w + step) : std::max (target, w - step);
+            L[i] = dryL[(size_t) i] + (L[i] - dryL[(size_t) i]) * w;
+            R[i] = dryR[(size_t) i] + (R[i] - dryR[(size_t) i]) * w;
         }
     }
+    wetInit = true;
 }
 
 // Tape: warm asymmetric saturation, tone tilt, wow and flutter

@@ -302,6 +302,8 @@ namespace choices
     PB(chaos2_sync, "Chaos 2 Lorenz Retrig", false) \
     PG_MTX(PF, PI, PC, PB, 01) PG_MTX(PF, PI, PC, PB, 02) PG_MTX(PF, PI, PC, PB, 03) PG_MTX(PF, PI, PC, PB, 04) PG_MTX(PF, PI, PC, PB, 05) PG_MTX(PF, PI, PC, PB, 06) PG_MTX(PF, PI, PC, PB, 07) PG_MTX(PF, PI, PC, PB, 08) \
     PG_MTX(PF, PI, PC, PB, 09) PG_MTX(PF, PI, PC, PB, 10) PG_MTX(PF, PI, PC, PB, 11) PG_MTX(PF, PI, PC, PB, 12) PG_MTX(PF, PI, PC, PB, 13) PG_MTX(PF, PI, PC, PB, 14) PG_MTX(PF, PI, PC, PB, 15) PG_MTX(PF, PI, PC, PB, 16) \
+    PG_MTX(PF, PI, PC, PB, 17) PG_MTX(PF, PI, PC, PB, 18) PG_MTX(PF, PI, PC, PB, 19) PG_MTX(PF, PI, PC, PB, 20) PG_MTX(PF, PI, PC, PB, 21) PG_MTX(PF, PI, PC, PB, 22) PG_MTX(PF, PI, PC, PB, 23) PG_MTX(PF, PI, PC, PB, 24) \
+    PG_MTX(PF, PI, PC, PB, 25) PG_MTX(PF, PI, PC, PB, 26) PG_MTX(PF, PI, PC, PB, 27) PG_MTX(PF, PI, PC, PB, 28) PG_MTX(PF, PI, PC, PB, 29) PG_MTX(PF, PI, PC, PB, 30) PG_MTX(PF, PI, PC, PB, 31) PG_MTX(PF, PI, PC, PB, 32) \
     /* ---- sequencer lanes (modulation) ---- */ \
     PG_SEQ(PF, PI, PC, PB, 1) PG_SEQ(PF, PI, PC, PB, 2) PG_SEQ(PF, PI, PC, PB, 3) PG_SEQ(PF, PI, PC, PB, 4) \
     PG_SEQ(PF, PI, PC, PB, 5) PG_SEQ(PF, PI, PC, PB, 6) PG_SEQ(PF, PI, PC, PB, 7) PG_SEQ(PF, PI, PC, PB, 8) \
@@ -435,6 +437,15 @@ struct ParamInfo
 };
 
 const std::vector<ParamInfo>& paramInfos();
+
+// ---- modulation of any parameter ----
+constexpr int kMtxSlots = 32;
+// Matrix destinations past MD_Count address any continuous parameter directly ("generic" destinations,
+// applied once for the whole synth). genericModParams()[dst - MD_Count] is the parameter index.
+const std::vector<int>& genericModParams();
+int mdForParam (int pid);       // the per-voice / FX destination that drives this knob, or MD_None
+int destForParam (int pid);     // the matrix destination a knob maps to (MD_* or MD_Count + i), -1 if none
+int paramForDest (int dst);     // the knob a destination moves (-1 if none)
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 // adds the parameters whose id passes 'keep' (used by other Calabi Yau instruments to host this FX rack)
 void addParamsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout, const std::function<bool (const juce::String&)>& keep);

@@ -6,10 +6,42 @@ namespace pg::ui
 {
 using namespace juce;
 
+// Modulation destinations: the classic ones, then every knob grouped by module
+void fillDestinationMenu (ComboBox& dst)
+{
+    const auto all = pg::choices::modDests();
+    auto* root = dst.getRootMenu();
+    root->addItem (1, all[0]);
+    PopupMenu classic;
+    for (int i = 1; i < pg::MD_Count; ++i) classic.addItem (i + 1, all[i]);
+    root->addSubMenu ("Voice / FX destinations", classic);
+    std::vector<std::pair<String, PopupMenu>> groups;
+    auto groupOf = [] (const String& pid) -> String
+    {
+        static const std::pair<const char*, const char*> g[] = {
+            { "wtA_", "WT A" }, { "wtB_", "WT B" }, { "wtC_", "WT C" }, { "sp_", "Spectral" }, { "gr_", "Grain" }, { "gm", "Grain mods" },
+            { "smp_", "Sampler" }, { "sub_", "Sub" }, { "noise_", "Noise" }, { "pl_", "Plaits" }, { "fm_", "FM matrix" },
+            { "bite_", "MultiDistortion" }, { "flt_", "Filter" }, { "fenv_", "Filter envelope" }, { "amp_", "Amplifier" },
+            { "menv", "Mod envelopes" }, { "lfo", "LFOs" }, { "chaos", "Chaos" }, { "ff1_", "FX Filter 1" }, { "ff2_", "FX Filter 2" },
+            { "fx_", "FX rack" }, { "mb_", "MixBus" }, { "rt_", "Routing" } };
+        for (auto& x : g) if (pid.startsWith (x.first)) return x.second;
+        return "Other";
+    };
+    const auto& gen = pg::genericModParams();
+    for (size_t i = 0; i < gen.size(); ++i)
+    {
+        const auto name = groupOf (pg::paramInfos()[(size_t) gen[i]].id);
+        auto it = std::find_if (groups.begin(), groups.end(), [&] (auto& p) { return p.first == name; });
+        if (it == groups.end()) { groups.push_back ({ name, PopupMenu() }); it = groups.end() - 1; }
+        it->second.addItem (pg::MD_Count + (int) i + 1, all[pg::MD_Count + (int) i]);
+    }
+    for (auto& gm : groups) root->addSubMenu ("Any knob: " + gm.first, gm.second);
+}
+
 // =============================================================================
 // ParamControl
 // =============================================================================
-ParamControl::ParamControl (APVTS& state, const String& id, const String& label)
+ParamControl::ParamControl (APVTS& state, const String& paramIdIn, const String& label) : id (paramIdIn)
 {
     auto* prm = state.getParameter (id);
     jassert (prm != nullptr);
@@ -22,7 +54,8 @@ ParamControl::ParamControl (APVTS& state, const String& id, const String& label)
     if (auto* c = dynamic_cast<AudioParameterChoice*> (prm))
     {
         k = Menu;
-        combo.addItemList (c->choices, 1);
+        if (id.startsWith ("seq") && id.endsWith ("_dst")) fillDestinationMenu (combo);   // hundreds of entries: grouped
+        else combo.addItemList (c->choices, 1);
         addAndMakeVisible (combo);
         addAndMakeVisible (caption);
         ca = std::make_unique<APVTS::ComboBoxAttachment> (state, id, combo);
@@ -45,6 +78,70 @@ ParamControl::ParamControl (APVTS& state, const String& id, const String& label)
         addAndMakeVisible (caption);
         sa = std::make_unique<APVTS::SliderAttachment> (state, id, slider);
         slider.setDoubleClickReturnValue (true, prm->convertFrom0to1 (prm->getDefaultValue()));
+        slider.onMenu = [this]
+        {
+            if (auto* h = host()) if (h->canModulate (id)) { h->showModMenu (id, *this); return true; }
+            return false;
+        };
+    }
+}
+
+bool ParamControl::isModulated() const
+{
+    auto* h = host();
+    return h != nullptr && ! h->ringsFor (id).empty();
+}
+
+bool ParamControl::isInterestedInDragSource (const SourceDetails& d)
+{
+    auto* h = host();
+    return k == Knob && h != nullptr && d.description.toString().startsWith ("mod:") && h->canModulate (id);
+}
+
+void ParamControl::itemDropped (const SourceDetails& d)
+{
+    dropHover = false;
+    if (auto* h = host()) h->dropModulation (d.description.toString().fromFirstOccurrenceOf ("mod:", false, false).getIntValue(), id);
+    repaint();
+}
+
+// modulation rings around the knob (one arc per route, in the source's colour) and the live value
+void ParamControl::paintOverChildren (Graphics& g)
+{
+    if (k != Knob) return;
+    auto* h = host();
+    if (h == nullptr || ! h->canModulate (id)) return;
+    const auto b = slider.getBounds().toFloat().reduced (1.0f);
+    const auto c = b.getCentre();
+    const float rad = jmin (b.getWidth(), b.getHeight()) * 0.5f + 1.5f;
+    const auto rp = slider.getRotaryParameters();
+    auto angleAt = [&] (float n) { return rp.startAngleRadians + jlimit (0.0f, 1.0f, n) * (rp.endAngleRadians - rp.startAngleRadians); };
+    if (auto* dc = DragAndDropContainer::findParentDragContainerFor (this))
+        if (dc->isDragAndDropActive() && dc->getCurrentDragDescription().toString().startsWith ("mod:"))
+        {
+            const int s = dc->getCurrentDragDescription().toString().fromFirstOccurrenceOf ("mod:", false, false).getIntValue();
+            g.setColour (h->colourOf (s).withAlpha (dropHover ? 0.6f : 0.2f));
+            g.drawEllipse (Rectangle<float> (rad * 2 + 6, rad * 2 + 6).withCentre (c), dropHover ? 3.0f : 1.5f);
+        }
+    const auto rings = h->ringsFor (id);
+    float r = rad + 3.0f;
+    for (auto& ring : rings)
+    {
+        Path arc;
+        arc.addCentredArc (c.x, c.y, r, r, 0.0f, angleAt (ring.lo), angleAt (ring.hi), true);
+        g.setColour (ring.colour.withAlpha (0.9f));
+        g.strokePath (arc, PathStrokeType (2.2f, PathStrokeType::curved, PathStrokeType::rounded));
+        r += 3.2f;
+    }
+    const float live = rings.empty() ? -1.0f : h->liveValue (id);
+    if (live >= 0.0f)
+    {
+        const float a = angleAt (live);
+        const Point<float> pt (c.x + std::sin (a) * (rad + 3.0f), c.y - std::cos (a) * (rad + 3.0f));
+        g.setColour (rings.front().colour.withAlpha (0.35f));
+        g.fillEllipse (Rectangle<float> (11.0f, 11.0f).withCentre (pt));
+        g.setColour (cosmos::starlight);
+        g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre (pt));
     }
 }
 
@@ -719,7 +816,7 @@ MatrixRow::MatrixRow (APVTS& state, int s) : slot (s)
     pol.setTooltip ("Native keeps the source as it is; Unipolar = 0..1, Bipolar = -1..1");
     src.addItemList (pg::choices::modSources(), 1);
     via.addItemList (pg::choices::modSources(), 1);
-    dst.addItemList (pg::choices::modDests(), 1);
+    fillDestinationMenu (dst);
     amt.setSliderStyle (Slider::LinearHorizontal);
     amt.setTextBoxStyle (Slider::TextBoxRight, false, 48, 20);
     addAndMakeVisible (amt);

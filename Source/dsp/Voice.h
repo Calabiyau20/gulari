@@ -71,10 +71,10 @@ public:
     int getNote() const { return note; }
     uint64_t getAge() const { return age; }
     void render (float* outL, float* outR, int numSamples, const VoiceContext& ctx);
+    float source (int src) const;   // envelopes, velocity, note, random of this voice
 
 private:
     void controlUpdate (const VoiceContext& ctx);
-    float source (int src) const;
 
     double sr = 48000.0;
     int index = 0;

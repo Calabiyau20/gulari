@@ -4,13 +4,22 @@
 #include "ui/Widgets.h"
 #include "ui/Widgets2.h"
 
-class SynthgularityEditor : public juce::AudioProcessorEditor, private juce::Timer
+class SynthgularityEditor : public juce::AudioProcessorEditor, public juce::DragAndDropContainer, public pg::ui::ModHost, private juce::Timer
 {
 public:
     explicit SynthgularityEditor (SynthgularityProcessor&);
     ~SynthgularityEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    static constexpr int kChipsH = 34;
+
+    // ModHost: drag a source chip onto any knob
+    bool canModulate (const juce::String& paramId) const override;
+    void dropModulation (int source, const juce::String& paramId) override;
+    std::vector<pg::ui::ModRing> ringsFor (const juce::String& paramId) const override;
+    float liveValue (const juce::String& paramId) const override;
+    void showModMenu (const juce::String& paramId, juce::Component& knob) override;
+    juce::Colour colourOf (int source) const override;
 
 private:
     void timerCallback() override;
@@ -29,11 +38,8 @@ private:
         AnimatedTabs() : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop) {}
         void currentTabChanged (int, const juce::String&) override
         {
-            if (auto* c = getCurrentContentComponent())
-            {
-                c->setAlpha (0.0f);
-                juce::Desktop::getInstance().getAnimator().animateComponent (c, c->getBounds(), 1.0f, 220, false, 0.0, 0.0);
-            }
+            // the editor timer fades the page in (animating bounds here would capture stale sizes)
+            if (auto* c = getCurrentContentComponent()) c->setAlpha (0.0f);
         }
     };
 
@@ -52,6 +58,9 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" };
     std::unique_ptr<pg::ui::MasterSection> master;
+    std::unique_ptr<pg::ui::GonioMini> gonio;
+    juce::OwnedArray<pg::ui::SourceChip> chips;
+    std::vector<std::vector<pg::ui::ParamControl*>> tabKnobs;   // per tab, for rings and drag glow
     juce::Label voicesLabel;
 
     AnimatedTabs tabs;

@@ -8,7 +8,7 @@ set(PG_COMPANY_NAME   "Calabi Yau")
 set(PG_BUNDLE_ID      "com.calabiyau.synthgularity")
 set(PG_MANUFACTURER   CbYu)   # 4 chars, at least one upper-case letter
 set(PG_PLUGIN_CODE    Sygy)   # 4 chars, unique per plugin
-set(PG_VERSION        "0.5.0")
+set(PG_VERSION        "0.6.0")
 
 # Must be set before project(): lowest macOS the plugin runs on
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version" FORCE)
@@ -157,6 +157,14 @@ if(PG_BUILD_TESTS)
     target_link_libraries(SynthgularityRenderTest PRIVATE mutable juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags)
 
+    juce_add_console_app(SynthgularityClickTest PRODUCT_NAME "SynthgularityClickTest")
+    target_sources(SynthgularityClickTest PRIVATE tests/ClickTest.cpp ${PG_DSP_SOURCES})
+    target_include_directories(SynthgularityClickTest PRIVATE Source tests)
+    target_compile_definitions(SynthgularityClickTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 PG_HEADLESS=1
+        PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}")
+    target_link_libraries(SynthgularityClickTest PRIVATE mutable juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+        juce::juce_recommended_config_flags)
+
     juce_add_console_app(SynthgularityPresetGen PRODUCT_NAME "SynthgularityPresetGen")
     target_sources(SynthgularityPresetGen PRIVATE tests/PresetGen.cpp ${PG_DSP_SOURCES})
     target_include_directories(SynthgularityPresetGen PRIVATE Source)
@@ -184,7 +192,7 @@ endif()
 # look and feel and fonts with Synthgularity (compiled into it, no plugin entry).
 # =============================================================================
 set(CYR_PRODUCT_NAME "Calabi-Yau Resonator")
-set(CYR_VERSION      "1.0.0")
+set(CYR_VERSION      "1.1.0")
 juce_add_plugin(CalabiYauResonator
     PRODUCT_NAME "${CYR_PRODUCT_NAME}"
     COMPANY_NAME "${PG_COMPANY_NAME}"
@@ -228,6 +236,14 @@ if(PG_BUILD_TESTS)
     target_compile_definitions(ResonatorRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 CYR_HEADLESS=1 PG_HEADLESS=1
         PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}")
     target_link_libraries(ResonatorRenderTest PRIVATE mutable juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+        juce::juce_recommended_config_flags)
+
+    juce_add_console_app(ResonatorClickTest PRODUCT_NAME "ResonatorClickTest")
+    target_sources(ResonatorClickTest PRIVATE Resonator/tests/RClickTest.cpp ${CYR_DSP} ${PG_DSP_ONLY})
+    target_include_directories(ResonatorClickTest PRIVATE Resonator/Source Source tests)
+    target_compile_definitions(ResonatorClickTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 CYR_HEADLESS=1 PG_HEADLESS=1
+        PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}")
+    target_link_libraries(ResonatorClickTest PRIVATE mutable juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags)
 
     juce_add_console_app(ResonatorUiSnapshot PRODUCT_NAME "ResonatorUiSnapshot")

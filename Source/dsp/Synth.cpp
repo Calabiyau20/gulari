@@ -103,6 +103,9 @@ void StepData::fromTree (const juce::ValueTree& t)
 // =============================================================================
 void Synth::prepare (double sampleRate, int)
 {
+    pmReady = false;
+    newestVoice = nullptr;
+    duck = 1.0f; duckPhase = 0; switchPending = false;
     sr = sampleRate;
     for (int i = 0; i < kMaxVoices; ++i)
         voices[(size_t) i].prepare (sr, i);
@@ -544,8 +547,10 @@ void Synth::render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const
                     const SampleData* sample, const Wavetable* const* tables, const SpectralTable* spectral,
                     const ShotData* shot, const juce::AudioPlayHead::PositionInfo* pos)
 {
-    p = params;
-    ctx.p = params;
+    base = params;
+    updateParams (0);
+    p = pm.data();
+    ctx.p = pm.data();
     ctx.sample = sample;
     for (int t = 0; t < 3; ++t) ctx.table[t] = tables[t];
     ctx.spectral = spectral;
@@ -613,11 +618,13 @@ void Synth::render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const
         int end = juce::jmin (n, i + 32);
         if (ev < events.size()) end = juce::jmin (end, juce::jmax (i + 1, events[ev].first));
         updateGlobalMods (end - i, beatStart + bps * i, bps);
+        updateParams (end - i);
 
         // the newest voice feeds the grain display
         Voice* newest = nullptr;
         for (auto& v : voices)
             if (v.isActive() && (newest == nullptr || v.getAge() > newest->getAge())) newest = &v;
+        newestVoice = newest;
         int active = 0;
         for (auto& v : voices)
         {
@@ -626,10 +633,183 @@ void Synth::render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const
             ctx.viz = (&v == newest) ? &viz : nullptr;
             v.render (L + i, R + i, end - i, ctx);
         }
+        if (duckPhase != 0)
+        {
+            const float step = 1.0f / (float) (sr * 0.003);
+            for (int k = i; k < end; ++k)
+            {
+                if (duckPhase == 1) { duck -= step; if (duck <= 0.0f) { duck = 0.0f; switchPending = true; duckPhase = 2; } }
+                else if (! switchPending) { duck += step; if (duck >= 1.0f) { duck = 1.0f; duckPhase = 0; } }
+                L[k] *= duck;
+                R[k] *= duck;
+            }
+        }
         activeVoices.store (active, std::memory_order_relaxed);
         if (active == 0) for (auto& sl : viz.pos) sl.store (-1.0f, std::memory_order_relaxed);
         i = end;
     }
     while (ev < events.size()) handleMidi (events[ev++].second);
+}
+// ---------------------------------------------------------------------------
+// Parameters for this chunk: continuous knobs glide (12 ms), pitch steps (octave, semitone) slide,
+// and the matrix "any parameter" destinations are added on each knob's own 0..1 scale.
+// ---------------------------------------------------------------------------
+static const std::vector<char>& glideMask()
+{
+    static const std::vector<char> m = []
+    {
+        std::vector<char> v ((size_t) kNumParams, 0);
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            const auto& inf = paramInfos()[(size_t) i];
+            const bool pitchStep = inf.type == PType::Int && (inf.id.endsWith ("_semi") || (inf.id.endsWith ("_oct") && inf.id != "sub_oct"));
+            v[(size_t) i] = (inf.type == PType::Float || pitchStep) && ! inf.id.startsWith ("mtx") ? 1 : 0;
+        }
+        return v;
+    }();
+    return m;
+}
+
+static const std::vector<char>& duckMask()
+{
+    static const std::vector<char> m = []
+    {
+        std::vector<char> v ((size_t) kNumParams, 0);
+        const auto& g = glideMask();
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            const auto& id = paramInfos()[(size_t) i].id;
+            if (g[(size_t) i]) continue;
+            bool skip = id == "voice_mode" || id == "polyphony" || id == "bend_range";
+            for (auto* pre : { "mtx", "seq", "arp_", "lfo", "chaos", "menv", "gm", "fx_", "ff1", "ff2", "mb_", "rt_order", "oversampling" })
+                skip |= id.startsWith (pre);
+            v[(size_t) i] = skip ? 0 : 1;
+        }
+        return v;
+    }();
+    return m;
+}
+
+// does switching this parameter change what the voices play right now?
+static bool needsDip (int pid, const float* v)
+{
+    const auto& id = paramInfos()[(size_t) pid].id;
+    auto on = [&] (int p) { return v[p] > 0.5f; };
+    if (id.endsWith ("_rphase") || id == "smp_key" || id == "gr_keytrack" || id == "gr_root") return false;   // next note only
+    for (int o = 0; o < 3; ++o)
+    {
+        const juce::String pre = juce::String ("wt") + juce::String::charToString ((juce::juce_wchar) ('A' + o)) + "_";
+        if (! id.startsWith (pre)) continue;
+        const int b = o * (wtB_on - wtA_on);
+        if (id == pre + "on") return true;
+        if (! on (wtA_on + b)) return false;
+        if (id == pre + "warp") return v[wtA_wamt + b] > 0.0f;
+        if (id == pre + "warp2") return v[wtA_wamt2 + b] > 0.0f;
+        return true;
+    }
+    if (id.startsWith ("sp_") && id != "sp_on") { if (! on (sp_on)) return false; if (id == "sp_warp") return v[sp_wamt] > 0.0f; return true; }
+    if (id.startsWith ("gr_") && id != "gr_on") return on (gr_on);
+    if (id.startsWith ("smp_") && id != "smp_on") return on (smp_on);
+    if (id.startsWith ("pl_") && id != "pl_on") return on (pl_on);
+    if (id.startsWith ("fm_type")) return v[fm_amount] > 0.0f;
+    if (id == "noise_type") return v[noise_level] > 0.0f;
+    if (id == "sub_wave") return v[sub_level] > 0.0f;
+    if (id == "bite_post") return v[bite_drive] > 0.0f || v[bite_fold] > 0.0f || v[bite_crush] > 0.0f || v[bite_soft] > 0.0f || v[bite_asym] > 0.0f || v[bite_rect] > 0.0f || v[bite_tone] != 0.0f;
+    return true;
+}
+
+void Synth::applyDiscrete()
+{
+    const auto& dm = duckMask();
+    for (int i = 0; i < kNumParams; ++i) if (dm[(size_t) i]) sm[(size_t) i] = base[i];
+}
+
+void Synth::updateParams (int numSamples)
+{
+    const auto& mask = glideMask();
+    const auto& dm = duckMask();
+    if (! pmReady) { std::copy (base, base + kNumParams, sm.begin()); pmReady = true; }
+    if (numSamples <= 0)
+    {
+        // a new block: menus and switches follow; the ones that change the voices wait for the dip
+        bool sound = false;
+        for (int i = 0; i < kNumParams; ++i)
+            if (! mask[(size_t) i])
+            {
+                if (dm[(size_t) i] && sm[(size_t) i] != base[i])
+                {
+                    if (needsDip (i, sm.data())) sound = true;
+                    else sm[(size_t) i] = base[i];
+                }
+                else if (! dm[(size_t) i]) sm[(size_t) i] = base[i];
+            }
+        if (sound && duckPhase == 0)
+        {
+            bool anyVoice = false;
+            for (auto& v : voices) anyVoice |= v.isActive();
+            if (anyVoice) duckPhase = 1; else applyDiscrete();
+        }
+    }
+    else
+    {
+        if (switchPending) { applyDiscrete(); switchPending = false; }
+        const float k = 1.0f - std::exp (-(float) numSamples / (float) (sr * 0.012));
+        for (int i = 0; i < kNumParams; ++i)
+            if (mask[(size_t) i]) sm[(size_t) i] += (base[i] - sm[(size_t) i]) * k;
+            else if (! dm[(size_t) i]) sm[(size_t) i] = base[i];
+    }
+    std::copy (sm.begin(), sm.end(), pm.begin());
+
+    // sources for the "any parameter" destinations: the shared ones, and the newest voice's own
+    auto val = [&] (int s) -> float
+    {
+        switch (s)
+        {
+            case MS_Lfo1: case MS_Lfo2: case MS_Lfo3: case MS_Lfo4: return global.lfo[s - MS_Lfo1];
+            case MS_Chaos1: case MS_Chaos2: case MS_Chaos2Y: case MS_Chaos2Z: return global.chaos[s - MS_Chaos1];
+            case MS_Seq1: case MS_Seq2: case MS_Seq3: case MS_Seq4:
+            case MS_Seq5: case MS_Seq6: case MS_Seq7: case MS_Seq8: return global.seq[s - MS_Seq1];
+            case MS_ModWheel: return global.modWheel;
+            case MS_Aftertouch: return global.aftertouch;
+            case MS_PitchBend: return global.pitchBend;
+            case MS_None: return 0.0f;
+            default: return newestVoice != nullptr ? newestVoice->source (s) : 0.0f;
+        }
+    };
+    for (int s = 1; s < MS_Count; ++s) liveSrc[(size_t) s].store (val (s), std::memory_order_relaxed);
+    if (ranges == nullptr) return;
+    float offs[kMtxSlots + 8];
+    int pids[kMtxSlots + 8], n = 0;
+    auto addOffset = [&] (int dst, float v)
+    {
+        const int pid = paramForDest (dst);
+        if (pid < 0) return;
+        for (int k = 0; k < n; ++k) if (pids[k] == pid) { offs[k] += v; return; }
+        pids[n] = pid; offs[n] = v; ++n;
+    };
+    for (int s = 0; s < kMtxSlots; ++s)
+    {
+        const int b = mtx01_src + s * (mtx02_src - mtx01_src);
+        const int dst = (int) base[b + 1], src = (int) base[b];
+        if (dst < MD_Count || src == MS_None) continue;
+        const int pol = (int) base[b + 4];
+        float v = applyPolarity (val (src), src, pol, base) * sm[(size_t) (b + 2)];
+        const int via = (int) base[b + 3];
+        if (via != MS_None) v *= applyPolarity (val (via), via, pol == 2 ? 0 : pol, base);
+        addOffset (dst, v);
+    }
+    for (int l = 0; l < 8; ++l)
+    {
+        const int b = seq1_on + l * (seq2_on - seq1_on);
+        const int dst = (int) base[b + (seq1_dst - seq1_on)];
+        if (dst < MD_Count || base[b] < 0.5f) continue;
+        addOffset (dst, global.seq[l] * sm[(size_t) (b + (seq1_amt - seq1_on))]);
+    }
+    for (int k = 0; k < n; ++k)
+    {
+        const auto& r = (*ranges)[(size_t) pids[k]];
+        const float nv = juce::jlimit (0.0f, 1.0f, r.convertTo0to1 (juce::jlimit (r.start, r.end, sm[(size_t) pids[k]])) + offs[k]);
+        pm[(size_t) pids[k]] = r.convertFrom0to1 (nv);
+    }
 }
 } // namespace pg

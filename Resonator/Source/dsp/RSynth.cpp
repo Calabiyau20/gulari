@@ -19,6 +19,26 @@ void RVoice::prepare (double sampleRate)
     filter.reset();
     dcCoef = 1.0f - std::exp (-kTwoPiF * 12.0f / (float) sr);
     liveNorm.fill (-1.0f);
+    xfLen = juce::jmax (16, (int) (sr * 0.01));
+    gainK = 1.0f - std::exp (-(float) kCtrl / (float) (sr * 0.015));
+    smReady = false;
+}
+
+// parameters that glide (everything continuous, plus octave / semitone / bend so pitch steps slide in 12 ms)
+static const std::vector<char>& glideMask()
+{
+    static const std::vector<char> m = []
+    {
+        std::vector<char> v ((size_t) kNumR, 0);
+        for (int i = 0; i < kNumR; ++i)
+        {
+            const auto& inf = infos()[(size_t) i];
+            const bool pitchInt = inf.id.endsWith ("_oct") || inf.id.endsWith ("_semi") || inf.id == "bend";
+            v[(size_t) i] = (! inf.isChoice && ! inf.isBool && (! inf.isInt || pitchInt)) ? 1 : 0;
+        }
+        return v;
+    }();
+    return m;
 }
 
 void RVoice::start (int nt, float velocity, float fromNote, const float* p, uint64_t ord, uint32_t seed)
@@ -42,7 +62,7 @@ void RVoice::start (int nt, float velocity, float fromNote, const float* p, uint
     }
     for (int l = 0; l < kLfos; ++l)
         if (p[lfo1_trig + l * kLfoStride] > 0.5f) lfo[l].reset (p[lfo1_phase + l * kLfoStride]);
-    if (! wasActive) filter.reset();
+    if (! wasActive) { filter.reset(); filterOld.reset(); fltXf = 0; fltType = -1; smReady = false; ampVelReady = false; }
     lastSet.fill (-1.0f);
     amp.gateOn (! wasActive);
     for (auto& e : env) e.gateOn (true);
@@ -56,45 +76,72 @@ void RVoice::release()
     for (auto& e : env) e.gateOff();
 }
 
-void RVoice::setupOsc (int o, const float* e, const RGlobal& g)
+void RVoice::setupOsc (int o, const float* e, const RGlobal& g, bool smoothGain)
 {
     auto& s = osc[o];
     const int b = o * kOscStride;
-    s.on = e[osca_on + b] > 0.5f;
-    if (! s.on) return;
+    Cfg c;
+    c.on = e[osca_on + b] > 0.5f;
+    c.mode = (int) e[osca_mode + b];
     const int n = juce::jlimit (2, 7, (int) std::lround (e[osca_n + b]));
     const int k1 = (int) std::lround (e[osca_k1 + b]) % n, k2 = (int) std::lround (e[osca_k2 + b]) % n;
-    auto& sh = s.shape;
+    auto& sh = c.shape;
     sh.pw = 2.0f / (float) n;
     sh.k1 = kTwoPiF * (float) k1 / (float) n;
     sh.k2 = kTwoPiF * (float) k2 / (float) n;
     sh.ruA = e[osca_ru + b] * 0.78539816f;
     sh.rvA = e[osca_rv + b] * kHalfPiF;
     sh.ratio = (float) juce::jlimit (1, 7, (int) std::lround (e[osca_ratio + b]));
-    // alpha glides a little so modulation never clicks
     const float a = e[osca_alpha + b];
     s.alpha = s.first ? a : s.alpha + (a - s.alpha) * 0.35f;
-    s.first = false;
     sh.ca = fast::cosR (s.alpha);
     sh.sa = fast::sinR (s.alpha);
     sh.width = clampf (e[osca_width + b], 0.0f, 1.0f);
-    s.uni = juce::jlimit (1, kMaxUni, (int) std::lround (e[osca_uni + b]));
-    const float base = pitch + 12.0f * std::round (e[osca_oct + b]) + e[osca_semi + b] + e[osca_fine + b] * 0.01f
-                       + g.pitchBend * e[bend];
+    c.scan = makeScan (n, e[osca_cover + b], e[osca_pos + b]);
+    c.uni = juce::jlimit (1, kMaxUni, (int) std::lround (e[osca_uni + b]));
+    const float base = pitch + 12.0f * e[osca_oct + b] + e[osca_semi + b] + e[osca_fine + b] * 0.01f + g.pitchBend * e[bend];
     const float det = e[osca_det + b];
-    for (int l = 0; l < s.uni; ++l)
+    for (int l = 0; l < c.uni; ++l)
     {
-        const float spread = s.uni > 1 ? ((float) l / (float) (s.uni - 1) - 0.5f) * det * 0.01f : 0.0f;
-        s.inc[l] = pg::midiToHz (base + spread) / (float) sr;
-        s.layerOff[l] = (float) l * 0.7f;
+        const float spread = c.uni > 1 ? ((float) l / (float) (c.uni - 1) - 0.5f) * det * 0.01f : 0.0f;
+        c.inc[l] = pg::midiToHz (base + spread) / (float) sr;
+        c.layerOff[l] = (float) l * 0.7f;
     }
+    const int key[9] = { c.on ? 1 : 0, c.mode, n, k1, k2, (int) sh.ratio, c.uni,
+                         c.mode == 1 ? c.scan.count : 0, c.mode == 1 ? (int) std::floor (c.scan.start) : 0 };
+    std::copy (key, key + 9, c.key);
+    const bool discrete = ! s.first && ! std::equal (key, key + 9, s.cur.key);
+    // loudness match: a discrete change takes the new value at once (the old setting keeps its own while
+    // they crossfade); continuous moves glide over ~15 ms
+    const float target = g.oscGain[o];
+    if (s.first || (discrete && s.xf == 0)) s.gainSm = target;
+    else if (smoothGain) s.gainSm += (target - s.gainSm) * gainK;
+    c.norm = s.gainSm / std::sqrt ((float) c.uni);
+
+    auto glideTo = [] (Cfg& cur, const Cfg& t)
+    {
+        const float k = 1.0f / (float) kCtrl;
+        cur.dRu = (t.shape.ruA - cur.shape.ruA) * k;
+        cur.dRv = (t.shape.rvA - cur.shape.rvA) * k;
+        cur.dCa = (t.shape.ca - cur.shape.ca) * k;
+        cur.dSa = (t.shape.sa - cur.shape.sa) * k;
+        cur.dW = (t.shape.width - cur.shape.width) * k;
+        cur.dNorm = (t.norm - cur.norm) * k;
+        cur.dStart = (t.scan.start - cur.scan.start) * k;
+        for (int l = 0; l < cur.uni; ++l) cur.dInc[l] = (t.inc[juce::jmin (l, t.uni - 1)] - cur.inc[l]) * k;
+    };
+    if (s.first) { s.cur = c; s.cur.freeze(); s.xf = 0; }
+    else if (discrete && s.xf == 0) { s.old = s.cur; s.old.freeze(); s.cur = c; s.cur.freeze(); s.xf = xfLen; }
+    else glideTo (s.cur, c);   // continuous move, or a discrete one waiting for the running fade to finish
+    s.first = false;
+
     s.spinInc = e[osca_spin + b] * kTwoPiF / (float) sr;
     float pl, pr;
     pg::panGains (e[osca_pan + b], pl, pr);
-    const float lvl = e[osca_level + b] * g.oscGain[o] / std::sqrt ((float) s.uni) * 1.4142f;
-    s.fmNorm = g.oscGain[o] / std::sqrt ((float) s.uni);
-    s.gL = lvl * pl;
-    s.gR = lvl * pr;
+    const float lvl = e[osca_level + b] * 1.4142f;
+    // ramp level / pan to the new value across this control block
+    s.dgL = (lvl * pl - s.gL) / (float) kCtrl;
+    s.dgR = (lvl * pr - s.gR) / (float) kCtrl;
 }
 
 void RVoice::control (const float* p, const RGlobal& g)
@@ -131,8 +178,16 @@ void RVoice::control (const float* p, const RGlobal& g)
     srcVal[MS_PitchBend] = g.pitchBend;
     srcVal[MS_Random] = randomVal;
 
+    // ---- knob values glide (12 ms), discrete ones switch and crossfade in setupOsc ----
+    {
+        const auto& mask = glideMask();
+        const float k = smReady ? 1.0f - std::exp (-dt / 0.012f) : 1.0f;
+        for (int i = 0; i < kNumR; ++i)
+            sm[(size_t) i] = mask[(size_t) i] ? sm[(size_t) i] + (p[i] - sm[(size_t) i]) * k : p[i];
+        smReady = true;
+    }
     // ---- modulation slots: offsets on the 0..1 scale of each destination ----
-    std::copy (p, p + kNumR, eff.begin());
+    std::copy (sm.begin(), sm.end(), eff.begin());
     const int nd = numDests();
     int touched[kSlots], nt = 0;
     for (int s = 0; s < kSlots; ++s)
@@ -153,7 +208,7 @@ void RVoice::control (const float* p, const RGlobal& g)
     for (int k = 0; k < nt; ++k)
     {
         const int d = touched[k], rid = dp[(size_t) d - 1];
-        const float nv = clampf (toNorm (rid, p[rid]) + offs[(size_t) d], 0.0f, 1.0f);
+        const float nv = clampf (toNorm (rid, sm[(size_t) rid]) + offs[(size_t) d], 0.0f, 1.0f);
         eff[(size_t) rid] = fromNorm (rid, nv);
         liveNorm[(size_t) d] = nv;
     }
@@ -178,7 +233,7 @@ void RVoice::control (const float* p, const RGlobal& g)
     }
 
     // ---- oscillators and matrices ----
-    for (int o = 0; o < kOscs; ++o) setupOsc (o, e, g);
+    for (int o = 0; o < kOscs; ++o) setupOsc (o, e, g, true);
     for (int s = 0; s < kOscs; ++s)
         for (int d = 0; d < kOscs; ++d)
         {
@@ -187,23 +242,46 @@ void RVoice::control (const float* p, const RGlobal& g)
             pd[s][d] = e[pd_aa + s * 4 + d];
         }
 
-    // ---- filter ----
-    if (e[flt_on] > 0.5f)
+    // ---- filter: on / off fades the wet signal, a type change crossfades from the old type ----
     {
+        fltMixTarget = e[flt_on] > 0.5f ? 1.0f : 0.0f;
+        if (fltType < 0) { fltMix = fltMixTarget; fltType = (int) e[flt_type]; }
+        const int type = (int) e[flt_type];
+        if (type != fltType && fltXf == 0) { filterOld = filter; fltXf = xfLen; fltType = type; }
         const float cut = clampf (e[flt_cut] * std::exp2 ((pitch - 60.0f) / 12.0f * e[flt_key]), 20.0f, 20000.0f);
-        if (cut != lastSet[20] || e[flt_res] != lastSet[21] || e[flt_drive] != lastSet[22] || e[flt_type] != lastSet[23])
+        if (cut != lastSet[20] || e[flt_res] != lastSet[21] || e[flt_drive] != lastSet[22] || (float) fltType != lastSet[23])
         {
-            filter.set (0, (int) e[flt_type], false, cut, e[flt_res], e[flt_drive], (float) sr);
-            lastSet[20] = cut; lastSet[21] = e[flt_res]; lastSet[22] = e[flt_drive]; lastSet[23] = e[flt_type];
+            filter.set (0, fltType, false, cut, e[flt_res], e[flt_drive], (float) sr);
+            lastSet[20] = cut; lastSet[21] = e[flt_res]; lastSet[22] = e[flt_drive]; lastSet[23] = (float) fltType;
         }
     }
     const float vs = e[velsens];
-    ampVel = 1.0f - vs + vs * vel;
+    ampVelTarget = 1.0f - vs + vs * vel;
+    if (! ampVelReady) { ampVel = ampVelTarget; ampVelReady = true; }
     outGain = 0.8f;
+}
+
+void RVoice::renderCfg (const Cfg& c, Osc& s, float fmOff, float knee, float& L, float& R) const
+{
+    L = R = 0.0f;
+    if (! c.on) return;
+    for (int l = 0; l < c.uni; ++l)
+    {
+        float ph = s.ph[l] + fmOff;
+        ph -= fast::floorf (ph);
+        if (knee != 0.5f) ph = pdWarp (ph, knee);
+        float ol, orr;
+        if (c.mode == 1) scanSample (c.shape, c.scan, ph, s.spin, ol, orr);
+        else orbitSample (c.shape, ph, c.layerOff[l], s.spin, ol, orr);
+        L += ol; R += orr;
+    }
+    L *= c.norm;
+    R *= c.norm;
 }
 
 void RVoice::render (float* L, float* R, int n, const float* p, const RGlobal& g)
 {
+    const float fltStep = 1.0f / (float) xfLen;
     for (int i = 0; i < n; ++i)
     {
         if (ctrlLeft <= 0) { control (p, g); ctrlLeft = kCtrl; }
@@ -211,41 +289,65 @@ void RVoice::render (float* L, float* R, int n, const float* p, const RGlobal& g
         const float a = amp.next();
         for (auto& en : env) en.next();
         if (! amp.active()) { note = -1; return; }
-        if (a < 1.0e-6f && ! held) continue;
+        ampVel += (ampVelTarget - ampVel) * 0.002f;
 
         float vl = 0.0f, vr = 0.0f;
         float out[kOscs] {};
         for (int o = 0; o < kOscs; ++o)
         {
             auto& s = osc[o];
-            if (! s.on) continue;
+            s.gL += s.dgL;
+            s.gR += s.dgR;
+            if (! s.cur.on && s.xf == 0) continue;
             float fmOff = 0.0f, pdk = 0.0f;
             for (int src = 0; src < kOscs; ++src) { fmOff += fm[src][o] * prevOut[src]; pdk += pd[src][o] * prevOut[src]; }
             const float knee = 0.5f + 0.47f * clampf (pdk, -1.0f, 1.0f);
             s.spin += s.spinInc;
             if (s.spin > kTwoPiF) s.spin -= kTwoPiF; else if (s.spin < 0.0f) s.spin += kTwoPiF;
-            float xl = 0.0f, xr = 0.0f;
-            for (int l = 0; l < s.uni; ++l)
+            const int layers = s.xf > 0 ? juce::jmax (s.cur.uni, s.old.uni) : s.cur.uni;
+            for (int l = 0; l < layers; ++l)
             {
-                s.ph[l] += s.inc[l];
-                s.ph[l] -= std::floor (s.ph[l]);
-                float ph = s.ph[l] + fmOff;
-                ph -= std::floor (ph);
-                if (knee != 0.5f) ph = pdWarp (ph, knee);
+                s.ph[l] += s.cur.inc[juce::jmin (l, s.cur.uni - 1)];
+                s.ph[l] -= fast::floorf (s.ph[l]);
+            }
+            float xl, xr;
+            renderCfg (s.cur, s, fmOff, knee, xl, xr);
+            s.cur.step();
+            if (s.xf > 0)
+            {
                 float ol, orr;
-                orbitSample (s.shape, ph, s.layerOff[l], s.spin, ol, orr);
-                xl += ol; xr += orr;
+                renderCfg (s.old, s, fmOff, knee, ol, orr);
+                const float w = (float) s.xf / (float) xfLen;   // weight of the old setting
+                xl += (ol - xl) * w;
+                xr += (orr - xr) * w;
+                --s.xf;
             }
             // DC blocker, then level / pan
             s.dcL += (xl - s.dcL) * dcCoef;
             s.dcR += (xr - s.dcR) * dcCoef;
             xl -= s.dcL; xr -= s.dcR;
-            out[o] = 0.5f * (xl + xr) * s.fmNorm;
+            out[o] = 0.5f * (xl + xr);
             vl += xl * s.gL;
             vr += xr * s.gR;
         }
         for (int o = 0; o < kOscs; ++o) prevOut[o] = clampf (out[o], -1.5f, 1.5f);
-        if (eff[flt_on] > 0.5f) { vl = filter.tick (0, vl); vr = filter.tick (1, vr); }
+
+        // filter with crossfades
+        if (fltMix > 0.0f || fltMixTarget > 0.0f)
+        {
+            float fl = filter.tick (0, vl), fr = filter.tick (1, vr);
+            if (fltXf > 0)
+            {
+                const float w = (float) fltXf / (float) xfLen;
+                const float ol = filterOld.tick (0, vl), orr = filterOld.tick (1, vr);
+                fl += (ol - fl) * w;
+                fr += (orr - fr) * w;
+                --fltXf;
+            }
+            fltMix += fltMixTarget > fltMix ? juce::jmin (fltStep, fltMixTarget - fltMix) : -juce::jmin (fltStep, fltMix - fltMixTarget);
+            vl += (fl - vl) * fltMix;
+            vr += (fr - vr) * fltMix;
+        }
         const float gain = a * ampVel * outGain;
         L[i] += vl * gain;
         R[i] += vr * gain;
@@ -376,7 +478,7 @@ void RSynth::updateLoudness (const float* p)
     {
         const int b = o * kOscStride;
         std::array<float, 16> key { p[osca_n + b], p[osca_k1 + b], p[osca_k2 + b], p[osca_alpha + b], p[osca_ru + b],
-                                    p[osca_rv + b], p[osca_ratio + b], p[osca_width + b] };
+                                    p[osca_rv + b], p[osca_ratio + b], p[osca_width + b], p[osca_mode + b], p[osca_cover + b], p[osca_pos + b] };
         if (key == loudKey[o]) continue;
         loudKey[o] = key;
         const int nn = juce::jlimit (2, 7, (int) std::lround (key[0]));
@@ -387,10 +489,19 @@ void RSynth::updateLoudness (const float* p)
         s.ca = std::cos (key[3]); s.sa = std::sin (key[3]);
         s.ruA = key[4] * 0.78539816f; s.rvA = key[5] * kHalfPiF; s.ratio = (float) juce::jlimit (1, 7, (int) std::lround (key[6]));
         s.width = key[7];
-        constexpr int M = 256;
-        float a[M], c[M], ma = 0.0f, mc = 0.0f;
-        for (int i = 0; i < M; ++i) { orbitSample (s, (float) i / M, 0.0f, 0.0f, a[i], c[i]); ma += a[i]; mc += c[i]; }
-        ma /= M; mc /= M;
+        const bool scan = key[8] > 0.5f;
+        const auto sc = makeScan (nn, key[9], key[10]);
+        const int M = scan ? juce::jlimit (256, kLoudMax, sc.count * 8) : 256;
+        float* a = loudA.data();
+        float* c = loudB.data();
+        float ma = 0.0f, mc = 0.0f;
+        for (int i = 0; i < M; ++i)
+        {
+            if (scan) scanSample (s, sc, (float) i / (float) M, 0.0f, a[i], c[i]);
+            else orbitSample (s, (float) i / (float) M, 0.0f, 0.0f, a[i], c[i]);
+            ma += a[i]; mc += c[i];
+        }
+        ma /= (float) M; mc /= (float) M;
         float pk = 1.0e-3f;
         for (int i = 0; i < M; ++i) pk = std::max (pk, std::max (std::abs (a[i] - ma), std::abs (c[i] - mc)));
         global.oscGain[o] = std::min (8.0f, 0.6f / pk);

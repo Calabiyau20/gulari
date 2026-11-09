@@ -329,7 +329,19 @@ void SurfaceView::paint (Graphics& g)
     std::sort (quads.begin(), quads.end(), [] (const Q& x, const Q& y) { return x.depth > y.depth; });
     std::vector<Colour> cols;
     for (int a1 = 0; a1 < n; ++a1) for (int a2 = 0; a2 < n; ++a2) cols.push_back (patchColour (a1, a2, n));
-    const int active = k1 * n + k2;
+    // the value each knob really has right now (modulation included)
+    auto live = [&] (int rid)
+    {
+        const int d = destIndexOfParam (rid);
+        const float ln = d > 0 ? proc.synth.liveNorm[(size_t) d].load() : -1.0f;
+        return ln >= 0.0f ? ranges()[(size_t) rid].convertFrom0to1 (ln) : proc.value (rid);
+    };
+    const bool scanMode = (int) proc.value (osca_mode + b) == 1;
+    const auto sc = makeScan (n, live (osca_cover + b), live (osca_pos + b));
+    std::vector<char> hotPatch ((size_t) (n * n), 0);
+    if (scanMode)
+        for (int i = 0; i < sc.count; ++i) { int pp; float vv; scanLine (sc, sc.start + (float) i, pp, vv); hotPatch[(size_t) pp] = 1; }
+    else hotPatch[(size_t) (k1 * n + k2)] = 1;
     const float ref = std::pow (scale * 1.6f / (float) grid, 2.0f);
     for (auto& q : quads)
     {
@@ -339,7 +351,7 @@ void SurfaceView::paint (Graphics& g)
         const auto A = pt (a), B = pt (bb), C = pt (c), D = pt (d);
         const float cross = (C.x - A.x) * (D.y - B.y) - (C.y - A.y) * (D.x - B.x);
         const float lit = 0.4f + 0.6f * jmin (1.0f, std::abs (cross) * 0.5f / ref);
-        const bool hot = p == active;
+        const bool hot = hotPatch[(size_t) p] != 0;
         Path quad;
         quad.startNewSubPath (A); quad.lineTo (B); quad.lineTo (C); quad.lineTo (D); quad.closeSubPath();
         auto col = cols[(size_t) p].withMultipliedBrightness (lit * (hot ? 1.15f : 0.55f));
@@ -348,31 +360,56 @@ void SurfaceView::paint (Graphics& g)
         g.setColour (hot ? cosmos::gold.withAlpha (0.35f) : cosmos::voidC.withAlpha (0.4f));
         g.strokePath (quad, PathStrokeType (0.5f));
     }
-    // orbit of the note on the active patch
-    const float ru = proc.value (osca_ru + b), rv = proc.value (osca_rv + b);
-    const int ratio = jlimit (1, 7, (int) std::lround (proc.value (osca_ratio + b)));
-    Path orbit;
     float xyz[3], px, py, dep;
-    for (int s = 0; s <= 120; ++s)
+    const float ru = live (osca_ru + b), rv = live (osca_rv + b);
+    const int ratio = jlimit (1, 7, (int) std::lround (proc.value (osca_ratio + b)));
+    auto pointAt = [&] (double ph, float& x, float& y)
     {
-        const double ph = (double) s / 120.0;
-        const double u = 0.78539816 + ru * 0.78539816 * std::cos (6.283185307 * ph);
-        const double v = rv * 1.5707963 * std::sin (ratio * 6.283185307 * ph);
-        surfacePoint (u, v, k1, k2, n, alpha, xyz);
-        project (xyz[0], xyz[1], xyz[2], px, py, dep);
-        if (s == 0) orbit.startNewSubPath (px, py); else orbit.lineTo (px, py);
+        if (scanMode)
+        {
+            const auto sp2 = scanPoint (sc, (float) ph);
+            surfacePoint (sp2.uA, sp2.vA, sp2.patchA / n, sp2.patchA % n, n, alpha, xyz);
+        }
+        else
+        {
+            const double u = 0.78539816 + ru * 0.78539816 * std::cos (6.283185307 * ph);
+            const double v = rv * 1.5707963 * std::sin (ratio * 6.283185307 * ph);
+            surfacePoint (u, v, k1, k2, n, alpha, xyz);
+        }
+        project (xyz[0], xyz[1], xyz[2], x, y, dep);
+    };
+    Path orbit;
+    if (scanMode)
+    {
+        // every line the wave walks, drawn in gold: at full coverage the whole manifold lights up
+        for (int i = 0; i < sc.count; ++i)
+        {
+            int pp; float vv;
+            scanLine (sc, sc.start + (float) i, pp, vv);
+            for (int k = 0; k <= 8; ++k)
+            {
+                const float u = kScanUMin + (kScanUMax - kScanUMin) * (float) k / 8.0f;
+                surfacePoint (u, vv, pp / n, pp % n, n, alpha, xyz);
+                project (xyz[0], xyz[1], xyz[2], px, py, dep);
+                if (k == 0) orbit.startNewSubPath (px, py); else orbit.lineTo (px, py);
+            }
+        }
     }
-    g.setColour (cosmos::gold.withAlpha (0.25f));
-    g.strokePath (orbit, PathStrokeType (5.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    else
+        for (int s2 = 0; s2 <= 120; ++s2)
+        {
+            pointAt ((double) s2 / 120.0, px, py);
+            if (s2 == 0) orbit.startNewSubPath (px, py); else orbit.lineTo (px, py);
+        }
+    const float thin = scanMode ? jlimit (0.6f, 1.6f, 40.0f / (float) sc.count) : 1.6f;
+    g.setColour (cosmos::gold.withAlpha (0.22f));
+    g.strokePath (orbit, PathStrokeType (thin * 3.0f, PathStrokeType::curved, PathStrokeType::rounded));
     g.setColour (cosmos::gold);
-    g.strokePath (orbit, PathStrokeType (1.6f, PathStrokeType::curved, PathStrokeType::rounded));
-    // travelling point (slowed down so the eye can follow it); brighter while a voice sounds
+    g.strokePath (orbit, PathStrokeType (thin, PathStrokeType::curved, PathStrokeType::rounded));
+    // travelling point (slowed down so the eye can follow it; a scan of many lines moves proportionally faster)
     {
-        const double ph = std::fmod (time * 0.35, 1.0);
-        const double u = 0.78539816 + ru * 0.78539816 * std::cos (6.283185307 * ph);
-        const double v = rv * 1.5707963 * std::sin (ratio * 6.283185307 * ph);
-        surfacePoint (u, v, k1, k2, n, alpha, xyz);
-        project (xyz[0], xyz[1], xyz[2], px, py, dep);
+        const double speed = scanMode ? 0.35 * jlimit (1.0, 6.0, std::sqrt ((double) sc.count)) / 2.0 : 0.35;
+        pointAt (std::fmod (time * speed, 1.0), px, py);
         const bool sounding = proc.synth.activeVoices.load() > 0;
         g.setColour (cosmos::neon.withAlpha (sounding ? 0.45f : 0.2f));
         g.fillEllipse (Rectangle<float> (16.0f, 16.0f).withCentre ({ px, py }));
@@ -381,7 +418,8 @@ void SurfaceView::paint (Graphics& g)
     }
     g.setColour (colours::textDim);
     g.setFont (fonts::sans (10.0f));
-    g.drawText ("n=" + String (n) + "  patch " + String (k1) + "," + String (k2), bounds.reduced (8.0f, 5.0f), Justification::bottomLeft);
+    g.drawText (scanMode ? "n=" + String (n) + "  scan " + String (sc.count) + " / " + String (sc.total) + " lines"
+                         : "n=" + String (n) + "  patch " + String (k1) + "," + String (k2), bounds.reduced (8.0f, 5.0f), Justification::bottomLeft);
     if (! on)
     {
         g.setColour (cosmos::voidC.withAlpha (0.6f));
@@ -504,214 +542,6 @@ void LfoView::paint (Graphics& g)
     g.fillEllipse (Rectangle<float> (14.0f, 14.0f).withCentre ({ r.getRight() - 6.0f, y }));
     g.setColour (cosmos::starlight);
     g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre ({ r.getRight() - 6.0f, y }));
-}
-
-// =============================================================================
-// AnalyzerStrip
-// =============================================================================
-AnalyzerStrip::AnalyzerStrip (ResonatorProcessor& p) : proc (p)
-{
-    for (int i = 0; i < kSize; ++i) window[(size_t) i] = 0.5f - 0.5f * std::cos (pg::kTwoPi * (float) i / (float) (kSize - 1));
-    bands.fill (-100.0f);
-    peaks.fill (-100.0f);
-    setTooltip ("Oscilloscope, FFT spectrum, goniometer (stereo image, correlation) and true peak / LUFS. Click the meters to reset.");
-    startTimerHz (30);
-}
-
-void AnalyzerStrip::resized()
-{
-    auto r = getLocalBounds().reduced (6, 4);
-    meterA = r.removeFromRight (170);
-    r.removeFromRight (6);
-    gonioA = r.removeFromRight (r.getHeight() + 10);
-    r.removeFromRight (6);
-    scopeA = r.removeFromLeft (r.getWidth() * 2 / 5);
-    r.removeFromLeft (6);
-    fftA = r;
-}
-
-void AnalyzerStrip::mouseDown (const MouseEvent& e)
-{
-    if (meterA.contains (e.getPosition())) proc.meter.requestReset();
-}
-
-void AnalyzerStrip::timerCallback()
-{
-    auto& m = proc.meter;
-    tpL = m.tpL.load(); tpR = m.tpR.load(); tpMax = m.tpMax.load();
-    lm = m.lufsM.load(); ls = m.lufsS.load(); li = m.lufsI.load();
-    const int N = ResonatorProcessor::kScopeRing, mask = N - 1;
-    const int wp = proc.scopePos.load (std::memory_order_acquire);
-    auto mono = [&] (int k) { return 0.5f * (proc.scopeL[(size_t) (k & mask)] + proc.scopeR[(size_t) (k & mask)]); };
-    // scope: rising zero crossing, ~25 ms
-    {
-        const int span = (int) (m.sampleRate() * 0.025);
-        int start = wp - span - 4;
-        for (int k = wp - span - 4; k > wp - 4000; --k)
-            if (mono (k - 1) <= 0.0f && mono (k) > 0.0f) { start = k; break; }
-        traceHead = (traceHead + 2) % 3;
-        auto& t = traces[(size_t) traceHead];
-        for (int i = 0; i < kScope; ++i) t[(size_t) i] = mono (start + i * span / kScope);
-    }
-    // FFT
-    for (int i = 0; i < kSize; ++i) fftData[(size_t) i] = mono (wp - kSize + i) * window[(size_t) i];
-    std::fill (fftData.begin() + kSize, fftData.end(), 0.0f);
-    fft.performFrequencyOnlyForwardTransform (fftData.data());
-    const float sr = (float) m.sampleRate();
-    for (int b = 0; b < kBands; ++b)
-    {
-        const float f0 = 20.0f * std::pow (1000.0f, (float) b / kBands), f1 = 20.0f * std::pow (1000.0f, (float) (b + 1) / kBands);
-        const int i0 = jlimit (1, kSize / 2 - 1, (int) (f0 / sr * kSize)), i1 = jlimit (i0, kSize / 2 - 1, (int) (f1 / sr * kSize));
-        float mx = 0.0f;
-        for (int i = i0; i <= i1; ++i) mx = jmax (mx, fftData[(size_t) i]);
-        const float db = Decibels::gainToDecibels (mx * 2.0f / (float) kSize * 2.0f, -100.0f) + 4.5f * std::log2 (f0 / 1000.0f) * 0.5f;
-        bands[(size_t) b] = jmax (db, bands[(size_t) b] - 2.5f);
-        peaks[(size_t) b] = jmax (db, peaks[(size_t) b] - 0.35f);
-    }
-    // goniometer: last 1024 samples, correlation
-    double sLR = 0, sLL = 0, sRR = 0;
-    for (int i = 0; i < kGonio; ++i)
-    {
-        const int k = (wp - kGonio + i) & mask;
-        gl[(size_t) i] = proc.scopeL[(size_t) k];
-        gr[(size_t) i] = proc.scopeR[(size_t) k];
-        sLR += gl[(size_t) i] * gr[(size_t) i]; sLL += gl[(size_t) i] * gl[(size_t) i]; sRR += gr[(size_t) i] * gr[(size_t) i];
-    }
-    const double den = std::sqrt (sLL * sRR);
-    const float c = den > 1e-9 ? (float) (sLR / den) : 0.0f;
-    correlation += (c - correlation) * 0.2f;
-    repaint();
-}
-
-static void panelBg (Graphics& g, Rectangle<int> a, const String& title)
-{
-    g.setColour (cosmos::voidC.withAlpha (0.85f));
-    g.fillRoundedRectangle (a.toFloat(), 7.0f);
-    g.setColour (cosmos::nebula);
-    g.drawRoundedRectangle (a.toFloat().reduced (0.5f), 7.0f, 1.0f);
-    g.setColour (colours::textDim);
-    g.setFont (fonts::label (8.5f));
-    g.drawText (title, a.reduced (8, 4), Justification::topLeft);
-}
-
-void AnalyzerStrip::paint (Graphics& g)
-{
-    // ---- scope with phosphor persistence ----
-    panelBg (g, scopeA, "SCOPE");
-    {
-        auto r = scopeA.toFloat().reduced (8.0f, 14.0f);
-        g.setColour (colours::outline.withAlpha (0.5f));
-        g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
-        for (int age = 2; age >= 0; --age)
-        {
-            const auto& t = traces[(size_t) ((traceHead + age) % 3)];
-            Path p;
-            for (int i = 0; i < kScope; ++i)
-            {
-                const float x = r.getX() + r.getWidth() * (float) i / (kScope - 1), y = r.getCentreY() - jlimit (-1.2f, 1.2f, t[(size_t) i]) * r.getHeight() * 0.45f;
-                if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
-            }
-            g.setColour (cosmos::neon.withAlpha (age == 0 ? 0.95f : 0.25f / (float) age));
-            g.strokePath (p, PathStrokeType (age == 0 ? 1.6f : 1.0f));
-        }
-    }
-    // ---- spectrum ----
-    panelBg (g, fftA, "SPECTRUM");
-    {
-        auto r = fftA.toFloat().reduced (8.0f, 14.0f);
-        g.setFont (fonts::sans (8.5f));
-        for (float f : { 100.0f, 1000.0f, 10000.0f })
-        {
-            const float x = r.getX() + r.getWidth() * std::log (f / 20.0f) / std::log (1000.0f);
-            g.setColour (colours::outline.withAlpha (0.45f));
-            g.drawVerticalLine ((int) x, r.getY(), r.getBottom());
-            g.setColour (colours::textDim);
-            g.drawText (f >= 1000.0f ? String ((int) (f / 1000.0f)) + "k" : String ((int) f), (int) x + 2, (int) r.getBottom() - 10, 30, 10, Justification::left);
-        }
-        auto yOf = [&] (float db) { return r.getBottom() - jlimit (0.0f, 1.0f, (db + 90.0f) / 90.0f) * r.getHeight(); };
-        Path fill, line, pk;
-        fill.startNewSubPath (r.getX(), r.getBottom());
-        for (int b = 0; b < kBands; ++b)
-        {
-            const float x = r.getX() + r.getWidth() * (float) b / (kBands - 1);
-            fill.lineTo (x, yOf (bands[(size_t) b]));
-            if (b == 0) { line.startNewSubPath (x, yOf (bands[0])); pk.startNewSubPath (x, yOf (peaks[0])); }
-            else { line.lineTo (x, yOf (bands[(size_t) b])); pk.lineTo (x, yOf (peaks[(size_t) b])); }
-        }
-        fill.lineTo (r.getRight(), r.getBottom());
-        fill.closeSubPath();
-        g.setGradientFill (ColourGradient (cosmos::fuchsia.withAlpha (0.55f), r.getX(), r.getY(), cosmos::electric.withAlpha (0.1f), r.getX(), r.getBottom(), false));
-        g.fillPath (fill);
-        g.setColour (cosmos::orchid);
-        g.strokePath (line, PathStrokeType (1.3f));
-        g.setColour (cosmos::gold.withAlpha (0.5f));
-        g.strokePath (pk, PathStrokeType (0.8f));
-    }
-    // ---- goniometer (M/S rotated 45 degrees) ----
-    panelBg (g, gonioA, "GONIOMETER");
-    {
-        auto r = gonioA.toFloat().reduced (8.0f, 14.0f);
-        auto sq = r.withSizeKeepingCentre (jmin (r.getWidth(), r.getHeight() - 12.0f), jmin (r.getWidth(), r.getHeight() - 12.0f)).translated (0.0f, -6.0f);
-        const auto c = sq.getCentre();
-        const float h = sq.getWidth() * 0.5f;
-        g.setColour (colours::outline.withAlpha (0.5f));
-        g.drawLine (c.x, sq.getY(), c.x, sq.getBottom(), 0.8f);
-        g.drawLine (sq.getX(), c.y, sq.getRight(), c.y, 0.8f);
-        g.drawLine (c.x - h * 0.7f, c.y - h * 0.7f, c.x + h * 0.7f, c.y + h * 0.7f, 0.6f);
-        g.drawLine (c.x + h * 0.7f, c.y - h * 0.7f, c.x - h * 0.7f, c.y + h * 0.7f, 0.6f);
-        g.setFont (fonts::sans (8.0f));
-        g.setColour (colours::textDim);
-        g.drawText ("L", (int) (c.x - h * 0.75f) - 8, (int) (c.y - h * 0.75f) - 8, 10, 10, Justification::centred);
-        g.drawText ("R", (int) (c.x + h * 0.75f), (int) (c.y - h * 0.75f) - 8, 10, 10, Justification::centred);
-        for (int i = 0; i < kGonio; ++i)
-        {
-            const float L = gl[(size_t) i], R = gr[(size_t) i];
-            const float x = (R - L) * 0.7071f, y = (L + R) * 0.7071f;
-            const float px = c.x + jlimit (-1.0f, 1.0f, x) * h, py = c.y - jlimit (-1.0f, 1.0f, y) * h;
-            g.setColour (cosmos::neon.withAlpha (0.08f + 0.5f * (float) i / kGonio));
-            g.fillRect (px, py, 1.5f, 1.5f);
-        }
-        // correlation bar
-        auto bar = Rectangle<float> (r.getX() + 6.0f, r.getBottom() - 6.0f, r.getWidth() - 12.0f, 4.0f);
-        g.setColour (colours::outline);
-        g.fillRoundedRectangle (bar, 2.0f);
-        const float cx = bar.getCentreX() + correlation * bar.getWidth() * 0.5f;
-        g.setColour (correlation < 0.0f ? Colour (0xffff5c5c) : cosmos::neon);
-        g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ cx, bar.getCentreY() }));
-    }
-    // ---- true peak + LUFS ----
-    panelBg (g, meterA, "OUTPUT");
-    {
-        auto r = meterA.toFloat().reduced (8.0f, 16.0f);
-        auto bars = r.removeFromLeft (34.0f);
-        auto yOf = [&] (float db) { return bars.getBottom() - jlimit (0.0f, 1.0f, (db + 60.0f) / 63.0f) * bars.getHeight(); };
-        for (int ch = 0; ch < 2; ++ch)
-        {
-            auto b = bars.withWidth (12.0f).translated ((float) ch * 16.0f, 0.0f);
-            g.setColour (colours::outline);
-            g.fillRect (b);
-            const float v = ch == 0 ? tpL : tpR;
-            const float top = yOf (v);
-            g.setGradientFill (ColourGradient (Colour (0xffff5c5c), 0, yOf (0.0f), cosmos::neon, 0, yOf (-24.0f), false));
-            g.fillRect (b.withTop (top));
-        }
-        g.setColour (cosmos::gold);
-        g.drawHorizontalLine ((int) yOf (-1.0f), bars.getX(), bars.getRight());
-        r.removeFromLeft (8.0f);
-        g.setFont (fonts::sans (10.5f));
-        auto line = [&] (const String& k, float v, Colour c)
-        {
-            auto row = r.removeFromTop (r.getHeight() / 4.0f);
-            g.setColour (colours::textDim);
-            g.drawText (k, row.removeFromLeft (30.0f), Justification::centredLeft);
-            g.setColour (c);
-            g.drawText (v <= -99.0f ? String ("-inf") : String (v, 1), row, Justification::centredRight);
-        };
-        line ("TP", tpMax, tpMax > -1.0f ? Colour (0xffff5c5c) : colours::text);
-        line ("M", lm, colours::text);
-        line ("S", ls, colours::text);
-        line ("INT", li, cosmos::neon);
-    }
 }
 
 // =============================================================================

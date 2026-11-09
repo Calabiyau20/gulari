@@ -37,6 +37,13 @@ public:
                  const SampleData* sample, const Wavetable* const* tables, const SpectralTable* spectral,
                  const ShotData* shot, const juce::AudioPlayHead::PositionInfo* pos);
     void allNotesOff();
+    // knob ranges (for modulating any parameter on its own 0..1 scale)
+    void setRanges (const std::vector<juce::NormalisableRange<float>>* r) { ranges = r; }
+    // parameters as the voices and effects hear them: glided toward the knobs and with the
+    // "any parameter" matrix destinations applied
+    const float* effectiveParams() const { return pm.data(); }
+    // newest voice's sources and the shared ones, for the knob rings in the editor
+    std::array<std::atomic<float>, MS_Count> liveSrc {};
 
     StepData steps;
     GrainViz viz;
@@ -52,8 +59,20 @@ private:
     void updateGlobalMods (int numSamples, double beatAtStart, double beatsPerSample);
     void runArp (int numSamples, double beatAtStart, double beatsPerSample, std::vector<std::pair<int, juce::MidiMessage>>& events);
 
+    void updateParams (int numSamples);
     double sr = 48000.0;
     const float* p = nullptr;
+    const float* base = nullptr;
+    std::array<float, kNumParams> sm {}, pm {};
+    bool pmReady = false;
+    const std::vector<juce::NormalisableRange<float>>* ranges = nullptr;
+    const Voice* newestVoice = nullptr;
+    // discrete switches that change the voices' sound (oscillator on, table, routing, filter model...)
+    // dip the voices for a few milliseconds instead of jumping: fade out, switch, fade in
+    void applyDiscrete();
+    float duck = 1.0f;
+    int duckPhase = 0;          // 0 idle, 1 fading out, 2 fading in
+    bool switchPending = false;
     VoiceContext ctx;
     std::array<Voice, kMaxVoices> voices;
     std::vector<int> monoStack;   // held notes for mono / legato

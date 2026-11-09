@@ -142,7 +142,12 @@ public:
     }
     inline float tick (int c, float x)
     {
-        if (driveGain > 1.001f) x = fastTanh (x * driveGain) / std::sqrt (driveGain);
+        // drive fades in from zero so the saturation never switches on with a jump
+        if (driveGain > 1.0001f)
+        {
+            const float m = std::min (1.0f, (driveGain - 1.0f) * (1.0f / 3.0f));
+            x += (fastTanh (x * driveGain) / std::sqrt (driveGain) - x) * m;
+        }
         if (mdl == 1) return lad[c].tick (x, typ, stp);
         float y = pick (a[c], x);
         if (stp) y = pick (b[c], y);
@@ -183,7 +188,13 @@ struct Bite
 
     inline void process (float& l, float& r)
     {
-        if (bypassed() || mix <= 0.0f) return;
+        if (bypassed() || mix <= 0.0f)
+        {
+            // keep the DC blocker following the signal so switching on never starts from stale state
+            const float in[2] = { l, r };
+            for (int c = 0; c < 2; ++c) { const float y = in[c] - dcX[c] + 0.995f * dcY[c]; dcX[c] = in[c]; dcY[c] = y; }
+            return;
+        }
         const float inL = l, inR = r;
         const float g = 1.0f + drive * drive * 24.0f;
         float x[2] = { l * g, r * g };
@@ -194,7 +205,11 @@ struct Bite
             if (fold > 0.0f)
                 v = std::sin (v * (1.0f + fold * 6.0f) * 1.5707963f) * fold + v * (1.0f - fold);
             if (soft > 0.0f)
-                v = fastTanh (v * (1.0f + soft * 3.0f)) * soft + clampf (v, -1.5f, 1.5f) * (1.0f - soft);
+            {
+                // the saturator (and its safety clamp) fade in over the first 10 % of the knob
+                const float sat = fastTanh (v * (1.0f + soft * 3.0f)) * soft + clampf (v, -1.5f, 1.5f) * (1.0f - soft);
+                v += (sat - v) * std::min (1.0f, soft * 10.0f);
+            }
             // DC blocker (asymmetry adds DC)
             const float y = v - dcX[c] + 0.995f * dcY[c];
             dcX[c] = v; dcY[c] = y;
@@ -211,7 +226,8 @@ struct Bite
                 hold[0] = std::round (x[0] * levels) / levels;
                 hold[1] = std::round (x[1] * levels) / levels;
             }
-            x[0] = hold[0]; x[1] = hold[1];
+            const float w = std::min (1.0f, crush * 10.0f);   // fades in, no jump when the knob leaves zero
+            x[0] += (hold[0] - x[0]) * w; x[1] += (hold[1] - x[1]) * w;
         }
         if (tone != 0.0f)
             for (int c = 0; c < 2; ++c)

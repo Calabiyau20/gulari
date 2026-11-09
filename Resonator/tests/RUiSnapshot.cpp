@@ -14,6 +14,13 @@ int main (int argc, char** argv)
     proc.loadFactoryPreset (preset);
     // a drag-and-drop route made like a user would, so the rings show
     proc.addModulation (cyr::MS_Lfo3, cyr::oscb_ru, 0.4f);
+    if (std::getenv ("CYR_SCAN") != nullptr)
+    {
+        auto set = [&] (const char* id, float v) { if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+        set ("osca_mode", 1); set ("osca_cover", 1.0f);
+        set ("oscb_mode", 1); set ("oscb_cover", 0.05f); set ("oscb_pos", 0.3f);
+        set ("oscc_mode", 1); set ("oscc_cover", 0.3f);
+    }
     // play a chord so the scopes and live dots have something to show
     for (int b = 0; b < 160; ++b)
     {

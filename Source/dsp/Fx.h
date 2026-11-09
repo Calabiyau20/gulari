@@ -89,6 +89,10 @@ private:
     MixBus mixbus;
     double sr = 48000.0;
     float fxMod[MD_Count] {};
+    // switching an effect on / off fades its wet path over 10 ms instead of jumping
+    float fxWet[FX_Count] {};
+    bool wetInit = false;
+    std::vector<float> dryL, dryR;
 
     // stereo
     Svf stLow[2];

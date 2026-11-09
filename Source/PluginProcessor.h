@@ -67,6 +67,18 @@ public:
     juce::String currentPresetName { "Init" };
     int uiSkin = 0;   // interface skin, saved with the session (not with presets)
 
+    // ---- drag-and-drop modulation onto any knob (uses the matrix slots) ----
+    int addModulation (int source, int paramIndex, float amount);   // returns the slot, -1 when full / not possible
+    void removeModulation (int slot);
+    void setModAmount (int slot, float amount);
+    juce::Array<int> slotsFor (int paramIndex) const;
+    float value (int pid) const { return raw[(size_t) pid]->load(); }
+
+    // ---- output ring for the scope / goniometer ----
+    static constexpr int kScopeRing = 8192;
+    std::array<float, kScopeRing> scopeL {}, scopeR {};
+    std::atomic<int> scopePos { 0 };
+
     juce::AudioProcessorValueTreeState apvts;
     pg::Synth synth;
     const float* paramCache() const { return cache.data(); }
@@ -81,6 +93,9 @@ private:
     std::array<std::atomic<float>*, pg::kNumParams> raw {};
     std::array<juce::RangedAudioParameter*, pg::kNumParams> params {};
     std::array<float, pg::kNumParams> cache {};
+    std::vector<juce::NormalisableRange<float>> ranges;
+    juce::SmoothedValue<float> masterGain { 0.5f };
+    std::vector<float> gainRamp;
 
 
     pg::SamplePtr sample;

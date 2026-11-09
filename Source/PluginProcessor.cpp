@@ -18,6 +18,9 @@ SynthgularityProcessor::SynthgularityProcessor()
         params[(size_t) i] = apvts.getParameter (idOf (i));
         jassert (raw[(size_t) i] != nullptr);
     }
+    for (int i = 0; i < kNumParams; ++i)
+        ranges.push_back (dynamic_cast<juce::RangedAudioParameter*> (params[(size_t) i])->getNormalisableRange());
+    synth.setRanges (&ranges);
     std::atomic_store (&sample, makeDefaultSample());
     builtInWavetables();   // build the tables now, not on the audio thread
     builtInSpectra();
@@ -51,6 +54,9 @@ void SynthgularityProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     fx.prepare (sampleRate, samplesPerBlock);
     meter.prepare (sampleRate);
     work.setSize (2, samplesPerBlock);
+    masterGain.reset (sampleRate, 0.02);
+    masterGain.setCurrentAndTargetValue (dbToGain (cache[master_gain]));
+    gainRamp.assign ((size_t) maxBlock, 1.0f);
 }
 
 void SynthgularityProcessor::refreshCache()
@@ -97,15 +103,18 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const int strums = synth.noteOnCounter.load();
     const bool strum = strums != lastStrumCount;
     lastStrumCount = strums;
-    fx.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n, cache.data(), synth.global, synth.lastNote.load(), strum);
+    // the effects hear the glided / modulated parameters too
+    fx.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n, synth.effectiveParams(), synth.global, synth.lastNote.load(), strum);
 
-    const float gain = dbToGain (cache[master_gain]);
+    masterGain.setTargetValue (dbToGain (synth.effectiveParams()[master_gain]));
+    if ((int) gainRamp.size() < n) gainRamp.resize ((size_t) n);
+    for (int i = 0; i < n; ++i) gainRamp[(size_t) i] = masterGain.getNextValue();
     for (int ch = 0; ch < 2; ++ch)
     {
         auto* d = buffer.getWritePointer (ch);
         for (int i = 0; i < n; ++i)
         {
-            float v = d[i] * gain;
+            float v = d[i] * gainRamp[(size_t) i];
             if (! std::isfinite (v)) v = 0.0f;
             // transparent below -3 dBFS, soft above
             const float a = std::abs (v);
@@ -114,6 +123,66 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
     }
     meter.process (buffer.getReadPointer (0), buffer.getReadPointer (1), n);
+    int w = scopePos.load (std::memory_order_relaxed);
+    const float* ol = buffer.getReadPointer (0);
+    const float* orr = buffer.getReadPointer (1);
+    for (int i = 0; i < n; ++i) { scopeL[(size_t) w] = ol[i]; scopeR[(size_t) w] = orr[i]; w = (w + 1) & (kScopeRing - 1); }
+    scopePos.store (w, std::memory_order_release);
+}
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop modulation: a drop fills the next free matrix slot
+// ---------------------------------------------------------------------------
+static void setPlain (juce::RangedAudioParameter* p, float v) { if (p != nullptr) p->setValueNotifyingHost (p->convertTo0to1 (v)); }
+
+int SynthgularityProcessor::addModulation (int source, int pid, float amount)
+{
+    const int dst = destForParam (pid);
+    if (source <= MS_None || source >= MS_Count || dst <= 0) return -1;
+    const int stride = mtx02_src - mtx01_src;
+    for (int s = 0; s < kMtxSlots; ++s)
+        if ((int) value (mtx01_src + s * stride) == source && (int) value (mtx01_dst + s * stride) == dst) return s;
+    for (int s = 0; s < kMtxSlots; ++s)
+    {
+        const int b = mtx01_src + s * stride;
+        if ((int) value (b) == MS_None || (int) value (b + 1) == MD_None)
+        {
+            setPlain (params[(size_t) b], (float) source);
+            setPlain (params[(size_t) (b + 1)], (float) dst);
+            setPlain (params[(size_t) (b + 2)], amount);
+            setPlain (params[(size_t) (b + 3)], 0.0f);
+            setPlain (params[(size_t) (b + 4)], 0.0f);
+            return s;
+        }
+    }
+    return -1;
+}
+
+void SynthgularityProcessor::removeModulation (int slot)
+{
+    if (slot < 0 || slot >= kMtxSlots) return;
+    const int b = mtx01_src + slot * (mtx02_src - mtx01_src);
+    setPlain (params[(size_t) b], 0.0f);
+    setPlain (params[(size_t) (b + 1)], 0.0f);
+    setPlain (params[(size_t) (b + 2)], 0.0f);
+    setPlain (params[(size_t) (b + 3)], 0.0f);
+}
+
+void SynthgularityProcessor::setModAmount (int slot, float amount)
+{
+    if (slot >= 0 && slot < kMtxSlots)
+        setPlain (params[(size_t) (mtx01_amt + slot * (mtx02_src - mtx01_src))], juce::jlimit (-1.0f, 1.0f, amount));
+}
+
+juce::Array<int> SynthgularityProcessor::slotsFor (int pid) const
+{
+    juce::Array<int> out;
+    const int dst = destForParam (pid);
+    if (dst <= 0) return out;
+    const int stride = mtx02_src - mtx01_src;
+    for (int s = 0; s < kMtxSlots; ++s)
+        if ((int) value (mtx01_dst + s * stride) == dst && (int) value (mtx01_src + s * stride) != MS_None) out.add (s);
+    return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ struct Biquad
 class MixBus
 {
 public:
-    void prepare (double sampleRate);
+    void prepare (double sampleRate, int maxBlock = 4096);
     // mods: matrix offsets for MD_Mb* destinations; beat: musical position at block start
     void process (float* L, float* R, int n, const float* p, const float* mods, double bpm, double beat);
 
@@ -53,6 +53,9 @@ private:
     void limiter (float* L, float* R, int n, const float* p);
 
     double sr = 48000.0;
+    float wet[16] {};   // per MixBus type (MB_Count)
+    bool wetInit = false;
+    std::vector<float> dryL, dryR;
     struct Line { std::vector<float> b; int w = 0, mask = 0;
         void init (int len) { int s = 1; while (s < len + 4) s <<= 1; b.assign ((size_t) s, 0.0f); mask = s - 1; w = 0; }
         void push (float x) { b[(size_t) w] = x; w = (w + 1) & mask; }

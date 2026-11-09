@@ -48,6 +48,10 @@ void ResonatorProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     applyQuality ((int) rc[quality]);
     fx.prepare (sampleRate, maxBlock);
     meter.prepare (sampleRate);
+    masterGain.reset (sampleRate, 0.02);
+    masterGain.setCurrentAndTargetValue (pg::dbToGain (rc[master]));
+    gainRamp.assign ((size_t) maxBlock, 1.0f);
+    fxSmoothReady = false;
 }
 
 void ResonatorProcessor::applyQuality (int mode)
@@ -62,7 +66,15 @@ void ResonatorProcessor::applyQuality (int mode)
 void ResonatorProcessor::refresh()
 {
     for (int i = 0; i < kNumR; ++i) rc[(size_t) i] = raw[(size_t) i]->load (std::memory_order_relaxed);
-    for (auto& h : hosted) pgCache[(size_t) h.first] = h.second->load (std::memory_order_relaxed);
+    // FX knobs glide toward their value (the rack reads them once per block)
+    for (auto& h : hosted)
+    {
+        const float v = h.second->load (std::memory_order_relaxed);
+        auto& c = pgCache[(size_t) h.first];
+        const bool cont = pg::paramInfos()[(size_t) h.first].type == pg::PType::Float;
+        c = (cont && fxSmoothReady) ? c + (v - c) * fxSmoothK : v;
+    }
+    fxSmoothReady = true;
 }
 
 void ResonatorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -78,6 +90,7 @@ void ResonatorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     const int want = juce::jlimit (0, 2, (int) rc[quality]);
     if (n > maxBlock) prepareToPlay (baseRate, n);
     else if (want != osMode) applyQuality (want);
+    fxSmoothK = 1.0f - std::exp (-(float) n / (float) (baseRate * 0.015));
 
     if (osMode == 0)
         synth.render (buffer, midi, rc.data(), pos ? &*pos : nullptr);
@@ -105,13 +118,14 @@ void ResonatorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     lastStrum = strums;
     fx.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n, pgCache.data(), fxGlobal, synth.lastNote.load(), strum);
 
-    const float gain = pg::dbToGain (rc[master]);
+    masterGain.setTargetValue (pg::dbToGain (rc[master]));
+    for (int i = 0; i < n; ++i) gainRamp[(size_t) i] = masterGain.getNextValue();
     for (int ch = 0; ch < 2; ++ch)
     {
         auto* d = buffer.getWritePointer (ch);
         for (int i = 0; i < n; ++i)
         {
-            float v = d[i] * gain;
+            float v = d[i] * gainRamp[(size_t) i];
             if (! std::isfinite (v)) v = 0.0f;
             const float a = std::abs (v);
             if (a > 0.7f) v = std::copysign (0.7f + 0.3f * std::tanh ((a - 0.7f) / 0.3f), v);

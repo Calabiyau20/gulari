@@ -10,17 +10,52 @@ namespace pg::ui
 using APVTS = juce::AudioProcessorValueTreeState;
 
 // One parameter as a knob, menu or switch depending on its type.
-class ParamControl : public juce::Component
+void fillDestinationMenu (juce::ComboBox&);   // matrix / lane destinations, grouped by module
+
+// Implemented by an editor that offers drag-and-drop modulation onto its knobs.
+struct ModRing { juce::Colour colour; float lo, hi; };
+struct ModHost
+{
+    virtual ~ModHost() = default;
+    virtual bool canModulate (const juce::String& paramId) const = 0;
+    virtual void dropModulation (int source, const juce::String& paramId) = 0;
+    virtual std::vector<ModRing> ringsFor (const juce::String& paramId) const = 0;
+    virtual float liveValue (const juce::String& paramId) const = 0;     // 0..1, or -1 when not modulated
+    virtual void showModMenu (const juce::String& paramId, juce::Component& knob) = 0;
+    virtual juce::Colour colourOf (int source) const = 0;
+};
+
+// Slider that hands right-clicks to its owner instead of dragging
+struct MenuSlider : public juce::Slider
+{
+    std::function<bool()> onMenu;   // returns true when it handled the click
+    void mouseDown (const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onMenu && onMenu()) { menuOpen = true; return; } menuOpen = false; Slider::mouseDown (e); }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! menuOpen) Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override { if (! menuOpen) Slider::mouseUp (e); menuOpen = false; }
+    bool menuOpen = false;
+};
+
+class ParamControl : public juce::Component, public juce::DragAndDropTarget
 {
 public:
     ParamControl (APVTS& state, const juce::String& paramId, const juce::String& label);
     void resized() override;
+    void paintOverChildren (juce::Graphics&) override;
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropHover = false; repaint(); }
+    void itemDropped (const SourceDetails&) override;
     enum Kind { Knob, Menu, Switch };
     Kind kind() const { return k; }
-    juce::Slider slider;
+    const juce::String& paramId() const { return id; }
+    bool isModulated() const;
+    MenuSlider slider;
     juce::ComboBox combo;
 
 private:
+    ModHost* host() const { return findParentComponentOfClass<ModHost>(); }
+    juce::String id;
+    bool dropHover = false;
     Kind k = Knob;
     juce::Label caption;
     juce::ToggleButton toggle;

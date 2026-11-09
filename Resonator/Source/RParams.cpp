@@ -10,6 +10,7 @@ namespace choices
     juce::StringArray divisions()   { return pg::choices::divisions(); }
     double divisionInBeats (int i)  { return pg::choices::divisionInBeats (i); }
     juce::StringArray quality()     { return { "Off", "2x", "4x" }; }
+    juce::StringArray oscModes()    { return { "Orbit", "Scan" }; }
     juce::StringArray modSources()
     {
         return { "None", "Env 1", "Env 2", "Env 3", "Env 4", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "LFO 5", "LFO 6",
@@ -26,7 +27,7 @@ namespace choices
 // modDests() reads the names through infos(), so its size is computed here instead
 static int choiceSize (juce::StringArray (*f)())
 {
-    if (f == &choices::modDests) return 1 + (osca_pan - osca_n + 1) * kOscs + (pd_dd - fm_aa + 1) + 4 + kLfos;
+    if (f == &choices::modDests) return 1 + (osca_pos - osca_n + 1) * kOscs + (pd_dd - fm_aa + 1) + 4 + kLfos;
     return f().size();
 }
 
@@ -87,7 +88,7 @@ const std::vector<int>& modDestParams()
         std::vector<int> d;
         // modDests() reads names through infos(), which never calls back here
         for (int o = 0; o < kOscs; ++o)
-            for (int p = osca_n; p <= osca_pan; ++p) d.push_back (p + o * kOscStride);
+            for (int p = osca_n; p <= osca_pos; ++p) d.push_back (p + o * kOscStride);
         for (int p = fm_aa; p <= pd_dd; ++p) d.push_back (p);
         for (int p : { (int) flt_cut, (int) flt_res, (int) flt_drive, (int) master }) d.push_back (p);
         for (int l = 0; l < kLfos; ++l) d.push_back (lfo1_rate + l * kLfoStride);

@@ -49,12 +49,13 @@ private:
     AnimatedTabs tabs;
     juce::OwnedArray<juce::Component> pages;
     juce::OwnedArray<cyr::ui::SourceChip> chips;
-    std::unique_ptr<cyr::ui::AnalyzerStrip> analyzer;
+    std::unique_ptr<pg::ui::AnalyzerStrip> analyzer;
     std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
 
     std::vector<std::vector<juce::Component*>> live;   // per tab: repainted by the timer
     std::vector<std::vector<cyr::ui::ModKnob*>> knobs;  // per tab: modulation rings
     std::vector<cyr::ui::SurfaceView*> surfaces;
+    std::vector<cyr::ui::ModKnob*> oscKnobs;
     cyr::ui::MatrixView* matrixView = nullptr;
     juce::Array<juce::File> userPresets;
     std::unique_ptr<juce::FileChooser> chooser;

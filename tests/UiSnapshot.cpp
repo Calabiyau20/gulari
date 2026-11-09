@@ -11,6 +11,10 @@ int main (int argc, char** argv)
     proc.prepareToPlay (48000.0, 256);
     proc.loadFactoryPreset (argc > 2 ? juce::String (argv[2]).getIntValue() : 1);
     if (argc > 3) { juce::String e; proc.loadSample (juce::File (juce::String (argv[3])), e); }
+    // two drag-and-drop routes, like a user would make them: a voice destination and an "any knob" one
+    proc.addModulation (pg::MS_Lfo1, pg::indexOf ("wtA_pos"), 0.4f);
+    proc.addModulation (pg::MS_Lfo2, pg::indexOf ("wtA_fine"), 0.25f);
+    proc.addModulation (pg::MS_ModEnv, pg::indexOf ("flt_cutoff"), 0.35f);
     // play a chord briefly so displays have content
     juce::AudioBuffer<float> b (2, 256);
     for (int i = 0; i < 80; ++i)
@@ -21,7 +25,7 @@ int main (int argc, char** argv)
     }
     if (argc > 4) proc.uiSkin = juce::String (argv[4]).getIntValue();
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-    ed->setSize (1280, 800);
+    ed->setSize (1280, 834);
     auto* tabs = [&]() -> juce::TabbedComponent*
     {
         for (auto* c : ed->getChildren()) if (auto* t = dynamic_cast<juce::TabbedComponent*> (c)) return t;

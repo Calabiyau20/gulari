@@ -20,9 +20,12 @@ void FxChain::prepare (double sampleRate, int maxBlock)
     clouds.prepare (sr);
     filt[0].prepare (sr); filt[1].prepare (sr);
     reverb.prepare (sr);
-    mixbus.prepare (sr);
+    mixbus.prepare (sr, maxBlock);
     tmpL.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
     tmpR.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+    dryL.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+    dryR.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+    wetInit = false;
 }
 
 void FxChain::computeMods (const float* p, const GlobalMod& g)
@@ -42,11 +45,11 @@ void FxChain::computeMods (const float* p, const GlobalMod& g)
             default: return 0.0f;   // per-voice sources do not reach the FX
         }
     };
-    for (int s = 0; s < 16; ++s)
+    for (int s = 0; s < kMtxSlots; ++s)
     {
         const int base = mtx01_src + s * (mtx02_src - mtx01_src);
         const int dst = (int) p[base + 1];
-        if (dst < MD_VoiceCount) continue;
+        if (dst < MD_VoiceCount || dst >= MD_Count) continue;
         const int src = (int) p[base], pol = (int) p[base + 4];
         float v = applyPolarity (val (src), src, pol, p) * p[base + 2];
         const int via = (int) p[base + 3];
@@ -57,7 +60,7 @@ void FxChain::computeMods (const float* p, const GlobalMod& g)
     {
         const int base = seq1_on + l * (seq2_on - seq1_on);
         const int dst = (int) p[base + (seq1_dst - seq1_on)];
-        if (dst < MD_VoiceCount || p[base] < 0.5f) continue;
+        if (dst < MD_VoiceCount || dst >= MD_Count || p[base] < 0.5f) continue;
         fxMod[dst] += g.seq[l] * p[base + (seq1_amt - seq1_on)];
     }
 }
@@ -86,20 +89,42 @@ void FxChain::runRack (float* L, float* R, int n, const float* p, const GlobalMo
         const int type = juce::jlimit (0, FX_Count - 1, (int) p[fx_slot1 + s]);
         if (type == FX_Empty || used[type]) continue;
         used[type] = true;
-        switch (type)
+        static const int onId[FX_Count] = { 0, ff1_on, ff2_on, fx_st_on, fx_fl_on, fx_ph_on, fx_dl_on, fx_rn_on, fx_gr_on, fx_rv_on };
+        const bool on = p[onId[type]] > 0.5f;
+        float& w = fxWet[type];
+        if (! wetInit) w = on ? 1.0f : 0.0f;
+        if (! on && w <= 0.0f) continue;
+        auto run = [&]
         {
-            case FX_Filter1: if (p[ff1_on] > 0.5f) runFilter (0, L, R, n, p); break;
-            case FX_Filter2: if (p[ff2_on] > 0.5f) runFilter (1, L, R, n, p); break;
-            case FX_Stereo:  if (p[fx_st_on] > 0.5f) runStereo (L, R, n, p); break;
-            case FX_Flanger: if (p[fx_fl_on] > 0.5f) runFlanger (L, R, n, p); break;
-            case FX_Phaser:  if (p[fx_ph_on] > 0.5f) runPhaser (L, R, n, p); break;
-            case FX_Delay:   if (p[fx_dl_on] > 0.5f) runDelay (L, R, n, p, g); break;
-            case FX_Rings:   if (p[fx_rn_on] > 0.5f) runRings (L, R, n, p, lastNote, strum); break;
-            case FX_Clouds:  if (p[fx_gr_on] > 0.5f) runClouds (L, R, n, p); break;
-            case FX_Reverb:  if (p[fx_rv_on] > 0.5f) runReverb (L, R, n, p); break;
-            default: break;
+            switch (type)
+            {
+                case FX_Filter1: runFilter (0, L, R, n, p); break;
+                case FX_Filter2: runFilter (1, L, R, n, p); break;
+                case FX_Stereo:  runStereo (L, R, n, p); break;
+                case FX_Flanger: runFlanger (L, R, n, p); break;
+                case FX_Phaser:  runPhaser (L, R, n, p); break;
+                case FX_Delay:   runDelay (L, R, n, p, g); break;
+                case FX_Rings:   runRings (L, R, n, p, lastNote, strum); break;
+                case FX_Clouds:  runClouds (L, R, n, p); break;
+                case FX_Reverb:  runReverb (L, R, n, p); break;
+                default: break;
+            }
+        };
+        if (on && w >= 1.0f) { run(); continue; }
+        // fading in or out: blend the processed signal with the dry one
+        if ((int) dryL.size() < n) { dryL.resize ((size_t) n); dryR.resize ((size_t) n); }
+        std::copy (L, L + n, dryL.begin());
+        std::copy (R, R + n, dryR.begin());
+        run();
+        const float step = 1.0f / (0.01f * (float) sr), target = on ? 1.0f : 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            w = target > w ? juce::jmin (target, w + step) : juce::jmax (target, w - step);
+            L[i] = dryL[(size_t) i] + (L[i] - dryL[(size_t) i]) * w;
+            R[i] = dryR[(size_t) i] + (R[i] - dryR[(size_t) i]) * w;
         }
     }
+    wetInit = true;
 }
 
 void FxChain::runStereo (float* L, float* R, int n, const float* p)

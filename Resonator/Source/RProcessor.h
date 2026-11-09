@@ -78,6 +78,10 @@ private:
     std::array<float, pg::kNumParams> pgCache {};
 
     pg::FxChain fx;
+    juce::SmoothedValue<float> masterGain { 0.5f };
+    std::vector<float> gainRamp;
+    bool fxSmoothReady = false;
+    float fxSmoothK = 0.2f;
     pg::GlobalMod fxGlobal;
     int lastStrum = 0;
     std::unique_ptr<juce::dsp::Oversampling<float>> os[2];

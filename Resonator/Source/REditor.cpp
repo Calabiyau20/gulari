@@ -213,17 +213,17 @@ ResonatorEditor::ResonatorEditor (ResonatorProcessor& p) : AudioProcessorEditor 
         for (int o = 0; o < 4; ++o)
         {
             const String pre = String ("osc") + letters[o] + "_";
-            auto* s = page->add (new Section ("Oscillator " + String (letters[o]).toUpperCase() + "  -  Calabi-Yau orbit", accents[o]));
-            s->cols = 6;
+            auto* s = page->add (new Section ("Oscillator " + String (letters[o]).toUpperCase() + "  -  Calabi-Yau manifold", accents[o]));
+            s->cols = 7;
             auto* sv = s->own (new SurfaceView (proc, o));
             s->display = sv;
-            s->displayW = 200;
+            s->displayW = 190;
             surfaces.push_back (sv);
             s->titleExtra = s->own (new cyr::ui::Switch (st, pre + "on", "ON"));
             const std::pair<const char*, const char*> ks[] = {
-                { "n", "DIMENSION n" }, { "k1", "PATCH k1" }, { "k2", "PATCH k2" }, { "alpha", "ALPHA" }, { "ru", "RADIUS u" }, { "rv", "RADIUS v" },
-                { "ratio", "RATIO v:u" }, { "spin", "SPIN Hz" }, { "width", "WIDTH" }, { "uni", "UNISON" }, { "det", "DETUNE" }, { "level", "LEVEL" },
-                { "oct", "OCTAVE" }, { "semi", "SEMI" }, { "fine", "FINE" }, { "pan", "PAN" } };
+                { "mode", "MODE" }, { "n", "DIMENSION n" }, { "k1", "PATCH k1" }, { "k2", "PATCH k2" }, { "alpha", "ALPHA" }, { "cover", "COVERAGE" }, { "pos", "POSITION" },
+                { "ru", "RADIUS u" }, { "rv", "RADIUS v" }, { "ratio", "RATIO v:u" }, { "spin", "SPIN Hz" }, { "width", "WIDTH" }, { "uni", "UNISON" }, { "det", "DETUNE" },
+                { "oct", "OCTAVE" }, { "semi", "SEMI" }, { "fine", "FINE" }, { "level", "LEVEL" }, { "pan", "PAN" } };
             for (auto& k : ks) knob (*s, kn, pre + k.first, k.second, accents[o]);
             s->add (new cyr::ui::Switch (st, pre + "rphase", "RANDOM PHASE"));
             secs.push_back (s);
@@ -240,6 +240,7 @@ ResonatorEditor::ResonatorEditor (ResonatorProcessor& p) : AudioProcessorEditor 
             }
         };
         addTab ("OSCILLATORS", page, lv, kn);
+        oscKnobs = kn;
     }
 
     // ---------------- FM / PD MATRIX ----------------
@@ -510,8 +511,8 @@ ResonatorEditor::ResonatorEditor (ResonatorProcessor& p) : AudioProcessorEditor 
     });
 
     // ---------------- persistent bottom: modulation sources + analyzers ----------------
-    for (int s = 1; s < MS_Count; ++s) addAndMakeVisible (chips.add (new SourceChip (proc, s)));
-    analyzer = std::make_unique<AnalyzerStrip> (proc);
+    for (int s = 1; s < MS_Count; ++s) addAndMakeVisible (chips.add (new cyr::ui::SourceChip (proc, s)));
+    analyzer = std::make_unique<pg::ui::AnalyzerStrip> (pg::ui::ScopeFeed { &proc.meter, proc.scopeL.data(), proc.scopeR.data(), &proc.scopePos, ResonatorProcessor::kScopeRing });
     addAndMakeVisible (*analyzer);
 
     setResizable (true, true);
@@ -652,7 +653,21 @@ void ResonatorEditor::timerCallback()
     if (auto* c = tabs.getCurrentContentComponent())
         if (c->getAlpha() < 1.0f) c->setAlpha (jmin (1.0f, c->getAlpha() + 0.16f));
     const int tab = tabs.getCurrentTabIndex();
-    if (tab == 0) for (auto* s : surfaces) s->tick (animT);
+    if (tab == 0)
+    {
+        for (auto* s : surfaces) s->tick (animT);
+        // knobs that do nothing in the current mode fade back
+        for (auto* k : oscKnobs)
+        {
+            const int rid = k->paramIndex();
+            const int o = (rid - osca_on) / kOscStride, local = rid - o * kOscStride;
+            const bool scan = (int) proc.value (osca_mode + o * kOscStride) == 1;
+            const bool orbitOnly = local == osca_ru || local == osca_rv || local == osca_ratio || local == osca_k1 || local == osca_k2;
+            const bool scanOnly = local == osca_cover || local == osca_pos;
+            const float want = (scan && orbitOnly) || (! scan && scanOnly) ? 0.38f : 1.0f;
+            if (std::abs (k->getAlpha() - want) > 0.01f) k->setAlpha (k->getAlpha() + (want - k->getAlpha()) * 0.3f);
+        }
+    }
     if (matrixView != nullptr) matrixView->time = animT;
     if (tab >= 0 && tab < (int) live.size())
         for (auto* c : live[(size_t) tab]) if (c != nullptr && c->isShowing() && dynamic_cast<SurfaceView*> (c) == nullptr) c->repaint();

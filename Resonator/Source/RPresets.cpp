@@ -225,29 +225,62 @@ std::vector<FactoryPreset> make()
        .mod (MS_Random, "osca_alpha", 0.3f).delay (0.35f, 0.55f, 6).reverb (0.25f);
       add (b); }
 
+    // ---- SCAN: the whole manifold used as a wavetable ----
+    { Build b ("Scan - Manifold Sweep");
+      b.osc ('a', { { "mode", 1 }, { "n", 5 }, { "cover", 0.02f }, { "pos", 0.1f }, { "width", 0.8f }, { "uni", 2 }, { "det", 10 } })
+       .amp (0.05f, 1.0f, 0.9f, 1.2f).set ({ { "flt_cut", 6000 } })
+       .lfo (1, { { "rate", 0.05f }, { "shape", 1 } }).mod (MS_Lfo1, "osca_pos", 0.45f)
+       .reverb (0.3f, 4.0f);
+      add (b); }
+
+    { Build b ("Scan - Full Coverage Drone");
+      b.osc ('a', { { "mode", 1 }, { "n", 3 }, { "cover", 1.0f }, { "oct", -2 }, { "width", 1.0f } })
+       .osc ('b', { { "n", 3 }, { "ru", 0.5f }, { "rv", 0.3f }, { "oct", -1 }, { "level", 0.5f } })
+       .amp (2.0f, 1.0f, 1.0f, 5.0f).set ({ { "flt_cut", 2400 }, { "flt_res", 0.2f } })
+       .lfo (2, { { "rate", 0.04f }, { "shape", 6 } }).mod (MS_Lfo2, "osca_alpha", 0.3f).mod (MS_Lfo2, "flt_cut", 0.15f)
+       .reverb (0.45f, 8.0f, 0.95f);
+      add (b); }
+
+    { Build b ("Scan - Coverage Pluck");
+      b.osc ('a', { { "mode", 1 }, { "n", 4 }, { "cover", 0.0f }, { "pos", 0.4f }, { "width", 0.7f } })
+       .amp (0.001f, 0.6f, 0.0f, 0.4f).env (1, 0.001f, 0.35f, 0.0f, 0.3f).mod (MS_Env1, "osca_cover", 0.12f)
+       .set ({ { "flt_cut", 7000 } }).delay (0.25f, 0.4f, 8).reverb (0.2f);
+      add (b); }
+
+    { Build b ("Scan - Wavetable Bass");
+      b.osc ('a', { { "mode", 1 }, { "n", 6 }, { "cover", 0.01f }, { "pos", 0.3f }, { "oct", -1 }, { "width", 0.1f }, { "rphase", 0 } })
+       .osc ('b', { { "n", 2 }, { "ru", 0.4f }, { "rv", 0.0f }, { "oct", -2 }, { "level", 0.5f }, { "rphase", 0 } })
+       .set ({ { "poly", 1 }, { "glide", 0.04f }, { "flt_cut", 1500 }, { "flt_res", 0.3f } })
+       .amp (0.002f, 0.4f, 0.7f, 0.12f).env (1, 0.001f, 0.25f, 0.0f, 0.2f).mod (MS_Env1, "osca_pos", 0.25f).mod (MS_Env1, "flt_cut", 0.35f);
+      add (b); }
+
     // loudness match: master trims measured with ResonatorRenderTest (loudest 400 ms at -15 dB RMS)
     static const std::map<juce::String, float> trims {
-        { "Arp - Spin Network", 3.7f },
-        { "Bass - Calabi Sub", -4.8f },
+        { "Arp - Spin Network", 3.3f },
+        { "Bass - Calabi Sub", -4.4f },
         { "Bass - Fermat Cubic", -1.2f },
-        { "Bass - Kaluza-Klein", 1.0f },
-        { "Bass - Psy Brane Growl", -1.2f },
-        { "Bell - Compactified", -9.1f },
-        { "Drone - Orbifold", -7.0f },
+        { "Bass - Kaluza-Klein", 1.2f },
+        { "Bass - Psy Brane Growl", -1.7f },
+        { "Bell - Compactified", -9.7f },
+        { "Drone - Orbifold", -6.9f },
         { "FX - Dimension Seven", -11.0f },
         { "FX - Tachyon Sweep", -3.4f },
-        { "Keys - Mirror Symmetry", -6.2f },
-        { "Keys - Moduli Organ", -11.3f },
-        { "Lead - Brane Runner", 0.0f },
-        { "Lead - Event Horizon", 1.8f },
+        { "Keys - Mirror Symmetry", -5.4f },
+        { "Keys - Moduli Organ", -14.0f },
+        { "Lead - Brane Runner", 0.2f },
+        { "Lead - Event Horizon", -0.2f },
         { "Lead - Wormhole PD", 2.6f },
-        { "Pad - Hyperspace Choir", -1.6f },
-        { "Pad - Quintic Bloom", 3.8f },
-        { "Pad - String Landscape", -1.9f },
-        { "Pluck - Hodge Diamond", -1.3f },
-        { "Pluck - Kahler", 0.7f },
-        { "Stab - Singularity Chord", -10.7f },
-        { "Texture - Fold Space", 0.7f },
+        { "Pad - Hyperspace Choir", -1.5f },
+        { "Pad - Quintic Bloom", 3.3f },
+        { "Pad - String Landscape", -2.5f },
+        { "Pluck - Hodge Diamond", 0.2f },
+        { "Pluck - Kahler", 1.8f },
+        { "Scan - Coverage Pluck", -0.2f },
+        { "Scan - Full Coverage Drone", -1.4f },
+        { "Scan - Manifold Sweep", -0.3f },
+        { "Scan - Wavetable Bass", -2.1f },
+        { "Stab - Singularity Chord", -12.5f },
+        { "Texture - Fold Space", 1.4f },
     };
     for (auto& p : v)
     {

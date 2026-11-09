@@ -157,7 +157,7 @@ void Voice::controlUpdate (const VoiceContext& ctx)
 
     // ---- modulation matrix ----
     for (auto& m : mod) m = 0.0f;
-    for (int s = 0; s < 16; ++s)
+    for (int s = 0; s < kMtxSlots; ++s)
     {
         const int base = mtx01_src + s * (mtx02_src - mtx01_src);
         const int dst = (int) p[base + 1];

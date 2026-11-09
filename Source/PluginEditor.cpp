@@ -3,6 +3,7 @@
 #include <map>
 
 using namespace juce;
+using namespace pg;
 using namespace pg::ui;
 
 namespace
@@ -226,6 +227,27 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
     initButton.onClick = [this] { proc.initPreset(); presetBox.setText ("Init", dontSendNotification); };
     master = std::make_unique<MasterSection> (proc, st);
     addAndMakeVisible (*master);
+    const pg::ui::ScopeFeed feed { &proc.meter, proc.scopeL.data(), proc.scopeR.data(), &proc.scopePos, SynthgularityProcessor::kScopeRing };
+    gonio = std::make_unique<pg::ui::GonioMini> (feed);
+    addAndMakeVisible (*gonio);
+    // modulation sources: drag a chip onto any knob, on any page
+    {
+        static const char* shortNames[] = { "-", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "CHAOS", "LORENZ X", "LORENZ Y", "LORENZ Z",
+                                            "SEQ 1", "SEQ 2", "SEQ 3", "SEQ 4", "SEQ 5", "SEQ 6", "SEQ 7", "SEQ 8",
+                                            "MENV 1", "F.ENV", "A.ENV", "VEL", "NOTE", "WHEEL", "AFTER", "BEND", "RAND", "MENV 2", "MENV 3", "MENV 4" };
+        static const int order[] = { MS_Lfo1, MS_Lfo2, MS_Lfo3, MS_Lfo4, MS_Chaos1, MS_Chaos2, MS_Chaos2Y, MS_Chaos2Z,
+                                     MS_ModEnv, MS_ModEnv2, MS_ModEnv3, MS_ModEnv4, MS_FiltEnv, MS_AmpEnv,
+                                     MS_Seq1, MS_Seq2, MS_Seq3, MS_Seq4, MS_Seq5, MS_Seq6, MS_Seq7, MS_Seq8,
+                                     MS_Velocity, MS_Note, MS_ModWheel, MS_Aftertouch, MS_PitchBend, MS_Random };
+        for (int src : order)
+        {
+            const bool bip = src == MS_Lfo1 || src == MS_Lfo2 || src == MS_Lfo3 || src == MS_Lfo4 || (src >= MS_Chaos1 && src <= MS_Chaos2Z)
+                             || src == MS_Note || src == MS_PitchBend || src == MS_Random;
+            auto* c = chips.add (new pg::ui::SourceChip (src, shortNames[src], colourOf (src),
+                                                         [this, src] { return proc.synth.liveSrc[(size_t) src].load (std::memory_order_relaxed); }, bip));
+            addAndMakeVisible (c);
+        }
+    }
     voicesLabel.setColour (Label::textColourId, colours::textDim);
     voicesLabel.setJustificationType (Justification::centred);
     addAndMakeVisible (voicesLabel);
@@ -506,8 +528,14 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         auto* hAmt = makeLabel (*page, "AMOUNT", 11.5f);
         auto* hVia = makeLabel (*page, "VIA (scales the amount)", 11.5f);
         std::vector<MatrixRow*> rows;
-        for (int s = 0; s < 16; ++s) rows.push_back (page->add (new MatrixRow (st, s)));
-        auto* tip = makeLabel (*page, "Per-voice sources (envelopes, velocity, note, random) only reach voice destinations. FX destinations use the shared sources.", 12.0f);
+        auto* holder = new Component();
+        auto* view = page->add (new Viewport());
+        view->setViewedComponent (holder, true);
+        view->setScrollBarsShown (true, false);
+        for (int s = 0; s < kMtxSlots; ++s) { rows.push_back (new MatrixRow (st, s)); holder->addAndMakeVisible (rows.back()); }
+        for (auto* row : rows) owned.add (row);
+        auto* tip = makeLabel (*page, "32 slots. Dropping a MOD SOURCES chip on a knob fills the next free one. Voice destinations follow each note; "
+                                      "the others (any knob, the FX) are shared by all voices.", 12.0f);
         page->layout = [=] (Rectangle<int> r)
         {
             tip->setBounds (r.removeFromBottom (24).reduced (6, 0));
@@ -524,8 +552,10 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
                 hVia->setBounds (h.removeFromRight (w * 16 / 100));
                 hAmt->setBounds (h.reduced (6, 0));
             }
-            const int h = r.getHeight() / 16;
-            for (auto* row : rows) row->setBounds (r.removeFromTop (h));
+            view->setBounds (r);
+            const int h = 30, w = r.getWidth() - view->getScrollBarThickness();
+            holder->setSize (w, h * (int) rows.size());
+            for (int i = 0; i < (int) rows.size(); ++i) rows[(size_t) i]->setBounds (0, i * h, w, h);
         };
         tabs.addTab ("MATRIX", Colours::transparentBlack, page, false);
         live.push_back ({});
@@ -752,9 +782,31 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         live.push_back ({ flow });
     }
 
+    // ---------------- ANALYZER: scope, spectrum, goniometer, loudness ----------------
+    {
+        auto* page = new Page(); pages.add (page);
+        auto* strip = page->add (new pg::ui::AnalyzerStrip (feed));
+        page->layout = [strip] (Rectangle<int> r) { strip->setBounds (r.reduced (6)); };
+        tabs.addTab ("ANALYZER", Colours::transparentBlack, page, false);
+        live.push_back ({});
+    }
+
+    // every knob on every page, for the modulation rings and the drag glow
+    for (int t = 0; t < tabs.getNumTabs(); ++t)
+    {
+        std::vector<ParamControl*> list;
+        std::function<void (Component*)> walk = [&] (Component* c)
+        {
+            if (auto* pc = dynamic_cast<ParamControl*> (c)) { if (pc->kind() == ParamControl::Knob) list.push_back (pc); return; }
+            for (auto* ch : c->getChildren()) walk (ch);
+        };
+        walk (tabs.getTabContentComponent (t));
+        tabKnobs.push_back (list);
+    }
+
     setResizable (true, true);
-    setResizeLimits (1180, 740, 2200, 1500);
-    setSize (1280, 800);
+    setResizeLimits (1180, 740 + kChipsH, 2200, 1500);
+    setSize (1280, 800 + kChipsH);
     startTimerHz (30);
 }
 
@@ -860,6 +912,131 @@ void SynthgularityEditor::paint (Graphics& g)
         g.drawText ("BY CALABI YAU", sig, Justification::centredLeft);
     }
     if (sk != 1) brand::checker (g, Rectangle<float> (0.0f, (float) kHeaderH, (float) getWidth(), 8.0f), 4.0f);
+    g.setColour (colours::textDim);
+    g.setFont (fonts::label (8.5f));
+    g.drawText ("MOD SOURCES", Rectangle<float> (12.0f, (float) (getHeight() - kChipsH), 86.0f, (float) kChipsH), Justification::centredLeft);
+}
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop modulation
+// ---------------------------------------------------------------------------
+Colour SynthgularityEditor::colourOf (int s) const
+{
+    switch (s)
+    {
+        case MS_Lfo1: return cosmos::neon;     case MS_Lfo2: return cosmos::teal;
+        case MS_Lfo3: return cosmos::azure;    case MS_Lfo4: return cosmos::orchid;
+        case MS_Chaos1: return cosmos::fuchsia;
+        case MS_Chaos2: case MS_Chaos2Y: case MS_Chaos2Z: return Colour (0xffff5c8a);
+        case MS_ModEnv: case MS_ModEnv2: case MS_ModEnv3: case MS_ModEnv4: return cosmos::gold;
+        case MS_FiltEnv: return Colour (0xffff8a3d);
+        case MS_AmpEnv: return cosmos::starlight;
+        case MS_Velocity: return Colour (0xff9fd7ff);
+        case MS_Note: return Colour (0xffb7a6ff);
+        case MS_ModWheel: return Colour (0xff7ef0d0);
+        case MS_Aftertouch: return Colour (0xffffc7f0);
+        case MS_PitchBend: return Colour (0xffd6e685);
+        case MS_Random: return Colour (0xffc9c9c9);
+        default:
+            if (s >= MS_Seq1 && s <= MS_Seq8) return cosmos::electric.interpolatedWith (cosmos::neon, (float) (s - MS_Seq1) / 7.0f);
+            return cosmos::steel;
+    }
+}
+
+bool SynthgularityEditor::canModulate (const String& id) const
+{
+    const int pid = indexOf (id);
+    return pid >= 0 && destForParam (pid) > 0;
+}
+
+void SynthgularityEditor::dropModulation (int source, const String& id)
+{
+    const int pid = indexOf (id);
+    const bool bip = isBipolarSource (source, proc.paramCache());
+    if (proc.addModulation (source, pid, bip ? 0.25f : 0.35f) < 0)
+        showError ("All 32 matrix slots are in use. Clear one on the MATRIX page, or right-click a knob to remove a route.");
+}
+
+std::vector<ui::ModRing> SynthgularityEditor::ringsFor (const String& id) const
+{
+    std::vector<ui::ModRing> out;
+    const int pid = indexOf (id);
+    if (pid < 0) return out;
+    auto* prm = proc.apvts.getParameter (id);
+    const float base = prm != nullptr ? prm->getValue() : 0.0f;
+    const int stride = mtx02_src - mtx01_src;
+    for (int s : proc.slotsFor (pid))
+    {
+        const int src = (int) proc.value (mtx01_src + s * stride), pol = (int) proc.value (mtx01_pol + s * stride);
+        const float amt = proc.value (mtx01_amt + s * stride);
+        const bool bip = pol == 2 || (pol == 0 && isBipolarSource (src, proc.paramCache()));
+        const float lo = bip ? base - std::abs (amt) : jmin (base, base + amt), hi = bip ? base + std::abs (amt) : jmax (base, base + amt);
+        out.push_back ({ colourOf (src), lo, hi });
+    }
+    return out;
+}
+
+float SynthgularityEditor::liveValue (const String& id) const
+{
+    const int pid = indexOf (id);
+    if (pid < 0) return -1.0f;
+    auto* prm = proc.apvts.getParameter (id);
+    if (prm == nullptr) return -1.0f;
+    if (destForParam (pid) >= MD_Count)
+        return prm->convertTo0to1 (proc.synth.effectiveParams()[pid]);
+    // voice destinations: knob plus every route times the source's present value
+    float v = prm->getValue();
+    const int stride = mtx02_src - mtx01_src;
+    for (int s : proc.slotsFor (pid))
+    {
+        const int src = (int) proc.value (mtx01_src + s * stride), pol = (int) proc.value (mtx01_pol + s * stride);
+        v += applyPolarity (proc.synth.liveSrc[(size_t) src].load(), src, pol, proc.paramCache()) * proc.value (mtx01_amt + s * stride);
+    }
+    return jlimit (0.0f, 1.0f, v);
+}
+
+void SynthgularityEditor::showModMenu (const String& id, Component& knob)
+{
+    const int pid = indexOf (id);
+    const auto slots = proc.slotsFor (pid);
+    static const char* srcNames[] = { "-", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Chaos 1", "Lorenz X", "Lorenz Y", "Lorenz Z",
+                                      "Seq 1", "Seq 2", "Seq 3", "Seq 4", "Seq 5", "Seq 6", "Seq 7", "Seq 8",
+                                      "Mod Env 1", "Filter Env", "Amp Env", "Velocity", "Note", "Mod Wheel", "Aftertouch", "Pitch Bend", "Random",
+                                      "Mod Env 2", "Mod Env 3", "Mod Env 4" };
+    static const float amounts[] = { -1.0f, -0.5f, -0.25f, -0.1f, 0.1f, 0.25f, 0.5f, 0.75f, 1.0f };
+    PopupMenu m;
+    m.addSectionHeader (proc.apvts.getParameter (id)->getName (40));
+    m.addItem (1, "Reset to default");
+    if (slots.isEmpty()) m.addItem (2, "Drag a MOD SOURCES chip onto this knob to modulate it", false, false);
+    const int stride = mtx02_src - mtx01_src;
+    for (int i = 0; i < slots.size(); ++i)
+    {
+        const int s = slots[i];
+        const int src = (int) proc.value (mtx01_src + s * stride);
+        const float amt = proc.value (mtx01_amt + s * stride);
+        PopupMenu sub;
+        for (int k = 0; k < 9; ++k)
+            sub.addItem (100 + i * 20 + k, (amounts[k] > 0 ? "+" : "") + String (roundToInt (amounts[k] * 100)) + " %", true, std::abs (amounts[k] - amt) < 0.01f);
+        sub.addSeparator();
+        sub.addItem (100 + i * 20 + 10, "Invert");
+        sub.addItem (100 + i * 20 + 11, "Remove");
+        m.addSubMenu (String (srcNames[src]) + "   " + (amt >= 0 ? "+" : "") + String (roundToInt (amt * 100)) + " %   (slot " + String (s + 1) + ")", sub);
+    }
+    SafePointer<Component> safe (&knob);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&knob), [this, slots, id, safe] (int r)
+    {
+        if (r == 1) { if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->getDefaultValue()); }
+        else if (r >= 100)
+        {
+            const int i = (r - 100) / 20, k = (r - 100) % 20;
+            if (i >= slots.size()) return;
+            const int stride2 = mtx02_src - mtx01_src;
+            if (k < 9) proc.setModAmount (slots[i], amounts[k]);
+            else if (k == 10) proc.setModAmount (slots[i], -proc.value (mtx01_amt + slots[i] * stride2));
+            else if (k == 11) proc.removeModulation (slots[i]);
+        }
+        if (safe != nullptr) safe->repaint();
+    });
 }
 
 void SynthgularityEditor::setSkin (int index)
@@ -887,8 +1064,10 @@ void SynthgularityEditor::resized()
     auto header = r.removeFromTop (kHeaderH).reduced (12, 12);
     r.removeFromTop (10);
     header.removeFromLeft (318);
-    master->setBounds (header.removeFromRight (jmin (600, header.getWidth() - 380)).withTrimmedTop (-8).withTrimmedBottom (-8));
-    header.removeFromRight (10);
+    master->setBounds (header.removeFromRight (jmin (560, header.getWidth() - 440)).withTrimmedTop (-8).withTrimmedBottom (-8));
+    header.removeFromRight (6);
+    gonio->setBounds (header.removeFromRight (64).withTrimmedTop (-8).withTrimmedBottom (-8));
+    header.removeFromRight (8);
     auto presetArea = header.withSizeKeepingCentre (jmin (480, header.getWidth()), 30).translated (0, -9);
     voicesLabel.setBounds (presetArea.translated (0, 31).withHeight (16));
     prevButton.setBounds (presetArea.removeFromLeft (30));
@@ -900,6 +1079,12 @@ void SynthgularityEditor::resized()
     nextButton.setBounds (presetArea.removeFromRight (30));
     presetArea.removeFromRight (4);
     presetBox.setBounds (presetArea);
+    {
+        auto bar = r.removeFromBottom (kChipsH).reduced (10, 2);
+        bar.removeFromLeft (88);   // "MOD SOURCES" label (painted)
+        const int w = bar.getWidth() / juce::jmax (1, chips.size());
+        for (auto* c : chips) c->setBounds (bar.removeFromLeft (w));
+    }
     tabs.setBounds (r.reduced (4, 0));
     about.setBounds (getLocalBounds());
 }
@@ -908,7 +1093,17 @@ void SynthgularityEditor::timerCallback()
 {
     animT += 1.0 / 30.0;
     repaint (0, 0, 340, kHeaderH);   // the header aura
+    gonio->repaint();
+    for (auto* c : chips) c->repaint();
+    if (auto* c = tabs.getCurrentContentComponent())
+        if (c->getAlpha() < 1.0f) c->setAlpha (jmin (1.0f, c->getAlpha() + 0.16f));
     const int tab = tabs.getCurrentTabIndex();
+    if (tab >= 0 && tab < (int) tabKnobs.size())
+    {
+        const bool dragging = isDragAndDropActive();
+        for (auto* k : tabKnobs[(size_t) tab])
+            if (dragging || k->isModulated()) k->repaint();
+    }
     if (tab >= 0 && tab < (int) live.size())
         for (auto* c : live[(size_t) tab]) if (c != nullptr && c->isVisible()) c->repaint();
     voicesLabel.setText (String (proc.synth.activeVoices.load()) + " voices", dontSendNotification);

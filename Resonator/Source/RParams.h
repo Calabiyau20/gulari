@@ -15,6 +15,7 @@ namespace choices
     juce::StringArray lfoShapes();
     juce::StringArray divisions();
     juce::StringArray quality();
+    juce::StringArray oscModes();
     juce::StringArray modSources();
     juce::StringArray modDests();     // display names of every modulatable parameter
     double divisionInBeats (int index);
@@ -38,7 +39,10 @@ namespace choices
     PF(osc##o##_fine, "Osc " #O " Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
     PF(osc##o##_level, "Osc " #O " Level", 0.0f, 1.0f, 0.7f, 0.0f) \
     PF(osc##o##_pan, "Osc " #O " Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
-    PB(osc##o##_rphase, "Osc " #O " Random Phase", true)
+    PF(osc##o##_cover, "Osc " #O " Scan Coverage", 0.0f, 1.0f, 0.25f, 0.0f) \
+    PF(osc##o##_pos, "Osc " #O " Scan Position", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PB(osc##o##_rphase, "Osc " #O " Random Phase", true) \
+    PC(osc##o##_mode, "Osc " #O " Mode", oscModes, 0)
 
 #define CYR_FMROW(PF, s, S) \
     PF(fm_##s##a, "FM " #S " > A", 0.0f, 1.0f, 0.0f, 0.0f) PF(fm_##s##b, "FM " #S " > B", 0.0f, 1.0f, 0.0f, 0.0f) \

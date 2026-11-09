@@ -2,6 +2,59 @@
 
 namespace pg
 {
+// knobs whose drop goes to an existing per-voice (or FX) destination: same 0..1 meaning as the knob
+int mdForParam (int pid)
+{
+    switch (pid)
+    {
+        case wtA_pos: return MD_WtAPos;   case wtA_level: return MD_WtALevel; case wtA_wamt: return MD_WtAWarp;
+        case wtB_pos: return MD_WtBPos;   case wtB_level: return MD_WtBLevel; case wtB_wamt: return MD_WtBWarp;
+        case wtC_pos: return MD_WtCPos;   case wtC_level: return MD_WtCLevel; case wtC_wamt: return MD_WtCWarp;
+        case sp_pos: return MD_SpPos;     case sp_level: return MD_SpLevel;   case sp_wamt: return MD_SpWarp;
+        case gr_pos: return MD_GrPos;     case gr_spray: return MD_GrSpray;   case gr_level: return MD_GrLevel;
+        case fm_amount: return MD_FmAmount; case sub_level: return MD_SubLevel; case noise_level: return MD_NoiseLevel;
+        case smp_level: return MD_SmpLevel;
+        case pl_harm: return MD_PlHarm;   case pl_timbre: return MD_PlTimbre; case pl_morph: return MD_PlMorph; case pl_level: return MD_PlLevel;
+        case bite_drive: return MD_BiteDrive; case bite_fold: return MD_BiteFold; case bite_crush: return MD_BiteCrush;
+        case flt_cutoff: return MD_Cutoff; case flt_res: return MD_Resonance;
+        case fx_dl_mix: return MD_DelayMix; case fx_dl_fb: return MD_DelayFb;
+        case fx_rn_structure: return MD_RnStructure; case fx_rn_bright: return MD_RnBright; case fx_rn_pos: return MD_RnPos;
+        case fx_gr_pos: return MD_GrfxPos; case fx_gr_size: return MD_GrfxSize; case fx_gr_density: return MD_GrfxDensity;
+        case fx_gr_texture: return MD_GrfxTexture; case fx_gr_mix: return MD_GrfxMix;
+        case fx_fl_mix: return MD_FlMix;  case fx_ph_mix: return MD_PhMix;
+        case fx_rv_size: return MD_RvSize; case fx_rv_mix: return MD_RvMix;
+        case mb_dj_pos: return MD_MbDjFilter; case mb_tg_depth: return MD_MbGateDepth; case mb_tp_drive: return MD_MbTapeDrive;
+        default: return MD_None;
+    }
+}
+
+// every continuous parameter that drag and drop / the matrix may move, straight from the list (no paramInfos(),
+// which itself needs the size of the destination list)
+static bool genericAllowed (const char* id)
+{
+    const juce::String s (id);
+    for (auto* pre : { "mtx", "seq", "arp_", "master_gain_unused" })
+        if (s.startsWith (pre)) return false;
+    return true;
+}
+
+static const std::vector<std::pair<int, juce::String>>& genericCandidates()
+{
+    static const std::vector<std::pair<int, juce::String>> v = []
+    {
+        std::vector<std::pair<int, juce::String>> out;
+       #define GC_F(id, nm, mn, mx, df, sk) if (genericAllowed (#id) && mdForParam (id) == MD_None) out.push_back ({ (int) id, juce::String (nm) });
+       #define GC_I(id, nm, mn, mx, df)     if (genericAllowed (#id) && (juce::String (#id).endsWith ("_oct") || juce::String (#id).endsWith ("_semi"))) out.push_back ({ (int) id, juce::String (nm) });
+       #define GC_X(...)
+        PG_PARAM_LIST (GC_F, GC_I, GC_X, GC_X)
+       #undef GC_F
+       #undef GC_I
+       #undef GC_X
+        return out;
+    }();
+    return v;
+}
+
 namespace choices
 {
     juce::StringArray voiceModes()    { return { "Poly", "Mono", "Legato" }; }
@@ -47,7 +100,7 @@ namespace choices
                  "Mod Env 1", "Filter Env", "Amp Env", "Velocity", "Note", "Mod Wheel",
                  "Aftertouch", "Pitch Bend", "Random", "Mod Env 2", "Mod Env 3", "Mod Env 4" };
     }
-    juce::StringArray modDests()
+    juce::StringArray modDestsClassic()
     {
         return { "None",
                  "WT A Position", "WT A Pitch", "WT A Level", "WT A Warp",
@@ -65,6 +118,13 @@ namespace choices
                  "FX Filter 1 Freq", "FX Filter 1 Reso", "FX Filter 1 Morph", "FX Filter 2 Freq", "FX Filter 2 Reso", "FX Filter 2 Morph",
                  "FX Reverb Size", "FX Reverb Mix", "MixBus DJ Filter", "MixBus Gate Depth", "MixBus Tape Drive",
                  "MixBus Crusher Bits", "MixBus Width" };
+    }
+    // the classic destinations plus every continuous parameter (listed by name)
+    juce::StringArray modDests()
+    {
+        auto a = modDestsClassic();
+        for (auto& g : genericCandidates()) a.add (g.second);
+        return a;
     }
     juce::StringArray modPolarity()   { return { "Native", "Unipolar", "Bipolar" }; }
     juce::StringArray seqModes()      { return { "Unipolar", "Bipolar" }; }
@@ -117,6 +177,42 @@ static std::vector<ParamInfo> buildInfos()
    #undef PG_INFO_B
     jassert ((int) v.size() == kNumParams);
     return v;
+}
+
+const std::vector<int>& genericModParams()
+{
+    static const std::vector<int> v = []
+    {
+        std::vector<int> out;
+        for (auto& g : genericCandidates()) out.push_back (g.first);
+        return out;
+    }();
+    return v;
+}
+
+int destForParam (int pid)
+{
+    const int md = mdForParam (pid);
+    if (md != MD_None) return md;
+    const auto& g = genericModParams();
+    for (size_t i = 0; i < g.size(); ++i) if (g[i] == pid) return MD_Count + (int) i;
+    return -1;
+}
+
+int paramForDest (int dst)
+{
+    if (dst >= MD_Count)
+    {
+        const auto& g = genericModParams();
+        return dst - MD_Count < (int) g.size() ? g[(size_t) (dst - MD_Count)] : -1;
+    }
+    static const std::vector<int> back = []
+    {
+        std::vector<int> b ((size_t) MD_Count, -1);
+        for (int i = 0; i < kNumParams; ++i) { const int md = mdForParam (i); if (md != MD_None) b[(size_t) md] = i; }
+        return b;
+    }();
+    return dst > 0 && dst < MD_Count ? back[(size_t) dst] : -1;
 }
 
 const std::vector<ParamInfo>& paramInfos()
