@@ -1,4 +1,7 @@
 #include "PluginProcessor.h"
+#if PG_HAS_LIBRARY
+ #include "BinaryData.h"
+#endif
 #if ! PG_HEADLESS
  #include "PluginEditor.h"
 #endif
@@ -21,6 +24,9 @@ SynthgularityProcessor::SynthgularityProcessor()
     builtInShots();
     refreshCache();
     startTimerHz (2);
+   #if ! PG_HEADLESS && ! PG_NO_PLUGIN_ENTRY
+    installFactoryLibrary();
+   #endif
 }
 
 SynthgularityProcessor::~SynthgularityProcessor() { stopTimer(); }
@@ -285,6 +291,30 @@ bool SynthgularityProcessor::savePreset (const juce::String& name, juce::String&
     auto file = presetFolder().getChildFile (clean + ".sgpreset");
     if (! xml->writeTo (file)) { error = "Could not write " + file.getFullPathName(); return false; }
     return true;
+}
+
+bool SynthgularityProcessor::savePresetTo (const juce::File& file, const juce::String& name)
+{
+    currentPresetName = name;
+    auto xml = buildState().createXml();
+    file.getParentDirectory().createDirectory();
+    return xml != nullptr && xml->writeTo (file);
+}
+
+void SynthgularityProcessor::installFactoryLibrary()
+{
+   #if PG_HAS_LIBRARY
+    auto dest = presetFolder().getChildFile ("Factory Library");
+    auto marker = dest.getChildFile (".version");
+    const juce::String tag ("library-" + juce::String (BinaryData::FactoryLibrary_zipSize));
+    if (marker.existsAsFile() && marker.loadFileAsString().trim() == tag) return;
+    juce::MemoryInputStream in (BinaryData::FactoryLibrary_zip, BinaryData::FactoryLibrary_zipSize, false);
+    juce::ZipFile zip (in);
+    if (zip.getNumEntries() == 0) return;
+    dest.createDirectory();
+    zip.uncompressTo (dest, true);
+    marker.replaceWithText (tag);
+   #endif
 }
 
 bool SynthgularityProcessor::loadPreset (const juce::File& file)

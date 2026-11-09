@@ -699,9 +699,33 @@ void SynthgularityEditor::refreshPresetMenu()
     userPresets = proc.listPresets();
     if (! userPresets.isEmpty())
     {
-        presetBox.addSectionHeading ("User");
+        // folders become sub-menus: Factory Library > 01 Bass > ...
+        std::map<String, std::unique_ptr<PopupMenu>> subs;
+        std::vector<String> order;
+        PopupMenu userTop;
         for (int i = 0; i < userPresets.size(); ++i)
-            presetBox.addItem (userPresets[i].getRelativePathFrom (proc.presetFolder()).upToLastOccurrenceOf (".", false, false), 1000 + i);
+        {
+            const auto rel = userPresets[i].getRelativePathFrom (proc.presetFolder()).replaceCharacter ('\\', '/');
+            const auto dir = rel.upToLastOccurrenceOf ("/", false, false);
+            const auto name = userPresets[i].getFileNameWithoutExtension();
+            if (dir.isEmpty()) { userTop.addItem (1000 + i, name); continue; }
+            if (subs.find (dir) == subs.end()) { subs[dir] = std::make_unique<PopupMenu>(); order.push_back (dir); }
+            subs[dir]->addItem (1000 + i, name);
+        }
+        auto* root = presetBox.getRootMenu();
+        // group "A/B" folders under "A"
+        std::map<String, PopupMenu> parents;
+        std::vector<String> parentOrder;
+        for (auto& dir : order)
+        {
+            const auto parent = dir.upToFirstOccurrenceOf ("/", false, false);
+            const auto child = dir.fromFirstOccurrenceOf ("/", false, false);
+            if (child.isEmpty()) { root->addSubMenu (dir, *subs[dir]); continue; }
+            if (parents.find (parent) == parents.end()) parentOrder.push_back (parent);
+            parents[parent].addSubMenu (child, *subs[dir]);
+        }
+        for (auto& p : parentOrder) root->addSubMenu (p, parents[p]);
+        if (userTop.getNumItems() > 0) { presetBox.addSectionHeading ("User"); root->addSubMenu ("My presets", userTop); }
     }
     presetBox.setText (proc.currentPresetName, dontSendNotification);
 }

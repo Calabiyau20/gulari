@@ -57,6 +57,8 @@ public:
     juce::File presetFolder() const;
     juce::Array<juce::File> listPresets() const;
     bool savePreset (const juce::String& name, juce::String& error);
+    bool savePresetTo (const juce::File& file, const juce::String& name);
+    void installFactoryLibrary();   // unpacks the embedded preset library on first run
     bool loadPreset (const juce::File& file);
     void loadFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
