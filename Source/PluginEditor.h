@@ -22,7 +22,11 @@ private:
 
     SynthgularityProcessor& proc;
     static constexpr int kHeaderH = 72;
-    juce::Image stars, logo;
+    juce::Image stars, logo, logoGrid, isologo;
+    juce::Rectangle<float> isologoArea;
+    pg::ui::AboutOverlay about;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
     pg::ui::SynthLookAndFeel lnf;
     juce::TooltipWindow tooltips { this, 600 };
 

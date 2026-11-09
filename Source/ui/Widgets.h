@@ -149,6 +149,18 @@ private:
     void setFromMouse (juce::Point<float> p);
     juce::Rectangle<float> padArea() const;
     SynthgularityProcessor& proc;
+    juce::Image art;
+};
+
+// Brand "about" card: Calabi Yau artwork, version and credits. Click anywhere to close.
+class AboutOverlay : public juce::Component
+{
+public:
+    AboutOverlay();
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { setVisible (false); }
+private:
+    juce::Image banner, machine, serpent, isologo;
 };
 
 // One row of the modulation matrix
@@ -160,9 +172,9 @@ public:
     void resized() override;
 private:
     int slot;
-    juce::ComboBox src, dst, via;
+    juce::ComboBox src, dst, via, pol;
     juce::Slider amt;
-    std::unique_ptr<APVTS::ComboBoxAttachment> srcA, dstA, viaA;
+    std::unique_ptr<APVTS::ComboBoxAttachment> srcA, dstA, viaA, polA;
     std::unique_ptr<APVTS::SliderAttachment> amtA;
 };
 } // namespace pg::ui

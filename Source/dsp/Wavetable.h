@@ -39,7 +39,7 @@ class WavetableOsc
 {
 public:
     void prepare (double sampleRate, uint32_t seed);
-    void noteOn (bool randomPhase);
+    void noteOn (bool randomPhase, float startPhase = 0.0f);
     // freqHz: base pitch; pos: 0..1; phaseMod: added to the phase (in cycles) of every copy
     void setup (int unison, float detune, float spread, float pan);
     // Warp modes (choices::warpModes): reshape the phase or the read sample of each cycle

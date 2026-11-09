@@ -6,7 +6,7 @@ float modDepth (int dst)
 {
     switch (dst)
     {
-        case MD_WtAPitch: case MD_WtBPitch: case MD_GrPitch: case MD_ModPitch: return 24.0f;   // semitones
+        case MD_WtAPitch: case MD_WtBPitch: case MD_GrPitch: case MD_ModPitch: return 48.0f;   // semitones (+/- 4 octaves)
         case MD_Cutoff: return 6.0f;                                                          // octaves
         case MD_GrSize: return 3.0f;                                                          // octaves of size
         case MD_GrDensity: return 4.0f;                                                       // octaves of density
@@ -20,6 +20,7 @@ void Voice::prepare (double sampleRate, int idx)
     index = idx;
     const float r = (float) sr;
     amp.setSampleRate (r); fenv.setSampleRate (r); menv.setSampleRate (r);
+    for (auto& e : menvX) e.setSampleRate (r);
     grain.prepare (sr, 0x1234u + (uint32_t) idx * 7919u);
     wt[0].prepare (sr, 0x51u + (uint32_t) idx * 31u);
     wt[1].prepare (sr, 0x97u + (uint32_t) idx * 37u);
@@ -49,10 +50,12 @@ void Voice::start (int midiNote, float vel, bool retrigger, const VoiceContext& 
         amp.gateOn (! wasActive);
         fenv.gateOn (! wasActive);
         menv.gateOn (! wasActive);
+        for (auto& e : menvX) e.gateOn (! wasActive);
         grain.noteOn (true);
         grainLfo.reset (0.0f);
-        wt[0].noteOn (p[wtA_rphase] > 0.5f);
-        wt[1].noteOn (p[wtB_rphase] > 0.5f);
+        wt[0].noteOn (p[wtA_rphase] > 0.5f, p[wtA_phase]);
+        wt[1].noteOn (p[wtB_rphase] > 0.5f, p[wtB_phase]);
+        subOsc.phase = p[sub_phase];
         plaits.trigger();
         for (int i = 0; i < 4; ++i)
         {
@@ -84,6 +87,7 @@ void Voice::release()
 {
     held = false;
     amp.gateOff(); fenv.gateOff(); menv.gateOff();
+    for (auto& e : menvX) e.gateOff();
     plaits.gate (false);
 }
 
@@ -91,6 +95,7 @@ void Voice::kill()
 {
     held = false;
     amp.kill(); fenv.kill(); menv.kill();
+    for (auto& e : menvX) e.kill();
 }
 
 float Voice::source (int src) const
@@ -99,6 +104,7 @@ float Voice::source (int src) const
     {
         case MS_Lfo1: case MS_Lfo2: case MS_Lfo3: case MS_Lfo4: return lfoVal[src - MS_Lfo1];
         case MS_ModEnv: return menv.current();
+        case MS_ModEnv2: case MS_ModEnv3: case MS_ModEnv4: return menvX[src - MS_ModEnv2].current();
         case MS_FiltEnv: return fenv.current();
         case MS_AmpEnv: return amp.current();
         case MS_Velocity: return velocity;
@@ -118,6 +124,11 @@ void Voice::controlUpdate (const VoiceContext& ctx)
     amp.set (p[amp_a], p[amp_d], p[amp_s], p[amp_r]);
     fenv.set (p[fenv_a], p[fenv_d], p[fenv_s], p[fenv_r]);
     menv.set (p[menv_a], p[menv_d], p[menv_s], p[menv_r]);
+    for (int e = 0; e < 3; ++e)
+    {
+        const int b = menv2_a + e * (menv3_a - menv2_a);
+        menvX[e].set (p[b], p[b + 1], p[b + 2], p[b + 3]);
+    }
 
     // ---- per-voice LFOs (Note retrig) or the shared free-running ones ----
     const float blockSecs = (float) kControlBlock / rate;
@@ -154,9 +165,10 @@ void Voice::controlUpdate (const VoiceContext& ctx)
                 default: return source (sIdx);
             }
         };
-        float v = val (src) * p[base + 2];
+        const int pol = (int) p[base + 4];
+        float v = applyPolarity (val (src), src, pol, p) * p[base + 2];
         const int via = (int) p[base + 3];
-        if (via != MS_None) v *= val (via);
+        if (via != MS_None) v *= applyPolarity (val (via), via, pol == 2 ? 0 : pol, p);
         mod[dst] += v * modDepth (dst);
     }
 
@@ -305,6 +317,7 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
         const float env = amp.next();
         fenv.next();
         menv.next();
+        for (auto& e : menvX) e.next();
 
         // noise first (it is also an FM source)
         const float n = noise.tick (noiseType);

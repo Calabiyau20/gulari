@@ -44,9 +44,10 @@ void FxChain::computeMods (const float* p, const GlobalMod& g)
         const int base = mtx01_src + s * (mtx02_src - mtx01_src);
         const int dst = (int) p[base + 1];
         if (dst < MD_VoiceCount) continue;
-        float v = val ((int) p[base]) * p[base + 2];
+        const int src = (int) p[base], pol = (int) p[base + 4];
+        float v = applyPolarity (val (src), src, pol, p) * p[base + 2];
         const int via = (int) p[base + 3];
-        if (via != MS_None) v *= val (via);
+        if (via != MS_None) v *= applyPolarity (val (via), via, pol == 2 ? 0 : pol, p);
         fxMod[dst] += v;
     }
 }
@@ -133,6 +134,7 @@ void FxChain::process (float* L, float* R, int n, const float* p, const GlobalMo
         const float fb = clampf (p[fx_dl_fb] + fxMod[MD_DelayFb], 0.0f, 0.98f);
         float timeMs = p[fx_dl_time];
         if (p[fx_dl_sync] > 0.5f) timeMs = (float) (choices::divisionInBeats ((int) p[fx_dl_div]) * 60000.0 / g.bpm);
+        timeMs *= std::exp2 (fxMod[MD_DelayTime] * 2.0f);   // matrix: +/- 2 octaves of delay time (tape-style pitch bends)
         const float target = clampf (timeMs * 0.001f * rate, 1.0f, 4.0f * rate);
         const bool pp = p[fx_dl_pp] > 0.5f;
         for (int c = 0; c < 2; ++c)

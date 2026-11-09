@@ -209,42 +209,73 @@ Typeface::Ptr SynthLookAndFeel::getTypefaceForFont (const Font& f)
     return LookAndFeel_V4::getTypefaceForFont (f);
 }
 
+const Image& SynthLookAndFeel::knobFace (int px)
+{
+    px = jlimit (8, 512, px);
+    auto it = faceCache.find (px);
+    if (it != faceCache.end()) return it->second;
+    if (isologo.isNull())
+        isologo = ImageCache::getFromMemory (BinaryData::isologo_png, BinaryData::isologo_pngSize);
+    // step-down resample so small knobs stay crisp
+    Image src = isologo;
+    while (src.getWidth() / 2 >= px)
+        src = src.rescaled (src.getWidth() / 2, src.getHeight() / 2, Graphics::highResamplingQuality);
+    return faceCache[px] = src.rescaled (px, px, Graphics::highResamplingQuality);
+}
+
+// Isologo knob: the official Calabi Yau isologo as a fixed face, a cyan-to-magenta value
+// ring around it and a glowing pointer that sweeps over the face (after the brand filmstrip).
 void SynthLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float start, float end, Slider& s)
 {
-    const auto bounds = Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (3.0f);
+    const auto bounds = Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (2.0f);
     const float r = jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const auto c = bounds.getCentre();
     const float angle = start + pos * (end - start);
-    const float track = jmax (3.0f, r * 0.15f);
-    auto col = s.findColour (Slider::rotarySliderFillColourId);
-    if (col == Colour() || col.isTransparent()) col = colours::accent;
+    const float ring = jmax (2.5f, r * 0.13f);
+    const float ringR = r - ring * 0.5f;
+    const bool on = s.isEnabled();
+    const float scale = (float) g.getInternalContext().getPhysicalPixelScaleFactor();
 
+    // track
     Path bg;
-    bg.addCentredArc (c.x, c.y, r - track, r - track, 0.0f, start, end, true);
+    bg.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, start, end, true);
     g.setColour (colours::outline);
-    g.strokePath (bg, PathStrokeType (track, PathStrokeType::curved, PathStrokeType::rounded));
+    g.strokePath (bg, PathStrokeType (ring, PathStrokeType::curved, PathStrokeType::rounded));
 
+    // value ring, teal -> fuchsia gradient (bipolar params grow from 12 o'clock)
     const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
     const float from = bipolar ? (start + end) * 0.5f : start;
-    Path arc;
-    arc.addCentredArc (c.x, c.y, r - track, r - track, 0.0f, jmin (from, angle), jmax (from, angle), true);
-    g.setColour (s.isEnabled() ? col : colours::textDim);
-    g.strokePath (arc, PathStrokeType (track, PathStrokeType::curved, PathStrokeType::rounded));
+    if (std::abs (angle - from) > 0.001f)
+    {
+        Path arc;
+        arc.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, jmin (from, angle), jmax (from, angle), true);
+        if (on)
+        {
+            ColourGradient grad (cosmos::teal.brighter (0.4f), c.x - r, c.y + r, cosmos::fuchsia, c.x + r, c.y + r, false);
+            g.setGradientFill (grad);
+        }
+        else g.setColour (colours::textDim);
+        g.strokePath (arc, PathStrokeType (ring, PathStrokeType::curved, PathStrokeType::rounded));
+    }
 
-    // cap: a void bolt with a fine steel ring
-    const auto cap = Rectangle<float> (r * 1.14f, r * 1.14f).withCentre (c);
-    g.setColour (cosmos::voidC);
-    g.fillEllipse (cap);
-    g.setColour (cosmos::steel.withAlpha (0.6f));
-    g.drawEllipse (cap, 1.0f);
-    Path needle;
-    needle.addRoundedRectangle (-1.4f, -(r * 0.56f), 2.8f, r * 0.36f, 1.2f);
-    g.setColour (cosmos::starlight);
-    g.fillPath (needle, AffineTransform::rotation (angle).translated (c));
-    // node at the end of the value arc
-    const Point<float> tip (c.x + (r - track) * std::sin (angle), c.y - (r - track) * std::cos (angle));
-    g.setColour (cosmos::starlight);
-    g.fillEllipse (Rectangle<float> (track * 0.75f, track * 0.75f).withCentre (tip));
+    // face: the official isologo PNG, never redrawn
+    const float faceD = (r - ring) * 2.0f - 1.0f;
+    const auto faceR = Rectangle<float> (faceD, faceD).withCentre (c);
+    const auto& face = knobFace (roundToInt (faceD * scale));
+    g.setOpacity (on ? 1.0f : 0.45f);
+    g.drawImage (face, faceR, RectanglePlacement::stretchToFit);
+    g.setOpacity (1.0f);
+
+    // pointer: a glowing teal line from the face towards the rim
+    const auto pt = [&] (float rad) { return Point<float> (c.x + rad * std::sin (angle), c.y - rad * std::cos (angle)); };
+    const Line<float> needle (pt (r * 0.40f), pt (r - ring * 0.6f));
+    const float nw = jmax (2.0f, r * 0.12f);
+    g.setColour (cosmos::voidC.withAlpha (0.55f));
+    g.drawLine (needle, nw + 2.0f);
+    g.setColour ((on ? cosmos::teal : colours::textDim).withAlpha (0.45f));
+    g.drawLine (needle, nw + 1.0f);
+    g.setColour (on ? Colour (0xff8ff6ff) : cosmos::steel);
+    g.drawLine (needle, nw * 0.5f);
 }
 
 void SynthLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float,

@@ -45,8 +45,8 @@ namespace choices
     {
         return { "None", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Chaos 1", "Chaos 2",
                  "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Seq 1", "Seq 2", "Seq 3", "Seq 4",
-                 "Mod Env", "Filter Env", "Amp Env", "Velocity", "Note", "Mod Wheel",
-                 "Aftertouch", "Pitch Bend", "Random" };
+                 "Mod Env 1", "Filter Env", "Amp Env", "Velocity", "Note", "Mod Wheel",
+                 "Aftertouch", "Pitch Bend", "Random", "Mod Env 2", "Mod Env 3", "Mod Env 4" };
     }
     juce::StringArray modDests()
     {
@@ -59,8 +59,9 @@ namespace choices
                  "Cutoff", "Resonance", "Pan", "Volume",
                  "FX Delay Mix", "FX Delay Feedback", "FX Resonator Structure", "FX Resonator Brightness",
                  "FX Resonator Position", "FX Clouds Position", "FX Clouds Size", "FX Clouds Density",
-                 "FX Clouds Texture", "FX Clouds Mix", "FX Flanger Mix", "FX Phaser Mix" };
+                 "FX Clouds Texture", "FX Clouds Mix", "FX Flanger Mix", "FX Phaser Mix", "FX Delay Time" };
     }
+    juce::StringArray modPolarity()   { return { "Native", "Unipolar", "Bipolar" }; }
     juce::StringArray seqModes()      { return { "Unipolar", "Bipolar" }; }
     juce::StringArray arpModes()      { return { "Up", "Down", "Up/Down", "Down/Up", "As Played", "Random", "Chord" }; }
     juce::StringArray ringsModels()   { return { "Modal", "Sympathetic", "String", "FM Voice", "Sympathetic Quantized", "String + Reverb" }; }

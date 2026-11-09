@@ -8,7 +8,7 @@ set(PG_COMPANY_NAME   "Calabi Yau")
 set(PG_BUNDLE_ID      "com.calabiyau.synthgularity")
 set(PG_MANUFACTURER   CbYu)   # 4 chars, at least one upper-case letter
 set(PG_PLUGIN_CODE    Sygy)   # 4 chars, unique per plugin
-set(PG_VERSION        "0.2.0")
+set(PG_VERSION        "0.3.0")
 
 # Must be set before project(): lowest macOS the plugin runs on
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version" FORCE)
@@ -94,7 +94,13 @@ clap_juce_extensions_plugin(TARGET Synthgularity
 set(PG_ASSETS
     Resources/fonts/Syncopate-Bold.ttf
     Resources/fonts/Montserrat-SemiBold.ttf
-    Resources/fonts/Montserrat-Bold.ttf)
+    Resources/fonts/Montserrat-Bold.ttf
+    Resources/brand/isologo.png
+    Resources/brand/bg-logogrid.jpg
+    Resources/brand/banner-arch.jpg
+    Resources/brand/orb-torus.jpg
+    Resources/brand/art-serpent.jpg
+    Resources/brand/about-machine.jpg)
 set(PG_HAS_LOGO 0)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/logo-calabi-yau.png)
     list(APPEND PG_ASSETS Resources/logo-calabi-yau.png)

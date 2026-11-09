@@ -32,6 +32,28 @@ struct VoiceContext
 // How each modulation destination maps an amount of 1.0
 float modDepth (int dst);
 
+// Sources that swing -1..1 by nature; the rest run 0..1
+inline bool isBipolarSource (int s, const float* p)
+{
+    switch (s)
+    {
+        case MS_Lfo1: case MS_Lfo2: case MS_Lfo3: case MS_Lfo4: case MS_Chaos1: case MS_Chaos2:
+        case MS_Note: case MS_PitchBend: case MS_Random: return true;
+        case MS_Seq1: case MS_Seq2: case MS_Seq3: case MS_Seq4:
+            return (int) p[seq1_mode + (s - MS_Seq1) * (seq2_on - seq1_on)] == 1;
+        default: return false;
+    }
+}
+
+// Matrix polarity: 0 native, 1 force unipolar (0..1), 2 force bipolar (-1..1)
+inline float applyPolarity (float v, int src, int pol, const float* p)
+{
+    if (pol == 0) return v;
+    const bool bi = isBipolarSource (src, p);
+    if (pol == 1) return bi ? 0.5f * (v + 1.0f) : v;
+    return bi ? v : 2.0f * v - 1.0f;
+}
+
 class Voice
 {
 public:
@@ -59,7 +81,7 @@ private:
     uint64_t age = 0;
     static inline uint64_t ageCounter = 0;
 
-    Adsr amp, fenv, menv;
+    Adsr amp, fenv, menv, menvX[3];   // menvX = Mod Env 2..4
     Lfo lfo[4];
     Lfo grainLfo;                 // Grain Mod 1: periodic
     float grainRnd = 0.0f, grainRndTarget = 0.0f, grainRndPhase = 1.0f;   // Grain Mod 2: smooth random

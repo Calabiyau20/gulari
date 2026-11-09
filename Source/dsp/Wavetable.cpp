@@ -192,10 +192,10 @@ void WavetableOsc::prepare (double sampleRate, uint32_t seed)
     setup (1, 0.0f, 0.0f, 0.0f);
 }
 
-void WavetableOsc::noteOn (bool randomPhase)
+void WavetableOsc::noteOn (bool randomPhase, float startPhase)
 {
     for (int i = 0; i < kMaxUnison; ++i)
-        phase[i] = randomPhase ? rng.uni() : 0.0f;
+        phase[i] = randomPhase ? rng.uni() : startPhase;
 }
 
 void WavetableOsc::setup (int unison, float detune, float spread, float pan)

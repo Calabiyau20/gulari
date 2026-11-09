@@ -94,6 +94,9 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
     tabs.setColour (TabbedComponent::backgroundColourId, Colours::transparentBlack);
     tabs.setColour (TabbedComponent::outlineColourId, Colours::transparentBlack);
     addAndMakeVisible (tabs);
+    logoGrid = ImageCache::getFromMemory (BinaryData::bglogogrid_jpg, BinaryData::bglogogrid_jpgSize);
+    isologo  = ImageCache::getFromMemory (BinaryData::isologo_png, BinaryData::isologo_pngSize);
+    addChildComponent (about);
 
     // ---------------- OSC ----------------
     {
@@ -104,9 +107,9 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
             const String x = o == 0 ? "wtA_" : "wtB_";
             StringArray it;
             for (auto s : { "on:On", "table:Table", "pos:Position", "warp:Warp Mode", "wamt:Warp", "oct:Octave", "semi:Semi",
-                            "fine:Fine", "unison:Unison", "detune:Detune", "spread:Spread", "level:Level", "pan:Pan", "rphase:Rnd Phase" })
+                            "fine:Fine", "phase:Phase", "unison:Unison", "detune:Detune", "spread:Spread", "level:Level", "pan:Pan", "rphase:Free" })
                 it.add (x + s);
-            wt[o] = page->add (new Panel (st, o == 0 ? "Wavetable A" : "Wavetable B", it, 7, o == 0 ? colours::accent : colours::accent2));
+            wt[o] = page->add (new Panel (st, o == 0 ? "Wavetable A" : "Wavetable B", it, 8, o == 0 ? colours::accent : colours::accent2));
             wt[o]->extraHeight = 78;
             auto* view = page->add (new WavetableView (proc, o));
             tableViews[o] = view;
@@ -121,7 +124,7 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
             view->toFront (false); load->toFront (false);
         }
         auto* mo = page->add (new Panel (st, "Modulator", items ({ "mo_wave:Wave", "mo_oct:Octave", "mo_semi:Semi", "mo_fine:Fine", "mo_level:Level" }), 3));
-        auto* sub = page->add (new Panel (st, "Sub + Noise", items ({ "sub_wave:Sub Wave", "sub_oct:Sub Oct", "sub_level:Sub Level", "noise_type:Noise", "noise_level:Noise Lvl" }), 3));
+        auto* sub = page->add (new Panel (st, "Sub + Noise", items ({ "sub_wave:Sub Wave", "sub_oct:Sub Oct", "sub_level:Sub Level", "sub_phase:Sub Phase", "noise_type:Noise", "noise_level:Noise Lvl" }), 3));
         auto* pl = page->add (new Panel (st, "Plaits (Mutable Instruments)", items ({ "pl_on:On", "pl_engine:Engine", "pl_oct:Octave", "pl_level:Level",
                                           "pl_harm:Harmonics", "pl_timbre:Timbre", "pl_morph:Morph", "pl_pan:Pan", "pl_lpg:LPG", "pl_decay:Decay", "pl_colour:Colour" }), 4, colours::warn));
         auto* fm = page->add (new Panel (st, "Mod Matrix  FM / PD / AM  (row > column)", items ({ "fm_amount:Amount", "fm_a_a:A>A",
@@ -201,19 +204,43 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         auto* bite = page->add (new Panel (st, "MultiDistortion", items ({ "bite_drive:Drive", "bite_asym:Asymmetry", "bite_rect:Rectify",
                                           "bite_fold:Fold", "bite_soft:Saturate", "bite_crush:Crush", "bite_tone:Tone", "bite_mix:Mix",
                                           "bite_post:Post Filter" }), 5, colours::warn));
-        Panel* env[3];
-        const char* envNames[] = { "Amp Envelope", "Filter Envelope", "Mod Envelope" };
-        const char* envPre[] = { "amp_", "fenv_", "menv_" };
-        const Colour envCol[] = { cosmos::neon, cosmos::orchid, cosmos::fuchsia };
-        for (int e = 0; e < 3; ++e)
+        Panel* env[2];
+        const char* envNames[] = { "Amp Envelope", "Filter Envelope" };
+        const char* envPre[] = { "amp_", "fenv_" };
+        const Colour envCol[] = { cosmos::neon, cosmos::orchid };
+        auto addEnv = [&] (const String& title, const String& pre, Colour c) -> Panel*
         {
-            const String pre (envPre[e]);
-            env[e] = page->add (new Panel (st, envNames[e], StringArray { pre + "a:Attack", pre + "d:Decay", pre + "s:Sustain", pre + "r:Release" }, 4, envCol[e]));
-            env[e]->extraHeight = 92;
-            auto* view = page->add (new EnvelopeView (st, pre, envCol[e]));
+            auto* pnl = page->add (new Panel (st, title, StringArray { pre + "a:Attack", pre + "d:Decay", pre + "s:Sustain", pre + "r:Release" }, 4, c));
+            pnl->extraHeight = 92;
+            auto* view = page->add (new EnvelopeView (st, pre, c));
             envViews.add (view);
-            env[e]->layoutExtra = [view, panel = env[e]] (Rectangle<int> r) { view->setBounds (r + panel->getPosition()); };
+            pnl->layoutExtra = [view, pnl] (Rectangle<int> r) { view->setBounds (r + pnl->getPosition()); };
+            return pnl;
+        };
+        for (int e = 0; e < 2; ++e) env[e] = addEnv (envNames[e], envPre[e], envCol[e]);
+
+        // Mod Envelope 1-4: one panel per envelope, tab buttons switch between them
+        std::array<Panel*, 4> modEnv;
+        const char* modPre[] = { "menv_", "menv2_", "menv3_", "menv4_" };
+        for (int e = 0; e < 4; ++e)
+            modEnv[(size_t) e] = addEnv ("Mod Envelope", modPre[e], e % 2 ? cosmos::gold : cosmos::fuchsia);
+        std::array<TextButton*, 4> modTabs;
+        for (int e = 0; e < 4; ++e)
+        {
+            modTabs[(size_t) e] = makeButton (*page, String (e + 1), {}, "Mod Envelope " + String (e + 1) + " (source: Mod Env " + String (e + 1) + ")");
+            modTabs[(size_t) e]->setClickingTogglesState (false);
         }
+        auto showModEnv = [modEnv, modTabs, this] (int which)
+        {
+            for (int e = 0; e < 4; ++e)
+            {
+                modEnv[(size_t) e]->setVisible (e == which);
+                modTabs[(size_t) e]->setToggleState (e == which, dontSendNotification);
+                envViews[2 + e]->setVisible (e == which);
+            }
+        };
+        for (int e = 0; e < 4; ++e) modTabs[(size_t) e]->onClick = [showModEnv, e] { showModEnv (e); };
+        showModEnv (0);
         auto* voice = page->add (new Panel (st, "Voice", items ({ "voice_mode:Mode", "polyphony:Voices", "glide:Glide", "bend_range:Bend" }), 2));
         page->layout = [=] (Rectangle<int> r)
         {
@@ -221,7 +248,14 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
             auto a = split (rows[0], { 0.9f, 1.15f, 0.55f });
             flt->setBounds (a[0]); bite->setBounds (a[1]); voice->setBounds (a[2]);
             auto b = split (rows[1], { 1.0f, 1.0f, 1.0f });
-            for (int e = 0; e < 3; ++e) env[e]->setBounds (b[(size_t) e]);
+            for (int e = 0; e < 2; ++e) env[e]->setBounds (b[(size_t) e]);
+            for (int e = 0; e < 4; ++e) modEnv[(size_t) e]->setBounds (b[2]);
+            auto tabsArea = b[2].reduced (14, 0).withTrimmedTop (8).withHeight (24).removeFromRight (132);
+            for (int e = 0; e < 4; ++e)
+            {
+                modTabs[(size_t) e]->setBounds (tabsArea.removeFromLeft (33).reduced (2, 0));
+                modTabs[(size_t) e]->toFront (false);
+            }
         };
         tabs.addTab ("FILTER / AMP", Colours::transparentBlack, page, false);
     }
@@ -260,6 +294,7 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
     {
         auto* page = new Page(); pages.add (page);
         auto* hSrc = makeLabel (*page, "SOURCE", 11.5f);
+        auto* hPol = makeLabel (*page, "POLARITY", 11.5f);
         auto* hDst = makeLabel (*page, "DESTINATION", 11.5f);
         auto* hAmt = makeLabel (*page, "AMOUNT", 11.5f);
         auto* hVia = makeLabel (*page, "VIA (scales the amount)", 11.5f);
@@ -273,11 +308,13 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
                 auto h = r.removeFromTop (22);
                 h.removeFromLeft (30);
                 const int w = h.getWidth();
-                hSrc->setBounds (h.removeFromLeft (w * 22 / 100));
-                h.removeFromLeft (6);
-                hDst->setBounds (h.removeFromLeft (w * 28 / 100));
-                h.removeFromLeft (6);
-                hVia->setBounds (h.removeFromRight (w * 18 / 100));
+                hSrc->setBounds (h.removeFromLeft (w * 19 / 100));
+                h.removeFromLeft (4);
+                hPol->setBounds (h.removeFromLeft (w * 11 / 100));
+                h.removeFromLeft (4);
+                hDst->setBounds (h.removeFromLeft (w * 25 / 100));
+                h.removeFromLeft (4);
+                hVia->setBounds (h.removeFromRight (w * 16 / 100));
                 hAmt->setBounds (h.reduced (6, 0));
             }
             const int h = r.getHeight() / 16;
@@ -429,16 +466,27 @@ void SynthgularityEditor::paint (Graphics& g)
 {
     using namespace pg::ui;
     if (stars.getWidth() != getWidth() || stars.getHeight() != getHeight())
+    {
         stars = brand::starfield (getWidth(), getHeight(), 7, 0.9f);
+        // the Calabi Yau logo grid, sunk into the starfield
+        Graphics sg (stars);
+        sg.setOpacity (0.22f);
+        sg.drawImage (logoGrid, stars.getBounds().toFloat(), RectanglePlacement::centred | RectanglePlacement::fillDestination);
+        sg.setOpacity (1.0f);
+        sg.setGradientFill (ColourGradient (cosmos::voidC, 0.0f, 0.0f, cosmos::voidC.withAlpha (0.0f), 0.0f, (float) getHeight() * 0.55f, false));
+        sg.fillAll();
+    }
     g.drawImageAt (stars, 0, 0);
 
     // header: drop glyph + product name in the display face, then the Calabi Yau signature
     auto header = getLocalBounds().removeFromTop (kHeaderH).reduced (18, 0).toFloat();
-    brand::drop (g, { header.getX() + 12.0f, header.getCentreY() - 2.0f }, 30.0f);
+    // official isologo file (opens the About card)
+    isologoArea = Rectangle<float> (header.getX(), header.getCentreY() - 23.0f, 46.0f, 46.0f);
+    g.drawImage (isologo, isologoArea, RectanglePlacement::centred);
     g.setColour (cosmos::starlight);
     g.setFont (fonts::display (19.0f));
-    g.drawText ("SYNTHGULARITY", header.withTrimmedLeft (34.0f).withHeight (header.getHeight() * 0.62f), Justification::bottomLeft);
-    auto sig = header.withTrimmedLeft (36.0f).withTrimmedTop (header.getHeight() * 0.64f).withHeight (16.0f);
+    g.drawText ("SYNTHGULARITY", header.withTrimmedLeft (58.0f).withHeight (header.getHeight() * 0.62f), Justification::bottomLeft);
+    auto sig = header.withTrimmedLeft (60.0f).withTrimmedTop (header.getHeight() * 0.64f).withHeight (16.0f);
    #if PG_HAS_LOGO
     if (logo.isValid())
     {
@@ -457,6 +505,16 @@ void SynthgularityEditor::paint (Graphics& g)
         g.drawText ("BY CALABI YAU", sig, Justification::centredLeft);
     }
     brand::checker (g, Rectangle<float> (0.0f, (float) kHeaderH, (float) getWidth(), 8.0f), 4.0f);
+}
+
+void SynthgularityEditor::mouseDown (const MouseEvent& e)
+{
+    if (isologoArea.contains (e.position)) { about.setVisible (true); about.toFront (false); }
+}
+
+void SynthgularityEditor::mouseMove (const MouseEvent& e)
+{
+    setMouseCursor (isologoArea.contains (e.position) ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
 }
 
 void SynthgularityEditor::resized()
@@ -478,6 +536,7 @@ void SynthgularityEditor::resized()
     presetArea.removeFromRight (4);
     presetBox.setBounds (presetArea);
     tabs.setBounds (r.reduced (4, 0));
+    about.setBounds (getLocalBounds());
 }
 
 void SynthgularityEditor::timerCallback()

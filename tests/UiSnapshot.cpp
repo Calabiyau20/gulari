@@ -36,6 +36,16 @@ int main (int argc, char** argv)
         juce::FileOutputStream os (f);
         png.writeImageToStream (img, os);
     }
+    for (auto* c : ed->getChildren())
+        if (dynamic_cast<pg::ui::AboutOverlay*> (c) != nullptr)
+        {
+            c->setVisible (true);
+            auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            auto f = outDir.getChildFile ("about.png");
+            f.deleteFile();
+            juce::FileOutputStream os (f);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        }
     ed.reset();
     return 0;
 }

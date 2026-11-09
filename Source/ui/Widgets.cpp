@@ -1,4 +1,5 @@
 #include "Widgets.h"
+#include "BinaryData.h"
 #include "../PluginProcessor.h"
 
 namespace pg::ui
@@ -631,6 +632,12 @@ void OrbPad::paint (Graphics& g)
     {
         Graphics::ScopedSaveState ss (g);
         g.reduceClipRegion (inner.reduced (4.0f).toNearestInt());
+        if (art.isNull()) art = ImageCache::getFromMemory (BinaryData::orbtorus_jpg, BinaryData::orbtorus_jpgSize);
+        g.setOpacity (on ? 0.42f : 0.18f);
+        g.drawImage (art, inner, RectanglePlacement::centred | RectanglePlacement::fillDestination);
+        g.setOpacity (1.0f);
+        g.setGradientFill (ColourGradient (cosmos::voidC.withAlpha (0.1f), inner.getCentre(), cosmos::voidC.withAlpha (0.85f), inner.getTopLeft(), true));
+        g.fillRect (inner);
         Random rnd (11);
         for (int i = 0; i < 160; ++i)
         {
@@ -707,7 +714,9 @@ void OrbPad::mouseUp (const MouseEvent&)
 MatrixRow::MatrixRow (APVTS& state, int s) : slot (s)
 {
     const String n = String (s + 1).paddedLeft ('0', 2);
-    for (auto* c : { &src, &dst, &via }) addAndMakeVisible (*c);
+    for (auto* c : { &src, &dst, &via, &pol }) addAndMakeVisible (*c);
+    pol.addItemList (pg::choices::modPolarity(), 1);
+    pol.setTooltip ("Native keeps the source as it is; Unipolar = 0..1, Bipolar = -1..1");
     src.addItemList (pg::choices::modSources(), 1);
     via.addItemList (pg::choices::modSources(), 1);
     dst.addItemList (pg::choices::modDests(), 1);
@@ -717,6 +726,7 @@ MatrixRow::MatrixRow (APVTS& state, int s) : slot (s)
     srcA = std::make_unique<APVTS::ComboBoxAttachment> (state, "mtx" + n + "_src", src);
     dstA = std::make_unique<APVTS::ComboBoxAttachment> (state, "mtx" + n + "_dst", dst);
     viaA = std::make_unique<APVTS::ComboBoxAttachment> (state, "mtx" + n + "_via", via);
+    polA = std::make_unique<APVTS::ComboBoxAttachment> (state, "mtx" + n + "_pol", pol);
     amtA = std::make_unique<APVTS::SliderAttachment> (state, "mtx" + n + "_amt", amt);
     amt.textFromValueFunction = [] (double v) { return String (v, 2); };
     amt.updateText();
@@ -734,11 +744,75 @@ void MatrixRow::resized()
     auto r = getLocalBounds().reduced (0, 2);
     r.removeFromLeft (30);
     const int w = r.getWidth();
-    src.setBounds (r.removeFromLeft (w * 22 / 100).reduced (3, 0));
-    r.removeFromLeft (6);
-    dst.setBounds (r.removeFromLeft (w * 28 / 100).reduced (3, 0));
-    r.removeFromLeft (6);
-    via.setBounds (r.removeFromRight (w * 18 / 100).reduced (3, 0));
+    src.setBounds (r.removeFromLeft (w * 19 / 100).reduced (3, 0));
+    r.removeFromLeft (4);
+    pol.setBounds (r.removeFromLeft (w * 11 / 100).reduced (3, 0));
+    r.removeFromLeft (4);
+    dst.setBounds (r.removeFromLeft (w * 25 / 100).reduced (3, 0));
+    r.removeFromLeft (4);
+    via.setBounds (r.removeFromRight (w * 16 / 100).reduced (3, 0));
     amt.setBounds (r.reduced (6, 0));
+}
+} // namespace pg::ui
+
+namespace pg::ui
+{
+using namespace juce;
+
+AboutOverlay::AboutOverlay()
+{
+    banner  = ImageCache::getFromMemory (BinaryData::bannerarch_jpg, BinaryData::bannerarch_jpgSize);
+    machine = ImageCache::getFromMemory (BinaryData::aboutmachine_jpg, BinaryData::aboutmachine_jpgSize);
+    serpent = ImageCache::getFromMemory (BinaryData::artserpent_jpg, BinaryData::artserpent_jpgSize);
+    isologo = ImageCache::getFromMemory (BinaryData::isologo_png, BinaryData::isologo_pngSize);
+}
+
+void AboutOverlay::paint (Graphics& g)
+{
+    g.fillAll (cosmos::voidC.withAlpha (0.86f));
+    auto card = getLocalBounds().toFloat().withSizeKeepingCentre (jmin (880.0f, (float) getWidth() - 40.0f),
+                                                                  jmin (600.0f, (float) getHeight() - 40.0f));
+    auto cover = [&g] (const Image& img, Rectangle<float> r)
+    {
+        Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (r.toNearestInt());
+        g.drawImage (img, r, RectanglePlacement::centred | RectanglePlacement::fillDestination);
+    };
+    auto inner = brand::chamferFrame (g, card, 26.0f, 7.0f, cosmos::voidC, cosmos::orchid, true).reduced (14.0f);
+
+    auto top = inner.removeFromTop (inner.getHeight() * 0.36f);
+    cover (banner, top);
+    brand::checker (g, inner.removeFromTop (8.0f), 4.0f);
+    inner.removeFromTop (12.0f);
+
+    const float side = jmax (120.0f, (inner.getWidth() - 300.0f) * 0.5f);
+    auto left = inner.removeFromLeft (side);
+    cover (machine, left);
+    auto right = inner.removeFromRight (side).withTrimmedTop (0.0f);
+    cover (serpent, right);
+
+    auto mid = inner.reduced (18.0f, 0.0f);
+    auto logoR = mid.removeFromTop (74.0f).withSizeKeepingCentre (70.0f, 70.0f);
+    g.drawImage (isologo, logoR, RectanglePlacement::centred);   // official isologo file
+    mid.removeFromTop (8.0f);
+    g.setColour (cosmos::starlight);
+    g.setFont (fonts::display (17.0f));
+    g.drawText ("SYNTHGULARITY", mid.removeFromTop (26.0f), Justification::centred);
+    g.setColour (cosmos::gold);
+    g.setFont (fonts::label (10.5f));
+   #ifdef JucePlugin_VersionString
+    const String ver ("v" JucePlugin_VersionString);
+   #else
+    const String ver ("dev");
+   #endif
+    g.drawText ("BY CALABI YAU  -  " + ver, mid.removeFromTop (18.0f), Justification::centred);
+    mid.removeFromTop (12.0f);
+    g.setColour (cosmos::cream);
+    g.setFont (fonts::sans (11.0f));
+    g.drawFittedText ("Granular, wavetable and Mutable Instruments engines in one voice.\n\n"
+                      "Plaits, Rings and Clouds DSP by Emilie Gillet (MIT).\n"
+                      "JUCE, CLAP extensions, Syncopate and Montserrat fonts.\n\n"
+                      "Click anywhere to close.",
+                      mid.toNearestInt(), Justification::centredTop, 10);
 }
 } // namespace pg::ui

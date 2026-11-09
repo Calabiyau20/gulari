@@ -33,6 +33,7 @@ namespace choices
     juce::StringArray retrigModes();
     juce::StringArray modSources();
     juce::StringArray modDests();
+    juce::StringArray modPolarity();
     juce::StringArray seqModes();
     juce::StringArray arpModes();
     juce::StringArray ringsModels();
@@ -59,11 +60,18 @@ namespace choices
     PC(seq##n##_mode, "Seq " #n " Mode", seqModes, 0) \
     PF(seq##n##_glide, "Seq " #n " Glide", 0.0f, 1.0f, 0.0f, 0.0f)
 
+#define PG_MENV(PF, PI, PC, PB, n) \
+    PF(menv##n##_a, "Mod Env " #n " Attack", 0.001f, 10.0f, 0.005f, 0.5f) \
+    PF(menv##n##_d, "Mod Env " #n " Decay", 0.001f, 10.0f, 0.5f, 0.5f) \
+    PF(menv##n##_s, "Mod Env " #n " Sustain", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(menv##n##_r, "Mod Env " #n " Release", 0.001f, 15.0f, 0.3f, 0.8f)
+
 #define PG_MTX(PF, PI, PC, PB, n) \
     PC(mtx##n##_src, "Matrix " #n " Source", modSources, 0) \
     PC(mtx##n##_dst, "Matrix " #n " Destination", modDests, 0) \
     PF(mtx##n##_amt, "Matrix " #n " Amount", -1.0f, 1.0f, 0.0f, 0.0f) \
-    PC(mtx##n##_via, "Matrix " #n " Via", modSources, 0)
+    PC(mtx##n##_via, "Matrix " #n " Via", modSources, 0) \
+    PC(mtx##n##_pol, "Matrix " #n " Polarity", modPolarity, 0)
 
 #define PG_WT(PF, PI, PC, PB, o, O) \
     PB(wt##o##_on, "WT " #O " On", false) \
@@ -71,7 +79,7 @@ namespace choices
     PF(wt##o##_pos, "WT " #O " Position", 0.0f, 1.0f, 0.0f, 0.0f) \
     PC(wt##o##_warp, "WT " #O " Warp Mode", warpModes, 0) \
     PF(wt##o##_wamt, "WT " #O " Warp Amount", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PI(wt##o##_oct, "WT " #O " Octave", -3, 3, 0) \
+    PI(wt##o##_oct, "WT " #O " Octave", -4, 4, 0) \
     PI(wt##o##_semi, "WT " #O " Semitone", -12, 12, 0) \
     PF(wt##o##_fine, "WT " #O " Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
     PI(wt##o##_unison, "WT " #O " Unison", 1, 7, 1) \
@@ -79,7 +87,8 @@ namespace choices
     PF(wt##o##_spread, "WT " #O " Spread", 0.0f, 1.0f, 0.6f, 0.0f) \
     PF(wt##o##_level, "WT " #O " Level", 0.0f, 1.0f, 0.7f, 0.0f) \
     PF(wt##o##_pan, "WT " #O " Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
-    PB(wt##o##_rphase, "WT " #O " Random Phase", true)
+    PB(wt##o##_rphase, "WT " #O " Random Phase", true) \
+    PF(wt##o##_phase, "WT " #O " Phase", 0.0f, 1.0f, 0.0f, 0.0f)
 
 #define PG_PARAM_LIST(PF, PI, PC, PB) \
     /* ---- global ---- */ \
@@ -101,6 +110,7 @@ namespace choices
     PF(menv_d, "Mod Env Decay", 0.001f, 10.0f, 0.5f, 0.5f) \
     PF(menv_s, "Mod Env Sustain", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(menv_r, "Mod Env Release", 0.001f, 15.0f, 0.3f, 0.8f) \
+    PG_MENV(PF, PI, PC, PB, 2) PG_MENV(PF, PI, PC, PB, 3) PG_MENV(PF, PI, PC, PB, 4) \
     /* ---- granular oscillator ---- */ \
     PB(gr_on, "Grain On", true) \
     PC(gr_mode, "Grain Mode", grainModes, 0) \
@@ -109,7 +119,7 @@ namespace choices
     PF(gr_spray, "Grain Spray", 0.0f, 1.0f, 0.05f, 0.0f) \
     PF(gr_size, "Grain Size", 5.0f, 1000.0f, 120.0f, 100.0f) \
     PF(gr_density, "Grain Density", 1.0f, 200.0f, 20.0f, 20.0f) \
-    PF(gr_pitch, "Grain Pitch", -24.0f, 24.0f, 0.0f, 0.0f) \
+    PF(gr_pitch, "Grain Pitch", -48.0f, 48.0f, 0.0f, 0.0f) \
     PF(gr_prand, "Grain Pitch Random", 0.0f, 12.0f, 0.0f, 0.0f) \
     PB(gr_keytrack, "Grain Keytrack", true) \
     PI(gr_root, "Grain Root Note", 24, 96, 60) \
@@ -142,19 +152,20 @@ namespace choices
     PG_WT(PF, PI, PC, PB, B, B) \
     /* ---- modulator / sub / noise ---- */ \
     PC(mo_wave, "Mod Osc Wave", modWaves, 0) \
-    PI(mo_oct, "Mod Osc Octave", -3, 3, 0) \
+    PI(mo_oct, "Mod Osc Octave", -4, 4, 0) \
     PI(mo_semi, "Mod Osc Semitone", -12, 12, 0) \
     PF(mo_fine, "Mod Osc Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
     PF(mo_level, "Mod Osc Level", 0.0f, 1.0f, 0.0f, 0.0f) \
     PC(sub_wave, "Sub Wave", subWaves, 0) \
     PI(sub_oct, "Sub Octave", -2, -1, -1) \
     PF(sub_level, "Sub Level", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sub_phase, "Sub Phase", 0.0f, 1.0f, 0.0f, 0.0f) \
     PC(noise_type, "Noise Type", noiseTypes, 0) \
     PF(noise_level, "Noise Level", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- Plaits ---- */ \
     PB(pl_on, "Plaits On", false) \
     PC(pl_engine, "Plaits Engine", plaitsEngines, 8) \
-    PI(pl_oct, "Plaits Octave", -3, 3, 0) \
+    PI(pl_oct, "Plaits Octave", -4, 4, 0) \
     PF(pl_harm, "Plaits Harmonics", 0.0f, 1.0f, 0.5f, 0.0f) \
     PF(pl_timbre, "Plaits Timbre", 0.0f, 1.0f, 0.5f, 0.0f) \
     PF(pl_morph, "Plaits Morph", 0.0f, 1.0f, 0.5f, 0.0f) \
@@ -308,7 +319,7 @@ int indexOf (const juce::String& id);   // -1 if unknown
 enum ModSrc { MS_None, MS_Lfo1, MS_Lfo2, MS_Lfo3, MS_Lfo4, MS_Chaos1, MS_Chaos2,
               MS_Macro1, MS_Macro2, MS_Macro3, MS_Macro4, MS_Seq1, MS_Seq2, MS_Seq3, MS_Seq4,
               MS_ModEnv, MS_FiltEnv, MS_AmpEnv, MS_Velocity, MS_Note, MS_ModWheel,
-              MS_Aftertouch, MS_PitchBend, MS_Random, MS_Count };
+              MS_Aftertouch, MS_PitchBend, MS_Random, MS_ModEnv2, MS_ModEnv3, MS_ModEnv4, MS_Count };
 
 enum ModDst { MD_None,
               MD_WtAPos, MD_WtAPitch, MD_WtALevel, MD_WtBPos, MD_WtBPitch, MD_WtBLevel,
@@ -320,6 +331,6 @@ enum ModDst { MD_None,
               MD_VoiceCount,                      // ---- below: global (FX) destinations ----
               MD_DelayMix = MD_VoiceCount, MD_DelayFb, MD_RnStructure, MD_RnBright, MD_RnPos,
               MD_GrfxPos, MD_GrfxSize, MD_GrfxDensity, MD_GrfxTexture, MD_GrfxMix,
-              MD_FlMix, MD_PhMix, MD_Count };
+              MD_FlMix, MD_PhMix, MD_DelayTime, MD_Count };
 
 } // namespace pg

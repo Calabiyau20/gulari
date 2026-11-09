@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 // Calabi Yau brand system (manual "calabi-yau-brand.js" v1.2.0) translated to JUCE.
@@ -90,5 +91,10 @@ public:
     int getTabButtonBestWidth (juce::TabBarButton&, int) override { return 112; }
     void drawTabAreaBehindFrontButton (juce::TabbedButtonBar&, juce::Graphics&, int, int) override {}
     void drawBubble (juce::Graphics&, juce::BubbleComponent&, const juce::Point<float>& tip, const juce::Rectangle<float>& body) override;
+
+private:
+    const juce::Image& knobFace (int px);   // official isologo, pre-scaled per size
+    juce::Image isologo;
+    std::map<int, juce::Image> faceCache;
 };
 } // namespace pg::ui
