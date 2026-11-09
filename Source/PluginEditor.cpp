@@ -212,7 +212,11 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
     addAndMakeVisible (presetBox);
     presetBox.setTextWhenNothingSelected ("Presets");
     presetBox.onChange = [this] { choosePreset (presetBox.getSelectedId()); };
-    for (auto* b : { &prevButton, &nextButton, &saveButton, &initButton, &manualButton }) addAndMakeVisible (*b);
+    for (auto* b : { &prevButton, &nextButton, &saveButton, &initButton, &manualButton, &loadButton, &foldersButton }) addAndMakeVisible (*b);
+    loadButton.setTooltip ("Open a preset file (.sgpreset) from any folder");
+    foldersButton.setTooltip ("Choose the folders where presets are opened from and saved to");
+    loadButton.onClick = [this] { loadPresetDialog(); };
+    foldersButton.onClick = [this] { foldersMenu(); };
     manualButton.setTooltip ("Open the user manual (PDF, English or Spanish)");
     manualButton.onClick = [this]
     {
@@ -1073,19 +1077,24 @@ void SynthgularityEditor::resized()
     auto header = r.removeFromTop (kHeaderH).reduced (12, 12);
     r.removeFromTop (10);
     header.removeFromLeft (318);
-    master->setBounds (header.removeFromRight (jmin (480, header.getWidth() - 500)).withTrimmedTop (-8).withTrimmedBottom (-8));
+    master->setBounds (header.removeFromRight (jmin (410, header.getWidth() - 560)).withTrimmedTop (-8).withTrimmedBottom (-8));
     header.removeFromRight (6);
     gonio->setBounds (header.removeFromRight (64).withTrimmedTop (-8).withTrimmedBottom (-8));
     header.removeFromRight (8);
-    auto presetArea = header.withSizeKeepingCentre (jmin (600, header.getWidth()), 30).translated (0, -9);
-    voicesLabel.setBounds (presetArea.translated (0, 31).withHeight (16));
+    auto presetArea = header.withSizeKeepingCentre (jmin (560, header.getWidth()), 30).translated (0, -9);
+    // second row: voices on the left, FOLDERS and MANUAL on the right
+    auto row2 = presetArea.translated (0, 32).withHeight (18);
+    manualButton.setBounds (row2.removeFromRight (70));
+    row2.removeFromRight (4);
+    foldersButton.setBounds (row2.removeFromRight (76));
+    voicesLabel.setBounds (row2);
     prevButton.setBounds (presetArea.removeFromLeft (30));
     presetArea.removeFromLeft (4);
-    manualButton.setBounds (presetArea.removeFromRight (78));
+    initButton.setBounds (presetArea.removeFromRight (52));
     presetArea.removeFromRight (4);
-    initButton.setBounds (presetArea.removeFromRight (60));
+    saveButton.setBounds (presetArea.removeFromRight (56));
     presetArea.removeFromRight (4);
-    saveButton.setBounds (presetArea.removeFromRight (64));
+    loadButton.setBounds (presetArea.removeFromRight (56));
     presetArea.removeFromRight (4);
     nextButton.setBounds (presetArea.removeFromRight (30));
     presetArea.removeFromRight (4);
@@ -1138,7 +1147,9 @@ void SynthgularityEditor::refreshPresetMenu()
         PopupMenu userTop;
         for (int i = 0; i < userPresets.size(); ++i)
         {
-            const auto rel = userPresets[i].getRelativePathFrom (proc.presetFolder()).replaceCharacter ('\\', '/');
+            const auto open = proc.folders().openFolder();
+            const auto from = userPresets[i].isAChildOf (open) ? open : proc.presetFolder();
+            const auto rel = userPresets[i].getRelativePathFrom (from).replaceCharacter ('\\', '/');
             const auto dir = rel.upToLastOccurrenceOf ("/", false, false);
             const auto name = userPresets[i].getFileNameWithoutExtension();
             if (dir.isEmpty()) { userTop.addItem (1000 + i, name); continue; }
@@ -1174,7 +1185,8 @@ void SynthgularityEditor::choosePreset (int id)
 
 void SynthgularityEditor::savePresetDialog()
 {
-    auto* w = new AlertWindow ("Save preset", "Stores every knob, the SEQ and ARP steps and the paths of your loaded files.", MessageBoxIconType::NoIcon, this);
+    auto* w = new AlertWindow ("Save preset", "Stores every knob, the SEQ and ARP steps and the paths of your loaded files.\nFolder: "
+                               + proc.folders().saveFolder().getFullPathName() + "  (change it with FOLDERS)", MessageBoxIconType::NoIcon, this);
     w->addTextEditor ("name", proc.currentPresetName, "Name");
     w->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));
@@ -1249,4 +1261,51 @@ void SynthgularityEditor::openManual (bool spanish)
    #else
     juce::ignoreUnused (spanish);
    #endif
+}
+
+void SynthgularityEditor::loadPresetDialog()
+{
+    chooser = std::make_unique<FileChooser> ("Open a preset", proc.folders().openFolder(), "*.sgpreset");
+    chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (! f.existsAsFile()) return;
+        if (! proc.loadPreset (f)) { showError ("Could not read " + f.getFileName() + ". Is it a Synthgularity preset (.sgpreset)?"); return; }
+        presetBox.setText (proc.currentPresetName, dontSendNotification);
+        for (auto* l : lanes) l->repaint();
+        if (arpGrid) arpGrid->repaint();
+    });
+}
+
+void SynthgularityEditor::foldersMenu()
+{
+    auto& pf = proc.folders();
+    PopupMenu m;
+    m.addSectionHeader ("Open presets from:  " + pf.openFolder().getFullPathName());
+    m.addItem (1, "Choose the folder to open presets from...");
+    m.addItem (3, "Show this folder");
+    m.addSectionHeader ("Save presets to:  " + pf.saveFolder().getFullPathName());
+    m.addItem (2, "Choose the folder to save presets to...");
+    m.addItem (4, "Show this folder");
+    m.addSeparator();
+    m.addItem (5, "Use the default folders (Documents / Calabi Yau / Synthgularity / Presets)");
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&foldersButton), [this] (int r)
+    {
+        auto& f = proc.folders();
+        if (r == 1 || r == 2)
+        {
+            chooser = std::make_unique<FileChooser> (r == 1 ? "Folder to open presets from" : "Folder to save presets to",
+                                                     r == 1 ? f.openFolder() : f.saveFolder());
+            chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories, [this, r] (const FileChooser& fc)
+            {
+                const auto dir = fc.getResult();
+                if (! dir.isDirectory()) return;
+                if (r == 1) proc.folders().setOpenFolder (dir); else proc.folders().setSaveFolder (dir);
+                refreshPresetMenu();
+            });
+        }
+        else if (r == 3) f.openFolder().revealToUser();
+        else if (r == 4) f.saveFolder().revealToUser();
+        else if (r == 5) { f.useDefaults(); refreshPresetMenu(); }
+    });
 }

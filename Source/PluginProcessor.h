@@ -2,6 +2,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include "Params.h"
+#include "PresetFolders.h"
 #include "dsp/Synth.h"
 #include "dsp/Fx.h"
 #include "dsp/Sample.h"
@@ -55,7 +56,8 @@ public:
     pg::MasterMeter meter;
 
     // ---- presets ----
-    juce::File presetFolder() const;
+    juce::File presetFolder() const;            // the default folder (the Factory Library lives here)
+    pg::PresetFolders& folders() { return *presetFolders; }
     juce::Array<juce::File> listPresets() const;
     bool savePreset (const juce::String& name, juce::String& error);
     bool savePresetTo (const juce::File& file, const juce::String& name);
@@ -95,6 +97,7 @@ private:
     std::array<juce::RangedAudioParameter*, pg::kNumParams> params {};
     std::array<float, pg::kNumParams> cache {};
     std::vector<juce::NormalisableRange<float>> ranges;
+    std::unique_ptr<pg::PresetFolders> presetFolders;
     juce::SmoothedValue<float> masterGain { 0.5f };
     std::vector<float> gainRamp;
 

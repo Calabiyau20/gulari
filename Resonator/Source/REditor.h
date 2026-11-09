@@ -42,7 +42,10 @@ private:
     double animT = 0.0;
 
     juce::ComboBox presetBox, skinBox;
-    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" };
+    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" },
+                     loadButton { "LOAD" }, foldersButton { "FOLDERS" };
+    void loadPresetDialog();
+    void foldersMenu();
     std::unique_ptr<cyr::ui::ModKnob> masterKnob;
     juce::Label voicesLabel;
 

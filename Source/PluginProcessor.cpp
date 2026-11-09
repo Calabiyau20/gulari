@@ -18,6 +18,8 @@ SynthgularityProcessor::SynthgularityProcessor()
         params[(size_t) i] = apvts.getParameter (idOf (i));
         jassert (raw[(size_t) i] != nullptr);
     }
+    presetFolders = std::make_unique<pg::PresetFolders> (PG_PRODUCT_NAME, juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                         .getChildFile (PG_COMPANY_NAME).getChildFile (PG_PRODUCT_NAME).getChildFile ("Presets"));
     for (int i = 0; i < kNumParams; ++i)
         ranges.push_back (dynamic_cast<juce::RangedAudioParameter*> (params[(size_t) i])->getNormalisableRange());
     synth.setRanges (&ranges);
@@ -387,9 +389,14 @@ juce::File SynthgularityProcessor::presetFolder() const
     return f;
 }
 
+// presets of the folder chosen to open from, plus the Factory Library when that folder is elsewhere
 juce::Array<juce::File> SynthgularityProcessor::listPresets() const
 {
-    auto files = presetFolder().findChildFiles (juce::File::findFiles, true, "*.sgpreset");
+    const auto open = presetFolders->openFolder();
+    auto files = open.findChildFiles (juce::File::findFiles, true, "*.sgpreset");
+    const auto lib = presetFolder().getChildFile ("Factory Library");
+    if (lib.isDirectory() && ! lib.isAChildOf (open) && lib != open)
+        files.addArray (lib.findChildFiles (juce::File::findFiles, true, "*.sgpreset"));
     files.sort();
     return files;
 }
@@ -400,7 +407,7 @@ bool SynthgularityProcessor::savePreset (const juce::String& name, juce::String&
     if (clean.isEmpty()) { error = "Type a name for the preset."; return false; }
     currentPresetName = clean;
     auto xml = buildState().createXml();
-    auto file = presetFolder().getChildFile (clean + ".sgpreset");
+    auto file = presetFolders->saveFolder().getChildFile (clean + ".sgpreset");
     if (! xml->writeTo (file)) { error = "Could not write " + file.getFullPathName(); return false; }
     return true;
 }

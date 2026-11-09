@@ -56,7 +56,10 @@ private:
 
     // header
     juce::ComboBox presetBox;
-    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" }, manualButton { "MANUAL" };
+    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" }, manualButton { "MANUAL" },
+                     loadButton { "LOAD" }, foldersButton { "FOLDERS" };
+    void loadPresetDialog();
+    void foldersMenu();
     void openManual (bool spanish);
     std::unique_ptr<pg::ui::MasterSection> master;
     std::unique_ptr<pg::ui::GonioMini> gonio;

@@ -166,13 +166,17 @@ ResonatorEditor::ResonatorEditor (ResonatorProcessor& p) : AudioProcessorEditor 
     auto& st = proc.apvts;
 
     // ---------------- header ----------------
-    for (auto* c : std::initializer_list<Component*> { &presetBox, &prevButton, &nextButton, &saveButton, &initButton, &skinBox, &voicesLabel })
+    for (auto* c : std::initializer_list<Component*> { &presetBox, &prevButton, &nextButton, &saveButton, &initButton, &loadButton, &foldersButton, &skinBox, &voicesLabel })
         addAndMakeVisible (c);
     refreshPresetMenu();
     presetBox.onChange = [this] { choosePreset (presetBox.getSelectedId()); };
     prevButton.onClick = [this] { const int i = presetBox.getSelectedItemIndex(); if (i > 0) presetBox.setSelectedItemIndex (i - 1); };
     nextButton.onClick = [this] { const int i = presetBox.getSelectedItemIndex(); if (i + 1 < presetBox.getNumItems()) presetBox.setSelectedItemIndex (i + 1); };
     saveButton.onClick = [this] { savePresetDialog(); };
+    loadButton.onClick = [this] { loadPresetDialog(); };
+    foldersButton.onClick = [this] { foldersMenu(); };
+    loadButton.setTooltip ("Open a preset file (.cyrpreset) from any folder");
+    foldersButton.setTooltip ("Choose the folders where presets are opened from and saved to");
     initButton.onClick = [this] { proc.initPreset(); presetBox.setText ("Init", dontSendNotification); };
     for (int i = 0; i < (int) skins().size(); ++i) skinBox.addItem (skins()[(size_t) i].name, i + 1);
     skinBox.setSelectedId (skinIndex() + 1, dontSendNotification);
@@ -625,13 +629,17 @@ void ResonatorEditor::resized()
     auto skinArea = header.removeFromRight (170).withSizeKeepingCentre (170, 28).translated (0, -9);
     skinBox.setBounds (skinArea);
     header.removeFromRight (12);
-    auto presetArea = header.withSizeKeepingCentre (jmin (500, header.getWidth()), 30).translated (0, -9);
+    auto presetArea = header.withSizeKeepingCentre (jmin (620, header.getWidth()), 30).translated (0, -9);
     voicesLabel.setBounds (presetArea.translated (0, 31).withHeight (16));
     prevButton.setBounds (presetArea.removeFromLeft (30));
     presetArea.removeFromLeft (4);
-    initButton.setBounds (presetArea.removeFromRight (56));
+    foldersButton.setBounds (presetArea.removeFromRight (82));
     presetArea.removeFromRight (4);
-    saveButton.setBounds (presetArea.removeFromRight (60));
+    initButton.setBounds (presetArea.removeFromRight (52));
+    presetArea.removeFromRight (4);
+    saveButton.setBounds (presetArea.removeFromRight (56));
+    presetArea.removeFromRight (4);
+    loadButton.setBounds (presetArea.removeFromRight (56));
     presetArea.removeFromRight (4);
     nextButton.setBounds (presetArea.removeFromRight (30));
     presetArea.removeFromRight (4);
@@ -708,14 +716,60 @@ void ResonatorEditor::choosePreset (int id)
 
 void ResonatorEditor::savePresetDialog()
 {
-    proc.presetFolder().createDirectory();
-    chooser = std::make_unique<FileChooser> ("Save preset", proc.presetFolder().getChildFile (proc.currentPresetName + ".cyrpreset"), "*.cyrpreset");
+    const auto dir = proc.folders().saveFolder();
+    chooser = std::make_unique<FileChooser> ("Save preset", dir.getChildFile (proc.currentPresetName + ".cyrpreset"), "*.cyrpreset");
     chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
                           [this] (const FileChooser& fc)
     {
         const auto f = fc.getResult();
         if (f == File()) return;
+        // saving somewhere else makes that the new save folder
+        if (f.getParentDirectory() != proc.folders().saveFolder()) proc.folders().setSaveFolder (f.getParentDirectory());
         proc.savePreset (f.getFileNameWithoutExtension());
         refreshPresetMenu();
+    });
+}
+
+void ResonatorEditor::loadPresetDialog()
+{
+    chooser = std::make_unique<FileChooser> ("Open a preset", proc.folders().openFolder(), "*.cyrpreset");
+    chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (! f.existsAsFile()) return;
+        if (proc.loadPreset (f)) presetBox.setText (proc.currentPresetName, dontSendNotification);
+    });
+}
+
+void ResonatorEditor::foldersMenu()
+{
+    auto& pf = proc.folders();
+    PopupMenu m;
+    m.addSectionHeader ("Open presets from:  " + pf.openFolder().getFullPathName());
+    m.addItem (1, "Choose the folder to open presets from...");
+    m.addItem (3, "Show this folder");
+    m.addSectionHeader ("Save presets to:  " + pf.saveFolder().getFullPathName());
+    m.addItem (2, "Choose the folder to save presets to...");
+    m.addItem (4, "Show this folder");
+    m.addSeparator();
+    m.addItem (5, "Use the default folders (Documents / Calabi Yau / Calabi-Yau Resonator / Presets)");
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&foldersButton), [this] (int r)
+    {
+        auto& f = proc.folders();
+        if (r == 1 || r == 2)
+        {
+            chooser = std::make_unique<FileChooser> (r == 1 ? "Folder to open presets from" : "Folder to save presets to",
+                                                     r == 1 ? f.openFolder() : f.saveFolder());
+            chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories, [this, r] (const FileChooser& fc)
+            {
+                const auto dir = fc.getResult();
+                if (! dir.isDirectory()) return;
+                if (r == 1) proc.folders().setOpenFolder (dir); else proc.folders().setSaveFolder (dir);
+                refreshPresetMenu();
+            });
+        }
+        else if (r == 3) f.openFolder().revealToUser();
+        else if (r == 4) f.saveFolder().revealToUser();
+        else if (r == 5) { f.useDefaults(); refreshPresetMenu(); }
     });
 }

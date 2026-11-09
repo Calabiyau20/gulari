@@ -247,14 +247,14 @@ juce::File ResonatorProcessor::presetFolder() const
 
 juce::Array<juce::File> ResonatorProcessor::listPresets() const
 {
-    auto files = presetFolder().findChildFiles (juce::File::findFiles, true, "*.cyrpreset");
+    auto files = presetFolders.openFolder().findChildFiles (juce::File::findFiles, true, "*.cyrpreset");
     files.sort();
     return files;
 }
 
 bool ResonatorProcessor::savePreset (const juce::String& name)
 {
-    auto dir = presetFolder();
+    auto dir = presetFolders.saveFolder();
     dir.createDirectory();
     auto state = apvts.copyState();
     state.setProperty ("presetName", name, nullptr);

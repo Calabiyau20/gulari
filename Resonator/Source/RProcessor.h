@@ -5,6 +5,7 @@
 #include "RParams.h"
 #include "dsp/RSynth.h"
 #include "Params.h"
+#include "PresetFolders.h"
 #include "dsp/Fx.h"
 #include "dsp/Meter.h"
 #include <array>
@@ -48,7 +49,8 @@ public:
     static juce::StringArray factoryPresetNames();
     void loadFactoryPreset (int index);
     void initPreset();
-    juce::File presetFolder() const;
+    juce::File presetFolder() const;          // default folder
+    pg::PresetFolders& folders() { return presetFolders; }
     juce::Array<juce::File> listPresets() const;
     bool savePreset (const juce::String& name);
     bool loadPreset (const juce::File& file);
@@ -77,6 +79,8 @@ private:
     std::vector<std::pair<int, std::atomic<float>*>> hosted;   // pg index -> raw value
     std::array<float, pg::kNumParams> pgCache {};
 
+    pg::PresetFolders presetFolders { "Calabi-Yau Resonator", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+        .getChildFile ("Calabi Yau").getChildFile ("Calabi-Yau Resonator").getChildFile ("Presets") };
     pg::FxChain fx;
     juce::SmoothedValue<float> masterGain { 0.5f };
     std::vector<float> gainRamp;
