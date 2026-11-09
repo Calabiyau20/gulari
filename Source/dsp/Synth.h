@@ -15,7 +15,7 @@ struct StepData
     std::array<std::atomic<bool>, kLanes * kSteps> seqLock {};
     std::array<std::atomic<bool>, kSteps> arpOn {}, arpTie {};
     std::array<std::atomic<int>, kSteps> arpTranspose {}, arpRatchet {};
-    std::array<std::atomic<float>, kSteps> arpVel {};
+    std::array<std::atomic<float>, kSteps> arpVel {}, arpProb {}, arpGate {};
     std::array<std::atomic<int>, kLanes> seqPlayStep {};
     std::atomic<int> arpPlayStep { -1 };
 

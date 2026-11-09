@@ -123,6 +123,24 @@ int main (int argc, char** argv)
         { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "chaos1_type", (float) c); setP (pr, "chaos1_rate", 20.0f);
           setP (pr, "mtx01_src", (float) pg::MS_Chaos1); setP (pr, "mtx01_dst", (float) pg::MD_WtAPitch); setP (pr, "mtx01_amt", 0.5f);
           setP (pr, "mtx02_src", (float) pg::MS_Chaos2Z); setP (pr, "mtx02_dst", (float) pg::MD_Cutoff); setP (pr, "mtx02_amt", 0.5f); });
+    const char* mbOn[] = { "", "mb_tp_on", "mb_eq_on", "mb_cp_on", "mb_ch_on", "mb_im_on", "mb_tg_on", "mb_dj_on", "mb_bc_on", "mb_tr_on", "mb_lm_on" };
+    for (int k = 1; k <= 10; ++k)
+        renderCase ("MixBus " + pg::choices::mixbusTypes()[k], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, mbOn[k], 1); setP (pr, "mb_dj_pos", -0.5f); setP (pr, "mb_eq_low", 6); setP (pr, "mb_lm_in", 12); });
+    for (int o = 1; o <= 2; ++o)
+        renderCase ("Oversampling " + pg::choices::oversamplingModes()[o], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "wtA_warp", 6); setP (pr, "wtA_wamt", 0.8f); setP (pr, "bite_drive", 0.8f); setP (pr, "oversampling", (float) o); setP (pr, "sp_on", 1); setP (pr, "pl_on", 1); });
+    for (int w = 1; w <= 8; ++w)
+        renderCase ("Spectral warp " + pg::choices::spectralWarps()[w], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "sp_on", 1); setP (pr, "sp_warp", (float) w); setP (pr, "sp_wamt", 0.7f); setP (pr, "sp_pdecay", 0.5f); setP (pr, "sp_jitter", 0.5f); });
+    for (int t = 0; t < 5; ++t)
+        renderCase ("FM A>Spectral " + pg::choices::fmModes()[t], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "sp_on", 1); setP (pr, "wtA_on", 1); setP (pr, "wtA_level", 0); setP (pr, "fm_a_s", 0.7f); setP (pr, "fm_s_b", 0.5f); setP (pr, "wtB_on", 1); setP (pr, "fm_type_s", (float) t); });
+    renderCase ("Routing: all bypass filter", [&] (SynthgularityProcessor& pr)
+    { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "sp_on", 1); setP (pr, "flt_cutoff", 20); for (auto id : { "rt_flt_a", "rt_flt_sp" }) setP (pr, id, 0); setP (pr, "rt_order", 1); });
+    renderCase ("Seq lane route + arp prob", [&] (SynthgularityProcessor& pr)
+    { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "seq3_dst", (float) pg::MD_Cutoff); setP (pr, "seq3_amt", 1.0f); setP (pr, "seq5_dst", (float) pg::MD_MbDjFilter); setP (pr, "arp_on", 1);
+      for (int k = 0; k < 32; ++k) { pr.synth.steps.arpProb[(size_t) k].store (0.5f); pr.synth.steps.arpGate[(size_t) k].store (0.3f); } });
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES: " + juce::String (failures)) << "\n";
     return failures == 0 ? 0 : 1;
 }

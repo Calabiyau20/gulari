@@ -47,6 +47,12 @@ namespace choices
     juce::StringArray spectralSounds();
     juce::StringArray samplerSounds();
     juce::StringArray chaosTypes();
+    juce::StringArray spectralWarps();
+    juce::StringArray mixbusTypes();
+    juce::StringArray gatePatterns();
+    juce::StringArray routeOrders();
+    juce::StringArray oversamplingModes();
+    juce::StringArray distortionPositions();
 
     double divisionInBeats (int index);
 }
@@ -66,7 +72,9 @@ namespace choices
     PF(seq##n##_swing, "Seq " #n " Swing", 0.0f, 0.75f, 0.0f, 0.0f) \
     PC(seq##n##_mode, "Seq " #n " Mode", seqModes, 0) \
     PF(seq##n##_glide, "Seq " #n " Glide", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PC(seq##n##_dir, "Seq " #n " Direction", seqDirections, 0)
+    PC(seq##n##_dir, "Seq " #n " Direction", seqDirections, 0) \
+    PC(seq##n##_dst, "Seq " #n " Destination", modDests, 0) \
+    PF(seq##n##_amt, "Seq " #n " Amount", -1.0f, 1.0f, 0.5f, 0.0f)
 
 #define PG_MENV(PF, PI, PC, PB, n) \
     PF(menv##n##_a, "Mod Env " #n " Attack", 0.001f, 10.0f, 0.005f, 0.5f) \
@@ -191,6 +199,10 @@ namespace choices
     PF(sp_level, "Spectral Level", 0.0f, 1.0f, 0.7f, 0.0f) \
     PF(sp_pan, "Spectral Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
     PF(sp_width, "Spectral Width", 0.0f, 1.0f, 0.4f, 0.0f) \
+    PC(sp_warp, "Spectral Warp Mode", spectralWarps, 0) \
+    PF(sp_wamt, "Spectral Warp Amount", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_pdecay, "Spectral Partial Decay", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_jitter, "Spectral Jitter", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- one-shot sampler / sub / noise ---- */ \
     PB(smp_on, "Sampler On", false) \
     PC(smp_sound, "Sampler Sound", samplerSounds, 0) \
@@ -223,22 +235,32 @@ namespace choices
     PC(fm_type_a, "Mod Matrix Type A", fmModes, 0) \
     PC(fm_type_b, "Mod Matrix Type B", fmModes, 0) \
     PC(fm_type_c, "Mod Matrix Type C", fmModes, 0) \
+    PC(fm_type_s, "Mod Matrix Type Spectral", fmModes, 0) \
     PF(fm_amount, "FM Amount", 0.0f, 1.0f, 1.0f, 0.0f) \
     PF(fm_a_a, "FM A>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_a_b, "FM A>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_a_c, "FM A>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_a_s, "FM A>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_b_a, "FM B>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_b_b, "FM B>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_b_c, "FM B>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_b_s, "FM B>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_c_a, "FM C>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_c_b, "FM C>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_c_c, "FM C>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_c_s, "FM C>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_s_a, "FM Spectral>A", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_s_b, "FM Spectral>B", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_s_c, "FM Spectral>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_s_s, "FM Spectral>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_g_a, "FM Grain>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_g_b, "FM Grain>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_g_c, "FM Grain>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_g_s, "FM Grain>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_a, "FM Noise>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_b, "FM Noise>B", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_c, "FM Noise>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_n_s, "FM Noise>Spectral", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- bite ---- */ \
     PF(bite_drive, "MultiDistortion Drive", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(bite_fold, "MultiDistortion Fold", 0.0f, 1.0f, 0.0f, 0.0f) \
@@ -246,6 +268,14 @@ namespace choices
     PF(bite_soft, "MultiDistortion Saturate", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(bite_asym, "MultiDistortion Asymmetry", 0.0f, 1.0f, 0.0f, 0.0f) \
     PB(bite_post, "MultiDistortion After Filter", false) \
+    /* ---- routing ---- */ \
+    PB(rt_flt_a, "Route WT A Through Filter", true) PB(rt_flt_b, "Route WT B Through Filter", true) \
+    PB(rt_flt_c, "Route WT C Through Filter", true) PB(rt_flt_sp, "Route Spectral Through Filter", true) \
+    PB(rt_flt_gr, "Route Grain Through Filter", true) PB(rt_flt_pl, "Route Plaits Through Filter", true) \
+    PB(rt_flt_sub, "Route Sub+Noise Through Filter", true) PB(rt_flt_smp, "Route Sampler Through Filter", false) \
+    PB(rt_dist_sp, "Route Spectral Through Distortion", true) \
+    PC(rt_order, "FX Bus Order", routeOrders, 0) \
+    PC(oversampling, "Oversampling", oversamplingModes, 0) \
     PF(bite_mix, "MultiDistortion Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
     PF(bite_rect, "MultiDistortion Rectify", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(bite_tone, "MultiDistortion Tone", -1.0f, 1.0f, 0.0f, 0.0f) \
@@ -346,6 +376,38 @@ namespace choices
     PF(fx_rv_mod, "Reverb Modulation", 0.0f, 1.0f, 0.3f, 0.0f) \
     PF(fx_rv_width, "Reverb Width", 0.0f, 1.0f, 1.0f, 0.0f) \
     PF(fx_rv_mix, "Reverb Mix", 0.0f, 1.0f, 0.25f, 0.0f) \
+    /* ---- MIXBUS: second cascade of mix effects ---- */ \
+    PB(mb_tp_on, "MixBus Tape On", false) PF(mb_tp_drive, "MixBus Tape Drive", 0.0f, 1.0f, 0.3f, 0.0f) \
+    PF(mb_tp_wow, "MixBus Tape Wow", 0.0f, 1.0f, 0.15f, 0.0f) PF(mb_tp_tone, "MixBus Tape Tone", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(mb_tp_mix, "MixBus Tape Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PB(mb_eq_on, "MixBus EQ On", false) PF(mb_eq_low, "MixBus EQ Low", -12.0f, 12.0f, 0.0f, 0.0f) \
+    PF(mb_eq_mid, "MixBus EQ Mid", -12.0f, 12.0f, 0.0f, 0.0f) PF(mb_eq_mfreq, "MixBus EQ Mid Freq", 200.0f, 6000.0f, 1000.0f, 1000.0f) \
+    PF(mb_eq_high, "MixBus EQ High", -12.0f, 12.0f, 0.0f, 0.0f) PF(mb_eq_lcut, "MixBus EQ Low Cut", 20.0f, 600.0f, 20.0f, 100.0f) \
+    PF(mb_eq_hcut, "MixBus EQ High Cut", 2000.0f, 20000.0f, 20000.0f, 8000.0f) \
+    PB(mb_cp_on, "MixBus Comp On", false) PF(mb_cp_thr, "MixBus Comp Threshold", -40.0f, 0.0f, -12.0f, 0.0f) \
+    PF(mb_cp_ratio, "MixBus Comp Ratio", 1.0f, 20.0f, 3.0f, 4.0f) PF(mb_cp_att, "MixBus Comp Attack", 0.1f, 100.0f, 10.0f, 10.0f) \
+    PF(mb_cp_rel, "MixBus Comp Release", 10.0f, 1000.0f, 150.0f, 150.0f) PF(mb_cp_gain, "MixBus Comp Makeup", 0.0f, 24.0f, 0.0f, 0.0f) \
+    PF(mb_cp_mix, "MixBus Comp Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PB(mb_ch_on, "MixBus Chorus On", false) PF(mb_ch_rate, "MixBus Chorus Rate", 0.05f, 5.0f, 0.6f, 0.8f) \
+    PF(mb_ch_depth, "MixBus Chorus Depth", 0.0f, 1.0f, 0.5f, 0.0f) PF(mb_ch_mix, "MixBus Chorus Mix", 0.0f, 1.0f, 0.4f, 0.0f) \
+    PB(mb_im_on, "MixBus Imager On", false) PF(mb_im_width, "MixBus Imager Width", 0.0f, 2.0f, 1.2f, 0.0f) \
+    PF(mb_im_bass, "MixBus Imager Mono Bass", 20.0f, 400.0f, 120.0f, 100.0f) \
+    PB(mb_tg_on, "MixBus Gate On", false) PC(mb_tg_pat, "MixBus Gate Pattern", gatePatterns, 0) \
+    PC(mb_tg_div, "MixBus Gate Division", divisions, 4) PF(mb_tg_depth, "MixBus Gate Depth", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PF(mb_tg_smooth, "MixBus Gate Smooth", 0.0f, 1.0f, 0.2f, 0.0f) \
+    PB(mb_dj_on, "MixBus DJ Filter On", false) PF(mb_dj_pos, "MixBus DJ Filter", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(mb_dj_res, "MixBus DJ Filter Reso", 0.0f, 1.0f, 0.3f, 0.0f) \
+    PB(mb_bc_on, "MixBus Crusher On", false) PF(mb_bc_bits, "MixBus Crusher Bits", 2.0f, 16.0f, 10.0f, 0.0f) \
+    PF(mb_bc_rate, "MixBus Crusher Downsample", 1.0f, 32.0f, 1.0f, 4.0f) PF(mb_bc_mix, "MixBus Crusher Mix", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PB(mb_tr_on, "MixBus Transient On", false) PF(mb_tr_att, "MixBus Transient Attack", -1.0f, 1.0f, 0.3f, 0.0f) \
+    PF(mb_tr_sus, "MixBus Transient Sustain", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PB(mb_lm_on, "MixBus Limiter On", false) PF(mb_lm_in, "MixBus Limiter Input", 0.0f, 18.0f, 0.0f, 0.0f) \
+    PF(mb_lm_ceil, "MixBus Limiter Ceiling", -12.0f, 0.0f, -1.0f, 0.0f) PF(mb_lm_rel, "MixBus Limiter Release", 10.0f, 500.0f, 80.0f, 80.0f) \
+    PC(mb_slot1, "MixBus Slot 1", mixbusTypes, 1) PC(mb_slot2, "MixBus Slot 2", mixbusTypes, 2) \
+    PC(mb_slot3, "MixBus Slot 3", mixbusTypes, 3) PC(mb_slot4, "MixBus Slot 4", mixbusTypes, 4) \
+    PC(mb_slot5, "MixBus Slot 5", mixbusTypes, 5) PC(mb_slot6, "MixBus Slot 6", mixbusTypes, 6) \
+    PC(mb_slot7, "MixBus Slot 7", mixbusTypes, 7) PC(mb_slot8, "MixBus Slot 8", mixbusTypes, 8) \
+    PC(mb_slot9, "MixBus Slot 9", mixbusTypes, 9) PC(mb_slot10, "MixBus Slot 10", mixbusTypes, 10) \
     /* ---- FX rack: the order of the cascade ---- */ \
     PC(fx_slot1, "FX Slot 1", fxTypes, 1) PC(fx_slot2, "FX Slot 2", fxTypes, 2) \
     PC(fx_slot3, "FX Slot 3", fxTypes, 3) PC(fx_slot4, "FX Slot 4", fxTypes, 4) \
@@ -387,7 +449,7 @@ enum ModDst { MD_None,
               MD_WtAPos, MD_WtAPitch, MD_WtALevel, MD_WtAWarp,
               MD_WtBPos, MD_WtBPitch, MD_WtBLevel, MD_WtBWarp,
               MD_WtCPos, MD_WtCPitch, MD_WtCLevel, MD_WtCWarp,
-              MD_SpPos, MD_SpPitch, MD_SpTilt, MD_SpStretch, MD_SpShift, MD_SpLevel,
+              MD_SpPos, MD_SpPitch, MD_SpTilt, MD_SpStretch, MD_SpShift, MD_SpLevel, MD_SpWarp,
               MD_GrPos, MD_GrSize, MD_GrDensity, MD_GrPitch, MD_GrSpray, MD_GrLevel,
               MD_FmAmount, MD_SubLevel, MD_NoiseLevel, MD_SmpPitch, MD_SmpLevel,
               MD_PlHarm, MD_PlTimbre, MD_PlMorph, MD_PlLevel,
@@ -397,9 +459,11 @@ enum ModDst { MD_None,
               MD_DelayMix = MD_VoiceCount, MD_DelayFb, MD_DelayTime, MD_RnStructure, MD_RnBright, MD_RnPos,
               MD_GrfxPos, MD_GrfxSize, MD_GrfxDensity, MD_GrfxTexture, MD_GrfxMix,
               MD_FlMix, MD_PhMix, MD_Ff1Freq, MD_Ff1Res, MD_Ff1Morph, MD_Ff2Freq, MD_Ff2Res, MD_Ff2Morph,
-              MD_RvSize, MD_RvMix, MD_Count };
+              MD_RvSize, MD_RvMix, MD_MbDjFilter, MD_MbGateDepth, MD_MbTapeDrive, MD_MbCrushBits, MD_MbWidth, MD_Count };
 
 // FX rack slot types (choices::fxTypes)
+enum MbType { MB_Empty, MB_Tape, MB_EQ, MB_Comp, MB_Chorus, MB_Imager, MB_Gate, MB_DJ, MB_Crush, MB_Transient, MB_Limiter, MB_Count };
+
 enum FxType { FX_Empty, FX_Filter1, FX_Filter2, FX_Stereo, FX_Flanger, FX_Phaser, FX_Delay, FX_Rings, FX_Clouds, FX_Reverb, FX_Count };
 
 } // namespace pg

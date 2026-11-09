@@ -6,6 +6,26 @@ namespace pg::ui
 using namespace juce;
 
 // =============================================================================
+// Skins
+// =============================================================================
+const std::vector<Skin>& skins()
+{
+    static const std::vector<Skin> list = {
+        { "Calabi Cosmos", cosmos::deepSpace, cosmos::violet, cosmos::cream, cosmos::voidC, cosmos::voidC, 0, false },
+        { "Analog Studio", Colour (0xff26221e), Colour (0xffb08d57), Colour (0xffeee2c8), Colour (0xff1d1a17), Colour (0xff0c0b0a), 1, true },
+        { "Neon Void",     Colour (0xff0a0a10), cosmos::neon, cosmos::starlight, Colour (0xff000000), Colour (0xff05020c), 2, false },
+    };
+    return list;
+}
+
+int& skinIndex() { static int s = 0; return s; }
+
+// control colours that follow the skin (buttons, menus, tabs)
+static Colour edgeCol() { return skinIndex() == 1 ? Colour (0xff8a6d42) : cosmos::electric; }
+static Colour markCol() { return skinIndex() == 1 ? Colour (0xffe8a33a) : cosmos::fuchsia; }
+static Colour fillCol() { return skinIndex() == 1 ? Colour (0xff4a3a24) : cosmos::violet; }
+
+// =============================================================================
 // Fonts
 // =============================================================================
 namespace
@@ -225,8 +245,96 @@ const Image& SynthLookAndFeel::knobFace (int px)
 
 // Isologo knob: the official Calabi Yau isologo as a fixed face, a cyan-to-magenta value
 // ring around it and a glowing pointer that sweeps over the face (after the brand filmstrip).
+void SynthLookAndFeel::drawAnalogKnob (Graphics& g, Rectangle<float> b, float angle, float start, float end, bool hot, bool on)
+{
+    const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
+    const auto c = b.getCentre();
+    const Colour ink (0xffeee2c8), amber (0xffe8a33a);
+    // scale ticks
+    for (int t = 0; t <= 10; ++t)
+    {
+        const float a = start + (end - start) * (float) t / 10.0f;
+        const float r0 = r * (t % 5 == 0 ? 0.80f : 0.86f), r1 = r * 0.97f;
+        g.setColour (ink.withAlpha (on ? 0.75f : 0.3f));
+        g.drawLine (c.x + r0 * std::sin (a), c.y - r0 * std::cos (a), c.x + r1 * std::sin (a), c.y - r1 * std::cos (a), t % 5 == 0 ? 1.6f : 1.0f);
+    }
+    // skirt with knurling
+    const float rs = r * 0.76f;
+    g.setGradientFill (ColourGradient (Colour (0xff4a4744), c.x - rs, c.y - rs, Colour (0xff0d0c0b), c.x + rs, c.y + rs, false));
+    g.fillEllipse (Rectangle<float> (rs * 2, rs * 2).withCentre (c));
+    g.setColour (Colour (0xff000000).withAlpha (0.6f));
+    for (int k = 0; k < 36; ++k)
+    {
+        const float a = angle + (float) k * MathConstants<float>::twoPi / 36.0f;
+        g.drawLine (c.x + rs * 0.86f * std::sin (a), c.y - rs * 0.86f * std::cos (a), c.x + rs * std::sin (a), c.y - rs * std::cos (a), 1.0f);
+    }
+    // brushed aluminium cap
+    const float rc = rs * 0.62f;
+    ColourGradient cap (Colour (0xffe9e7e2), c.x - rc * 0.6f, c.y - rc * 0.7f, Colour (0xff6d6a66), c.x + rc * 0.7f, c.y + rc * 0.8f, true);
+    g.setGradientFill (cap);
+    g.fillEllipse (Rectangle<float> (rc * 2, rc * 2).withCentre (c));
+    g.setColour (Colour (0x30000000));
+    for (float rr = rc * 0.2f; rr < rc; rr += 2.0f) g.drawEllipse (Rectangle<float> (rr * 2, rr * 2).withCentre (c), 0.5f);
+    // pointer line across skirt and cap
+    g.setColour (on ? Colours::white : Colour (0xff9a9a9a));
+    g.drawLine (c.x + rc * 0.25f * std::sin (angle), c.y - rc * 0.25f * std::cos (angle), c.x + rs * 0.95f * std::sin (angle), c.y - rs * 0.95f * std::cos (angle), jmax (2.0f, r * 0.07f));
+    // little amber value lamp
+    if (hot)
+    {
+        g.setColour (amber.withAlpha (0.35f));
+        g.drawEllipse (Rectangle<float> (rs * 2 + 6, rs * 2 + 6).withCentre (c), 2.5f);
+    }
+}
+
+void SynthLookAndFeel::drawDropKnob (Graphics& g, Rectangle<float> b, float pos, float angle, float start, float end, bool bipolar, bool hot, bool on, Colour col)
+{
+    const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
+    const auto c = b.getCentre();
+    const float ringR = r * 0.88f, w = jmax (2.5f, r * 0.1f);
+    Path track; track.addCentredArc (c.x, c.y, ringR, ringR, 0, start, end, true);
+    g.setColour (Colour (0xff1a1626)); g.strokePath (track, PathStrokeType (w, PathStrokeType::curved, PathStrokeType::rounded));
+    const float from = bipolar ? (start + end) * 0.5f : start;
+    if (std::abs (angle - from) > 0.001f)
+    {
+        Path arc; arc.addCentredArc (c.x, c.y, ringR, ringR, 0, jmin (from, angle), jmax (from, angle), true);
+        g.setColour ((on ? col : colours::textDim).withAlpha (0.25f));
+        g.strokePath (arc, PathStrokeType (w * 3.0f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (on ? col : colours::textDim);
+        g.strokePath (arc, PathStrokeType (w, PathStrokeType::curved, PathStrokeType::rounded));
+    }
+    g.setColour (Colour (0xff07070b)); g.fillEllipse (Rectangle<float> (r * 1.3f, r * 1.3f).withCentre (c));
+    g.setColour (col.withAlpha (hot ? 0.9f : 0.35f)); g.drawEllipse (Rectangle<float> (r * 1.3f, r * 1.3f).withCentre (c), 1.2f);
+    // the brand drop, rotated to point at the value
+    Graphics::ScopedSaveState ss (g);
+    g.addTransform (AffineTransform::rotation (angle, c.x, c.y));
+    const float ds = r * 0.62f, dw = ds * 0.56f, dy = c.y - r * 0.08f;
+    Path d;
+    d.startNewSubPath (c.x, dy - ds / 2);
+    d.cubicTo (c.x + dw * 0.25f, dy - ds * 0.2f, c.x + dw * 0.55f, dy + ds * 0.05f, c.x + dw * 0.5f, dy + ds * 0.22f);
+    d.addCentredArc (c.x, dy + ds * 0.22f, dw * 0.5f, dw * 0.5f, 0, MathConstants<float>::pi * 0.5f, MathConstants<float>::pi * 1.5f, false);
+    d.cubicTo (c.x - dw * 0.55f, dy + ds * 0.05f, c.x - dw * 0.25f, dy - ds * 0.2f, c.x, dy - ds / 2);
+    d.closeSubPath();
+    if (on) { g.setColour (col.withAlpha (0.25f + 0.25f * pos)); g.strokePath (d, PathStrokeType (5.0f)); }
+    g.setColour (on ? col : colours::textDim);
+    g.fillPath (d);
+}
+
 void SynthLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float start, float end, Slider& s)
 {
+    const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
+    if (skin().knob == 1)
+    {
+        drawAnalogKnob (g, Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (2.0f), start + pos * (end - start), start, end, hot, s.isEnabled());
+        return;
+    }
+    if (skin().knob == 2)
+    {
+        auto col = s.findColour (Slider::rotarySliderFillColourId);
+        if (col == Colour() || col.isTransparent()) col = cosmos::neon;
+        drawDropKnob (g, Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (2.0f), pos, start + pos * (end - start), start, end,
+                      s.getMinimum() < 0.0 && s.getMaximum() > 0.0, hot, s.isEnabled(), col);
+        return;
+    }
     const auto bounds = Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (2.0f);
     const float r = jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const auto c = bounds.getCentre();
@@ -266,6 +374,12 @@ void SynthLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h
     g.drawImage (face, faceR, RectanglePlacement::stretchToFit);
     g.setOpacity (1.0f);
 
+    if (hot)
+    {
+        // hover halo: soft fuchsia glow just outside the value ring
+        g.setColour (cosmos::fuchsia.withAlpha (0.28f));
+        g.drawEllipse (bounds.withSizeKeepingCentre (r * 2.0f + 2.0f, r * 2.0f + 2.0f), 3.0f);
+    }
     // pointer: a glowing teal line from the face towards the rim
     const auto pt = [&] (float rad) { return Point<float> (c.x + rad * std::sin (angle), c.y - rad * std::cos (angle)); };
     const Line<float> needle (pt (r * 0.40f), pt (r - ring * 0.6f));
@@ -302,9 +416,9 @@ void SynthLookAndFeel::drawToggleButton (Graphics& g, ToggleButton& b, bool high
     auto r = b.getLocalBounds().toFloat().reduced (1.5f);
     const bool on = b.getToggleState();
     const float rad = r.getHeight() * 0.5f;
-    g.setColour (on ? cosmos::violet.withAlpha (0.55f) : cosmos::voidC.brighter (highlighted ? 0.06f : 0.0f));
+    g.setColour (on ? fillCol().withAlpha (0.55f) : cosmos::voidC.brighter (highlighted ? 0.06f : 0.0f));
     g.fillRoundedRectangle (r, rad);
-    g.setColour (on ? cosmos::neon : cosmos::electric);
+    g.setColour (on ? cosmos::neon : edgeCol());
     g.drawRoundedRectangle (r, rad, 1.5f);
     auto dotArea = r.removeFromLeft (r.getHeight()).reduced (r.getHeight() * 0.28f);
     g.setColour (on ? cosmos::neon : cosmos::nebula);
@@ -324,10 +438,10 @@ void SynthLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colou
     const bool on = b.getToggleState();
     Colour fill = on ? cosmos::neon : cosmos::voidC;
     if (highlighted && ! on) fill = cosmos::night.brighter (0.15f);
-    if (down) fill = cosmos::violet;
+    if (down) fill = fillCol();
     g.setColour (fill);
     g.fillRoundedRectangle (r, rad);
-    g.setColour (highlighted ? cosmos::orchid : cosmos::electric);
+    g.setColour (highlighted ? cosmos::orchid : edgeCol());
     g.drawRoundedRectangle (r, rad, 2.0f);
 }
 
@@ -343,12 +457,12 @@ void SynthLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool, int, int, 
     auto r = Rectangle<float> (0, 0, (float) w, (float) h).reduced (0.75f);
     g.setColour (cosmos::voidC);
     g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (box.hasKeyboardFocus (false) ? cosmos::neon : cosmos::electric);
+    g.setColour (box.hasKeyboardFocus (false) ? cosmos::neon : edgeCol());
     g.drawRoundedRectangle (r, 5.0f, 1.5f);
     Path arrow;
     const float ax = (float) w - 12.0f, ay = (float) h * 0.5f;
     arrow.addTriangle (ax - 4.5f, ay - 2.5f, ax + 4.5f, ay - 2.5f, ax, ay + 3.5f);   // inverted triangle, as in the iso blocks
-    g.setColour (cosmos::fuchsia);
+    g.setColour (markCol());
     g.fillPath (arrow);
 }
 
@@ -360,11 +474,11 @@ void SynthLookAndFeel::drawTabButton (TabBarButton& b, Graphics& g, bool over, b
     if (front)
     {
         // track plate with fuchsia pipe and jade end nodes
-        g.setColour (cosmos::fuchsia);
+        g.setColour (markCol());
         g.fillRect (Rectangle<float> (r.getX() - 3.0f, r.getCentreY() - 2.0f, r.getWidth() + 6.0f, 4.0f));
         g.setColour (cosmos::voidC);
         g.fillRoundedRectangle (r.reduced (6.0f, 0.0f), rad);
-        g.setColour (cosmos::electric);
+        g.setColour (edgeCol());
         g.drawRoundedRectangle (r.reduced (6.0f, 0.0f), rad, 2.0f);
         brand::bolt (g, { r.getX() + 4.0f, r.getCentreY() }, 4.0f);
         brand::bolt (g, { r.getRight() - 4.0f, r.getCentreY() }, 4.0f);
@@ -378,7 +492,7 @@ void SynthLookAndFeel::drawBubble (Graphics& g, BubbleComponent&, const Point<fl
 {
     g.setColour (cosmos::night);
     g.fillRoundedRectangle (body, 5.0f);
-    g.setColour (cosmos::electric);
+    g.setColour (edgeCol());
     g.drawRoundedRectangle (body, 5.0f, 1.5f);
 }
 } // namespace pg::ui

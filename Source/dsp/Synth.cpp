@@ -30,6 +30,8 @@ void StepData::reset()
         arpTranspose[(size_t) s].store (0);
         arpRatchet[(size_t) s].store (1);
         arpVel[(size_t) s].store (0.8f);
+        arpProb[(size_t) s].store (1.0f);
+        arpGate[(size_t) s].store (1.0f);
     }
 }
 
@@ -54,7 +56,8 @@ juce::ValueTree StepData::toTree() const
     for (int s = 0; s < kSteps; ++s)
         a.add (juce::String (arpOn[(size_t) s].load() ? 1 : 0) + ":" + juce::String (arpTranspose[(size_t) s].load()) + ":"
                + juce::String (arpVel[(size_t) s].load(), 3) + ":" + juce::String (arpTie[(size_t) s].load() ? 1 : 0) + ":"
-               + juce::String (arpRatchet[(size_t) s].load()));
+               + juce::String (arpRatchet[(size_t) s].load()) + ":" + juce::String (arpProb[(size_t) s].load(), 3) + ":"
+               + juce::String (arpGate[(size_t) s].load(), 3));
     juce::ValueTree arp ("Arp");
     arp.setProperty ("steps", a.joinIntoString (","), nullptr);
     t.appendChild (arp, nullptr);
@@ -88,6 +91,8 @@ void StepData::fromTree (const juce::ValueTree& t)
                 arpVel[(size_t) s].store (juce::jlimit (0.0f, 1.0f, f[2].getFloatValue()));
                 arpTie[(size_t) s].store (f[3].getIntValue() != 0);
                 arpRatchet[(size_t) s].store (juce::jlimit (1, 4, f[4].getIntValue()));
+                arpProb[(size_t) s].store (f.size() > 5 ? juce::jlimit (0.0f, 1.0f, f[5].getFloatValue()) : 1.0f);
+                arpGate[(size_t) s].store (f.size() > 6 ? juce::jlimit (0.05f, 1.0f, f[6].getFloatValue()) : 1.0f);
             }
         }
     }
@@ -105,6 +110,10 @@ void Synth::prepare (double sampleRate, int)
     monoStack.clear();
     arpHeld.clear(); arpLatched.clear(); arpOffs.clear(); arpSounding.clear();
     internalBeat = 0.0;
+    lorenz[0] = -0.1f; lorenz[1] = 0.2f; lorenz[2] = 0.1f;
+    chaos1State[0] = 0.1f; chaos1State[1] = 0.0f; chaos1State[2] = 0.0f;
+    for (auto& c : chaosSmooth) c = 0.0f;
+    for (auto& q : seqSmooth) q = 0.0f;
     monoStack.reserve (128); arpHeld.reserve (128); arpLatched.reserve (128);
     arpOffs.reserve (256); arpSounding.reserve (128);
 }
@@ -441,8 +450,10 @@ void Synth::runArp (int numSamples, double beatStart, double bps, std::vector<st
         const float vel = steps.arpVel[(size_t) s].load();
         const bool tie = steps.arpTie[(size_t) s].load();
         const int ratchet = juce::jlimit (1, 4, steps.arpRatchet[(size_t) s].load());
+        const float prob = steps.arpProb[(size_t) s].load();
+        const float stepGate = gate * steps.arpGate[(size_t) s].load();
 
-        if (stepOn)
+        if (stepOn && (prob >= 1.0f || rng.uni() < prob))
         {
             // build the note pool
             std::vector<int> base (src.begin(), src.end());
@@ -479,7 +490,7 @@ void Synth::runArp (int numSamples, double beatStart, double bps, std::vector<st
             for (int r = 0; r < ratchet; ++r)
             {
                 const double t = fire + sub * r;
-                const double offBeat = (tie && r == ratchet - 1) ? t + sub * 1.02 : t + sub * gate;
+                const double offBeat = (tie && r == ratchet - 1) ? t + sub * 1.02 : t + sub * stepGate;
                 for (int n : chosen)
                 {
                     const int note = quantize (juce::jlimit (0, 127, n + transpose));
@@ -554,6 +565,7 @@ void Synth::render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const
     wasPlaying = playing;
     const double bps = global.bpm / 60.0 / sr;
     const double beatStart = playing ? ppq : internalBeat;
+    global.beat = beatStart;
     internalBeat += bps * n;
 
     // ---- events: host MIDI (+ arpeggiator) ----

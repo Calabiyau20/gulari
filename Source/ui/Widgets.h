@@ -113,6 +113,11 @@ public:
     void euclid();
     void ramp();
     void clear();
+    enum Transform { Reverse, Mirror, Invert, RotateLeft, RotateRight, Double, Half };
+    void transform (int op);
+    void copyLane();
+    void pasteLane();
+    static bool canPaste();
 private:
     void setFromMouse (juce::Point<float> p);
     int length() const;

@@ -294,14 +294,17 @@ void SpectralOsc::noteOn (float)
         aL[k] = aR[k] = dL[k] = dR[k] = 0.0f;
         smoothAmp[k] = -1.0f;   // first update copies the target
         flicker[k] = flickerTarget[k] = 0.0f;
+        jit[k] = rng.bi();
     }
     playPos = 0.0f;
+    noteTime = 0.0f;
     active = 0;
 }
 
 void SpectralOsc::update (const SpectralTable& t, const Params& p, float freqHz, int blockLen)
 {
     const float blockSecs = (float) blockLen / (float) sr;
+    noteTime += blockSecs;
     if (! p.freeze) playPos += p.scan * blockSecs * 0.25f;   // scan 1 = one sweep every 4 seconds
     float x = p.pos + playPos;
     x = playPos == 0.0f ? clamp01 (x) : x - std::floor (x);
@@ -318,7 +321,15 @@ void SpectralOsc::update (const SpectralTable& t, const Params& p, float freqHz,
 
     // formant shift: read the spectral envelope at k / ratio
     float amp[kN];
-    const float ratio = semisToRatio (p.shift);
+    float ratio = semisToRatio (p.shift);
+    const float wa = clamp01 (p.warpAmt);
+    if (p.warp == 8) ratio *= std::pow (130.81f / juce::jmax (20.0f, freqHz), wa);   // Formant Lock: envelope fixed in Hz
+    if (p.warp == 6 && wa > 0.0f)                                                      // Mirror: flip the spectral envelope
+    {
+        float flip[kN];
+        for (int k = 0; k < kN; ++k) flip[k] = raw[k] + (raw[kN - 1 - k] - raw[k]) * wa;
+        std::copy (flip, flip + kN, raw);
+    }
     for (int k = 0; k < kN; ++k)
     {
         const float src = (float) (k + 1) / ratio - 1.0f;
@@ -348,6 +359,15 @@ void SpectralOsc::update (const SpectralTable& t, const Params& p, float freqHz,
         if (h % 2 == 0) a *= 1.0f - juce::jmax (0.0f, p.oddEven);
         else if (h > 1) a *= 1.0f - juce::jmax (0.0f, -p.oddEven);
         if (h > count) a = 0.0f;
+        if (p.warp == 3 && wa > 0.0f)                                                // Sieve: keep every Nth partial
+        {
+            const int nth = 1 + (int) std::round (wa * 7.0f);
+            if (h > 1 && (h - 1) % nth != 0) a = 0.0f;
+        }
+        if (p.warp == 4 && wa > 0.0f)                                                // Comb: notches across the spectrum
+            a *= 0.5f + 0.5f * std::cos (kTwoPi * (float) h * (0.03f + wa * 0.22f));
+        if (p.partialDecay > 0.0f)                                                   // high partials fade during the note
+            a *= std::exp (-noteTime * p.partialDecay * 10.0f * (float) (h - 1) / (float) kN);
         if (p.shimmer > 0.0f)
         {
             if (rng.uni() < blockSecs * 12.0f) flickerTarget[k] = rng.uni();
@@ -373,7 +393,17 @@ void SpectralOsc::update (const SpectralTable& t, const Params& p, float freqHz,
         smoothAmp[k] = a + (smoothAmp[k] - a) * tc;
         a = smoothAmp[k];
 
-        const float hz = freqHz * std::pow ((float) (k + 1), stretchExp);
+        float ratioK = (float) (k + 1);
+        switch (p.warp)
+        {
+            case 2: { const float K = 1.0f + (float) (kN - 1) * (1.0f - wa); if (ratioK > K) ratioK = juce::jmax (1.0f, 2.0f * K - ratioK); break; }   // Fold
+            case 5: ratioK *= 1.0f + ((k % 2) ? -1.0f : 1.0f) * wa * 0.03f; break;                                                            // Spread
+            case 7: ratioK = std::pow (ratioK, 1.0f - wa * 0.5f); break;                                                                       // Squeeze
+            default: break;
+        }
+        float hz = freqHz * std::pow (ratioK, stretchExp);
+        if (p.warp == 1) hz += wa * 400.0f * (k == 0 ? 0.0f : 1.0f);                                                                           // Shift (Hz)
+        if (p.jitter > 0.0f) hz *= semisToRatio (jit[k] * p.jitter * 0.5f);
         if (hz > nyq * 0.9f) a = 0.0f;
         else if (hz > nyq * 0.8f) a *= (nyq * 0.9f - hz) / (nyq * 0.1f);
         const float w = kTwoPi * juce::jmin (hz, nyq * 0.9f) / (float) sr;

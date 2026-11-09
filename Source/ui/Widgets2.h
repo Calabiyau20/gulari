@@ -18,7 +18,10 @@ private:
     void timerCallback() override;
     SynthgularityProcessor& proc;
     std::unique_ptr<ParamControl> knob;
-    juce::Rectangle<int> specArea, meterArea;
+    juce::Rectangle<int> specArea, meterArea, scopeArea;
+    static constexpr int kScope = 160;
+    std::array<std::array<float, kScope>, 4> traces {};   // newest first: phosphor persistence
+    int traceHead = 0;
     static constexpr int kOrder = 11, kSize = 1 << kOrder, kBands = 120;
     juce::dsp::FFT fft { kOrder };
     std::array<float, kSize * 2> fftData {};
@@ -60,7 +63,7 @@ private:
 class FxSlotRow : public juce::Component
 {
 public:
-    FxSlotRow (APVTS& state, int slot);
+    FxSlotRow (APVTS& state, int slot, bool mixbus = false);
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -68,11 +71,12 @@ public:
     bool selected = false;
     std::function<void (int slot)> onSelect;
     std::function<void (int slot, int dir)> onMove;
-    static juce::String onParamFor (int type);
+    static juce::String onParamFor (int type, bool mixbus = false);
 private:
     juce::Rectangle<float> ledArea() const;
     APVTS& st;
     int slot;
+    bool mb = false;
     juce::ComboBox combo;
     juce::TextButton up { juce::CharPointer_UTF8 ("\xe2\x96\xb2") }, down { juce::CharPointer_UTF8 ("\xe2\x96\xbc") };
     std::unique_ptr<APVTS::ComboBoxAttachment> att;

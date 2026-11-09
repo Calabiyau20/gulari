@@ -3,6 +3,7 @@
 #include "Building.h"
 #include "MutableWrappers.h"
 #include "Voice.h"
+#include "MixBus.h"
 #include <vector>
 
 namespace pg
@@ -84,6 +85,8 @@ private:
     void runClouds (float* L, float* R, int n, const float* p);
     void runFilter (int which, float* L, float* R, int n, const float* p);
     void runReverb (float* L, float* R, int n, const float* p);
+    void runRack (float* L, float* R, int n, const float* p, const GlobalMod& g, int lastNote, bool strum);
+    MixBus mixbus;
     double sr = 48000.0;
     float fxMod[MD_Count] {};
 

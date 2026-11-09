@@ -23,6 +23,8 @@ void MasterSection::resized()
     auto r = getLocalBounds();
     meterArea = r.removeFromRight (150);
     knob->setBounds (r.removeFromRight (62).withTrimmedTop (-4));
+    scopeArea = r.removeFromLeft (jmin (150, r.getWidth() / 3)).reduced (2, 4);
+    r.removeFromLeft (4);
     specArea = r.reduced (2, 4);
 }
 
@@ -39,6 +41,20 @@ void MasterSection::timerCallback()
 
     // latest kSize samples from the ring
     const int wp = m.ringPos.load (std::memory_order_acquire);
+    {
+        // oscilloscope: find a rising zero crossing in the last 2048 samples, show ~20 ms from it
+        const int span = (int) (m.sampleRate() * 0.02);
+        int start = wp - span - 4;
+        for (int k = wp - span - 4; k > wp - 2048; --k)
+        {
+            const float a = m.ring[(size_t) ((k - 1) & (MasterMeter::kRing - 1))], b = m.ring[(size_t) (k & (MasterMeter::kRing - 1))];
+            if (a <= 0.0f && b > 0.0f) { start = k; break; }
+        }
+        traceHead = (traceHead + 3) % 4;
+        auto& t = traces[(size_t) traceHead];
+        for (int i = 0; i < kScope; ++i)
+            t[(size_t) i] = m.ring[(size_t) ((start + i * span / kScope) & (MasterMeter::kRing - 1))];
+    }
     for (int i = 0; i < kSize; ++i)
         fftData[(size_t) i] = m.ring[(size_t) ((wp - kSize + i) & (MasterMeter::kRing - 1))] * window[(size_t) i];
     std::fill (fftData.begin() + kSize, fftData.end(), 0.0f);
@@ -59,6 +75,34 @@ void MasterSection::timerCallback()
 
 void MasterSection::paint (Graphics& g)
 {
+    {
+        // oscilloscope with phosphor trails
+        auto sr = scopeArea.toFloat();
+        g.setColour (cosmos::voidC.withAlpha (0.85f));
+        g.fillRoundedRectangle (sr, 5.0f);
+        g.setColour (cosmos::nebula);
+        g.drawRoundedRectangle (sr.reduced (0.5f), 5.0f, 1.0f);
+        g.drawHorizontalLine ((int) sr.getCentreY(), sr.getX() + 3.0f, sr.getRight() - 3.0f);
+        auto pr = sr.reduced (4.0f, 5.0f);
+        for (int k = 3; k >= 0; --k)
+        {
+            const auto& t = traces[(size_t) ((traceHead + k) % 4)];
+            Path p;
+            for (int i = 0; i < kScope; ++i)
+            {
+                const float x = pr.getX() + (float) i / (float) (kScope - 1) * pr.getWidth();
+                const float y = pr.getCentreY() - jlimit (-1.0f, 1.0f, t[(size_t) i]) * pr.getHeight() * 0.48f;
+                if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            }
+            const float a = k == 0 ? 1.0f : 0.35f / (float) k;
+            if (k == 0) { g.setColour (cosmos::neon.withAlpha (0.25f)); g.strokePath (p, PathStrokeType (4.0f)); }
+            g.setColour ((k == 0 ? cosmos::neon : cosmos::teal).withAlpha (a));
+            g.strokePath (p, PathStrokeType (k == 0 ? 1.4f : 1.0f));
+        }
+        g.setColour (colours::textDim);
+        g.setFont (fonts::label (8.0f));
+        g.drawText ("SCOPE", sr.reduced (5.0f, 2.0f), Justification::topLeft);
+    }
     // spectrum
     auto r = specArea.toFloat();
     g.setColour (cosmos::voidC.withAlpha (0.85f));
@@ -273,8 +317,13 @@ void ShotView::paint (Graphics& g)
 // =============================================================================
 // FxSlotRow
 // =============================================================================
-String FxSlotRow::onParamFor (int type)
+String FxSlotRow::onParamFor (int type, bool mixbus)
 {
+    if (mixbus)
+    {
+        static const char* ids[] = { "", "mb_tp_on", "mb_eq_on", "mb_cp_on", "mb_ch_on", "mb_im_on", "mb_tg_on", "mb_dj_on", "mb_bc_on", "mb_tr_on", "mb_lm_on" };
+        return type > 0 && type < MB_Count ? String (ids[type]) : String();
+    }
     switch (type)
     {
         case FX_Filter1: return "ff1_on";
@@ -290,11 +339,11 @@ String FxSlotRow::onParamFor (int type)
     }
 }
 
-FxSlotRow::FxSlotRow (APVTS& state, int s) : st (state), slot (s)
+FxSlotRow::FxSlotRow (APVTS& state, int s, bool mixbus) : st (state), slot (s), mb (mixbus)
 {
-    combo.addItemList (pg::choices::fxTypes(), 1);
+    combo.addItemList (mb ? pg::choices::mixbusTypes() : pg::choices::fxTypes(), 1);
     addAndMakeVisible (combo);
-    att = std::make_unique<APVTS::ComboBoxAttachment> (st, "fx_slot" + String (slot + 1), combo);
+    att = std::make_unique<APVTS::ComboBoxAttachment> (st, (mb ? "mb_slot" : "fx_slot") + String (slot + 1), combo);
     combo.onChange = [this] { if (onSelect) onSelect (slot); repaint(); };
     for (auto* b : { &up, &down }) { addAndMakeVisible (*b); b->setTooltip (b == &up ? "Move this effect earlier in the cascade" : "Move this effect later in the cascade"); }
     up.onClick = [this] { if (onMove) onMove (slot, -1); };
@@ -318,7 +367,7 @@ void FxSlotRow::resized()
 
 void FxSlotRow::mouseDown (const MouseEvent& e)
 {
-    const auto id = onParamFor (type());
+    const auto id = onParamFor (type(), mb);
     if (ledArea().expanded (4.0f).contains (e.position) && id.isNotEmpty())
         if (auto* p = st.getParameter (id)) p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
     if (onSelect) onSelect (slot);
@@ -338,11 +387,18 @@ void FxSlotRow::paint (Graphics& g)
     g.setColour (colours::textDim);
     g.setFont (fonts::display (10.0f));
     g.drawText (String (slot + 1), r.withWidth (22.0f), Justification::centred);
-    const auto id = onParamFor (type());
+    const auto id = onParamFor (type(), mb);
     bool on = false;
     if (id.isNotEmpty())
         if (auto* p = st.getRawParameterValue (id)) on = p->load() > 0.5f;
     auto led = ledArea();
+    if (on)
+    {
+        // breathing glow around a running effect
+        const float br = 0.5f + 0.5f * std::sin ((float) Time::getMillisecondCounter() * 0.004f + (float) slot);
+        g.setColour (cosmos::neon.withAlpha (0.12f + 0.22f * br));
+        g.fillEllipse (led.expanded (4.0f + 2.0f * br));
+    }
     g.setColour (id.isEmpty() ? cosmos::night : (on ? cosmos::neon : cosmos::voidC));
     g.fillEllipse (led);
     g.setColour (on ? cosmos::starlight : cosmos::steel.withAlpha (0.6f));

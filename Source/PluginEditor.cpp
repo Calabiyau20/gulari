@@ -51,8 +51,9 @@ TextButton* makeButton (Page& page, const String& text, std::function<void()> fn
 // The FX cascade drawn as a signal flow: IN > slot > slot > ... > OUT
 struct FxChainView : public Component
 {
-    explicit FxChainView (APVTS& s) : st (s) {}
+    FxChainView (APVTS& s, bool mixbus = false) : st (s), mb (mixbus) {}
     APVTS& st;
+    bool mb;
     void paint (Graphics& g) override
     {
         auto r = getLocalBounds().toFloat().reduced (4.0f);
@@ -61,15 +62,16 @@ struct FxChainView : public Component
         g.setFont (fonts::label (9.5f));
         g.drawText ("SIGNAL FLOW", inner.removeFromTop (16.0f), Justification::centredLeft);
         std::vector<std::pair<String, bool>> nodes;
-        bool used[pg::FX_Count] {};
+        bool used[16] {};
+        const int count = mb ? pg::MB_Count : pg::FX_Count;
         for (int i = 0; i < 10; ++i)
         {
-            const int t = (int) st.getRawParameterValue ("fx_slot" + String (i + 1))->load();
-            if (t <= 0 || t >= pg::FX_Count || used[t]) continue;
+            const int t = (int) st.getRawParameterValue ((mb ? "mb_slot" : "fx_slot") + String (i + 1))->load();
+            if (t <= 0 || t >= count || used[t]) continue;
             used[t] = true;
-            const auto id = FxSlotRow::onParamFor (t);
+            const auto id = FxSlotRow::onParamFor (t, mb);
             const bool on = id.isNotEmpty() && st.getRawParameterValue (id)->load() > 0.5f;
-            nodes.push_back ({ pg::choices::fxTypes()[t], on });
+            nodes.push_back ({ (mb ? pg::choices::mixbusTypes() : pg::choices::fxTypes())[t], on });
         }
         const int n = (int) nodes.size() + 2;
         const float gap = 14.0f;
@@ -100,6 +102,92 @@ struct FxChainView : public Component
     }
 };
 
+// ROUTING page diagram: sources -> distortion -> filter (or straight) -> amp -> FX buses -> master,
+// with dots flowing along the active wires
+struct RoutingView : public Component
+{
+    explicit RoutingView (APVTS& s) : st (s) {}
+    APVTS& st;
+    float v (const char* id) const { return st.getRawParameterValue (id)->load(); }
+    void paint (Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (4.0f);
+        auto inner = brand::chamferFrame (g, r, 16.0f, 5.0f, cosmos::voidC.withAlpha (0.9f), cosmos::electric, true).reduced (16.0f, 12.0f);
+        g.setColour (colours::textDim);
+        g.setFont (fonts::label (9.5f));
+        g.drawText ("SIGNAL FLOW  -  ONE VOICE  >  WHOLE SYNTH", inner.removeFromTop (16.0f), Justification::centredLeft);
+        const float t = (float) (Time::getMillisecondCounterHiRes() * 0.001);
+        struct Src { const char* name; bool on; bool filt; };
+        const Src srcs[] = {
+            { "WT A", v ("wtA_on") > 0.5f, v ("rt_flt_a") > 0.5f }, { "WT B", v ("wtB_on") > 0.5f, v ("rt_flt_b") > 0.5f },
+            { "WT C", v ("wtC_on") > 0.5f, v ("rt_flt_c") > 0.5f }, { "SPECTRAL", v ("sp_on") > 0.5f, v ("rt_flt_sp") > 0.5f },
+            { "GRAIN", v ("gr_on") > 0.5f, v ("rt_flt_gr") > 0.5f }, { "PLAITS", v ("pl_on") > 0.5f, v ("rt_flt_pl") > 0.5f },
+            { "SUB+NOISE", v ("sub_level") > 0.0f || v ("noise_level") > 0.0f, v ("rt_flt_sub") > 0.5f }, { "ONE-SHOT", v ("smp_on") > 0.5f, v ("rt_flt_smp") > 0.5f } };
+        const float colW = inner.getWidth() / 7.0f;
+        const float rowH = inner.getHeight() / 8.0f;
+        auto box = [&] (Rectangle<float> b, const String& txt, bool on, Colour c)
+        {
+            g.setColour (on ? cosmos::deepSpace : cosmos::night);
+            g.fillRoundedRectangle (b, 5.0f);
+            g.setColour (on ? c : cosmos::steel.withAlpha (0.4f));
+            g.drawRoundedRectangle (b.reduced (0.5f), 5.0f, on ? 1.6f : 1.0f);
+            g.setColour (on ? cosmos::starlight : cosmos::steel);
+            g.setFont (fonts::label (jmin (10.5f, b.getHeight() * 0.42f)));
+            g.drawFittedText (txt, b.reduced (3.0f).toNearestInt(), Justification::centred, 2, 0.6f);
+        };
+        auto wire = [&] (Point<float> a, Point<float> b, bool on, Colour c, float phase)
+        {
+            Path p; p.startNewSubPath (a);
+            p.cubicTo ({ (a.x + b.x) * 0.5f, a.y }, { (a.x + b.x) * 0.5f, b.y }, b);
+            g.setColour ((on ? c : cosmos::steel).withAlpha (on ? 0.55f : 0.15f));
+            g.strokePath (p, PathStrokeType (on ? 1.8f : 1.0f));
+            if (! on) return;
+            const float len = p.getLength();
+            for (int k = 0; k < 3; ++k)
+            {
+                const float f = std::fmod (t * 0.45f + phase + (float) k / 3.0f, 1.0f);
+                const auto pt = p.getPointAlongPath (f * len);
+                g.setColour (c.withAlpha (0.35f)); g.fillEllipse (Rectangle<float> (9.0f, 9.0f).withCentre (pt));
+                g.setColour (cosmos::starlight); g.fillEllipse (Rectangle<float> (3.5f, 3.5f).withCentre (pt));
+            }
+        };
+        const bool post = v ("bite_post") > 0.5f;
+        auto col = [&] (int c) { return inner.getX() + colW * (float) c; };
+        const float midY = inner.getCentreY();
+        auto bDist = Rectangle<float> (col (post ? 3 : 2) + 8, midY - 26 - rowH * 1.5f, colW - 16, 52);
+        auto bFilt = Rectangle<float> (col (post ? 2 : 3) + 8, midY - 26 - rowH * 1.5f, colW - 16, 52);
+        auto bAmp = Rectangle<float> (col (4) + 8, midY - 26, colW - 16, 52);
+        const bool mbFirst = v ("rt_order") > 0.5f;
+        auto bRack = Rectangle<float> (col (mbFirst ? 6 : 5) + 8, midY - 26, colW - 16, 52);
+        auto bMix = Rectangle<float> (col (mbFirst ? 5 : 6) + 8, midY - 26, colW - 16, 52);
+        // sources
+        for (int i = 0; i < 8; ++i)
+        {
+            auto b = Rectangle<float> (col (0) + 4, inner.getY() + rowH * (float) i + 3, colW * 1.2f - 8, rowH - 6);
+            box (b, srcs[i].name, srcs[i].on, cosmos::neon);
+            const auto from = Point<float> (b.getRight(), b.getCentreY());
+            if (srcs[i].filt) wire (from, { (post ? bFilt : bDist).getX(), (post ? bFilt : bDist).getCentreY() }, srcs[i].on, cosmos::neon, (float) i * 0.13f);
+            else wire (from, { bAmp.getX(), bAmp.getBottom() - 8.0f }, srcs[i].on, cosmos::gold, (float) i * 0.13f);
+        }
+        const bool any = true;
+        auto first = post ? bFilt : bDist, second = post ? bDist : bFilt;
+        wire ({ first.getRight(), first.getCentreY() }, { second.getX(), second.getCentreY() }, any, cosmos::orchid, 0.2f);
+        wire ({ second.getRight(), second.getCentreY() }, { bAmp.getX(), bAmp.getY() + 10.0f }, any, cosmos::orchid, 0.4f);
+        auto bFirstBus = mbFirst ? bMix : bRack, bSecondBus = mbFirst ? bRack : bMix;
+        wire ({ bAmp.getRight(), bAmp.getCentreY() }, { bFirstBus.getX(), bFirstBus.getCentreY() }, any, cosmos::fuchsia, 0.1f);
+        wire ({ bFirstBus.getRight(), bFirstBus.getCentreY() }, { bSecondBus.getX(), bSecondBus.getCentreY() }, any, cosmos::fuchsia, 0.3f);
+        box (bDist, "MULTI-\nDISTORTION", true, colours::warn);
+        box (bFilt, "FILTER", true, cosmos::orchid);
+        box (bAmp, "AMP\nENVELOPE", true, cosmos::neon);
+        box (bRack, "FX RACK", true, cosmos::fuchsia);
+        box (bMix, "MIXBUS", true, cosmos::fuchsia);
+        g.setColour (colours::textDim);
+        g.setFont (fonts::label (9.0f));
+        g.drawText ("> MASTER  dBTP / LUFS", Rectangle<float> (bSecondBus.getX() - 20, bSecondBus.getBottom() + 6, colW + 40, 14), Justification::centred);
+        g.drawText ("GOLD WIRES SKIP THE FILTER", Rectangle<float> (col (1), inner.getBottom() - 14, colW * 3, 14), Justification::centredLeft);
+    }
+};
+
 Label* makeLabel (Page& page, const String& text, float size = 12.0f, Colour c = colours::textDim)
 {
     auto* l = page.add (new Label ({}, text));
@@ -112,6 +200,7 @@ Label* makeLabel (Page& page, const String& text, float size = 12.0f, Colour c =
 
 SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProcessorEditor (&p), proc (p)
 {
+    skinIndex() = proc.uiSkin;
     setLookAndFeel (&lnf);
     auto& st = proc.apvts;
    #if PG_HAS_LOGO
@@ -206,7 +295,8 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         auto* panel = page->add (new Panel (st, "Spectral Oscillator", items ({ "sp_on:On", "sp_sound:Sound", "sp_pos:Position", "sp_scan:Scan",
                                            "sp_freeze:Freeze", "sp_partials:Partials", "sp_tilt:Tilt", "sp_stretch:Stretch", "sp_shift:Shift",
                                            "sp_oddeven:Odd/Even", "sp_blur:Blur", "sp_shimmer:Shimmer", "sp_width:Width", "sp_oct:Octave",
-                                           "sp_semi:Semi", "sp_fine:Fine", "sp_level:Level", "sp_pan:Pan" }), 9, cosmos::neon));
+                                           "sp_semi:Semi", "sp_fine:Fine", "sp_level:Level", "sp_pan:Pan", "sp_warp:Spectral Warp", "sp_wamt:Warp Amt",
+                                           "sp_pdecay:Partial Decay", "sp_jitter:Jitter" }), 11, cosmos::neon));
         page->layout = [=] (Rectangle<int> r)
         {
             auto top = r.removeFromTop (r.getHeight() * 44 / 100);
@@ -280,28 +370,31 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         shotView->toFront (false); shotLoad->toFront (false);
         auto* pl = page->add (new Panel (st, "Plaits (Mutable Instruments)", items ({ "pl_on:On", "pl_engine:Engine", "pl_oct:Octave", "pl_level:Level",
                                           "pl_harm:Harmonics", "pl_timbre:Timbre", "pl_morph:Morph", "pl_pan:Pan", "pl_lpg:LPG", "pl_decay:Decay", "pl_colour:Colour" }), 4, colours::warn));
-        auto* fm = page->add (new Panel (st, "Mod Matrix  FM / PD / AM  (row > column)", items ({ "fm_amount:Amount", "fm_a_a:A>A",
-                                          "fm_a_b:A>B", "fm_a_c:A>C", "fm_b_a:B>A", "fm_b_b:B>B", "fm_b_c:B>C", "fm_c_a:C>A", "fm_c_b:C>B",
-                                          "fm_c_c:C>C", "fm_g_a:Grain>A", "fm_g_b:Grain>B", "fm_g_c:Grain>C", "fm_n_a:Noise>A", "fm_n_b:Noise>B", "fm_n_c:Noise>C" }), 6, colours::accent2));
+        StringArray fmItems; fmItems.add ("fm_amount:Amount");
+        const char* fmS[] = { "a", "b", "c", "s", "g", "n" }; const char* fmSN[] = { "A", "B", "C", "Spec", "Grain", "Noise" };
+        const char* fmD[] = { "a", "b", "c", "s" }; const char* fmDN[] = { "A", "B", "C", "Spec" };
+        for (int si = 0; si < 6; ++si) for (int di = 0; di < 4; ++di)
+            fmItems.add (String ("fm_") + fmS[si] + "_" + fmD[di] + ":" + fmSN[si] + ">" + fmDN[di]);
+        auto* fm = page->add (new Panel (st, "Mod Matrix  FM / PD / AM  (row > column)", fmItems, 9, colours::accent2));
         {
-            ParamControl* types[3];
-            const char* tid[] = { "fm_type_a", "fm_type_b", "fm_type_c" };
-            const char* tname[] = { "Type into A", "Type into B", "Type into C" };
-            for (int t = 0; t < 3; ++t) types[t] = page->add (new ParamControl (st, tid[t], tname[t]));
+            ParamControl* types[4];
+            const char* tid[] = { "fm_type_a", "fm_type_b", "fm_type_c", "fm_type_s" };
+            const char* tname[] = { "Into A", "Into B", "Into C", "Into Spectral" };
+            for (int t = 0; t < 4; ++t) types[t] = page->add (new ParamControl (st, tid[t], tname[t]));
             fm->extraHeight = 44;
             fm->layoutExtra = [types, panel = fm] (Rectangle<int> r)
             {
                 r += panel->getPosition();
-                const int w = r.getWidth() / 3;
-                for (int t = 0; t < 3; ++t) types[t]->setBounds (r.removeFromLeft (w));
+                const int w = r.getWidth() / 4;
+                for (int t = 0; t < 4; ++t) types[t]->setBounds (r.removeFromLeft (w));
             };
         }
         page->layout = [=] (Rectangle<int> r)
         {
-            auto rows = split (r, { 0.85f, 1.15f }, false);
+            auto rows = split (r, { 0.8f, 1.2f }, false);
             auto top = split (rows[0], { 0.75f, 2.0f });
             sub->setBounds (top[0]); smp->setBounds (top[1]);
-            auto bottom = split (rows[1], { 1.0f, 1.45f });
+            auto bottom = split (rows[1], { 0.85f, 1.75f });
             pl->setBounds (bottom[0]); fm->setBounds (bottom[1]);
         };
         tabs.addTab ("SOURCES", Colours::transparentBlack, page, false);
@@ -447,34 +540,44 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         {
             const String n (l + 1);
             StringArray it;
-            for (auto sfx : { "_on:On", "_len:Length", "_div:Division", "_dir:Direction", "_mode:Range", "_swing:Swing", "_glide:Glide" })
+            for (auto sfx : { "_on:On", "_len:Length", "_div:Division", "_dir:Direction", "_mode:Range", "_swing:Swing", "_glide:Glide",
+                              "_dst:Route to matrix", "_amt:Amount" })
                 it.add ("seq" + n + sfx);
-            ps.push_back (page->add (new Panel (st, "Lane " + n, it, 4, l % 2 ? colours::accent2 : colours::accent)));
+            auto* pnl = page->add (new Panel (st, "Lane " + n, it, 5, l % 2 ? colours::accent2 : colours::accent));
+            ps.push_back (pnl);
             auto* lane = lanes.add (new StepLaneEditor (proc, l));
             page->addAndMakeVisible (lane);
             tools.push_back ({ makeButton (*page, "RANDOM", [lane] { lane->randomize (false); }, "New random values (locked steps stay)"),
                                makeButton (*page, "MUTATE", [lane] { lane->randomize (true); }, "Small random changes"),
                                makeButton (*page, "EUCLID", [lane] { lane->euclid(); }, "Spread hits evenly; click again for one more hit"),
                                makeButton (*page, "RAMP", [lane] { lane->ramp(); }),
-                               makeButton (*page, "CLEAR", [lane] { lane->clear(); }) });
+                               makeButton (*page, "REVERSE", [lane] { lane->transform (StepLaneEditor::Reverse); }, "Play the steps backwards"),
+                               makeButton (*page, "MIRROR", [lane] { lane->transform (StepLaneEditor::Mirror); }, "Second half mirrors the first (palindrome)"),
+                               makeButton (*page, "INVERT", [lane] { lane->transform (StepLaneEditor::Invert); }, "Flip every value upside down"),
+                               makeButton (*page, "ROTATE <", [lane] { lane->transform (StepLaneEditor::RotateLeft); }),
+                               makeButton (*page, "ROTATE >", [lane] { lane->transform (StepLaneEditor::RotateRight); }),
+                               makeButton (*page, "DOUBLE", [lane] { lane->transform (StepLaneEditor::Double); }, "Pattern twice as fast"),
+                               makeButton (*page, "HALF", [lane] { lane->transform (StepLaneEditor::Half); }, "Pattern twice as slow"),
+                               makeButton (*page, "CLEAR", [lane] { lane->clear(); }),
+                               makeButton (*page, "COPY", [lane] { lane->copyLane(); }, "Copy this lane"),
+                               makeButton (*page, "PASTE", [lane] { lane->pasteLane(); }, "Paste the copied lane here") });
         }
         auto bankHolder = std::make_shared<int> (0);
         TextButton* bankBtn[2];
-        auto* tip = makeLabel (*page, "Draw with the mouse. Right-click a step to lock it (gold). DIRECTION: forward, backward, ping-pong, random, even or odd steps. "
-                                      "Route a lane on the MATRIX page (Seq 1-8).", 12.0f);
+        auto* tip = makeLabel (*page, "Draw with the mouse, right-click locks a step (gold). ROUTE TO MATRIX sends the lane straight to a destination; the MATRIX page still works too.", 12.0f);
         auto* lanesPtr = &lanes;
-        for (int b = 0; b < 2; ++b)
+        for (int b2 = 0; b2 < 2; ++b2)
         {
-            bankBtn[b] = makeButton (*page, b == 0 ? "LANES 1-4" : "LANES 5-8", {}, "Show lanes " + String (b == 0 ? "1-4" : "5-8"));
-            bankBtn[b]->onClick = [bankHolder, b, page] { *bankHolder = b; page->resized(); };
+            bankBtn[b2] = makeButton (*page, b2 == 0 ? "LANES 1-4" : "LANES 5-8", {}, "Show lanes " + String (b2 == 0 ? "1-4" : "5-8"));
+            bankBtn[b2]->onClick = [bankHolder, b2, page] { *bankHolder = b2; page->resized(); };
         }
         page->layout = [=] (Rectangle<int> r)
         {
             auto head = r.removeFromTop (30);
-            for (int b = 0; b < 2; ++b)
+            for (int b2 = 0; b2 < 2; ++b2)
             {
-                bankBtn[b]->setBounds (head.removeFromLeft (120).reduced (2, 2));
-                bankBtn[b]->setToggleState (*bankHolder == b, dontSendNotification);
+                bankBtn[b2]->setBounds (head.removeFromLeft (120).reduced (2, 2));
+                bankBtn[b2]->setToggleState (*bankHolder == b2, dontSendNotification);
             }
             tip->setBounds (head.reduced (10, 0));
             const int h = r.getHeight() / 4;
@@ -486,10 +589,12 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
                 for (auto* t : tools[(size_t) l]) t->setVisible (vis);
                 if (! vis) continue;
                 auto row = r.removeFromTop (h);
-                ps[(size_t) l]->setBounds (row.removeFromLeft (360));
-                auto tcol = row.removeFromRight (90).reduced (4, 8);
-                const int bh = tcol.getHeight() / 5;
-                for (auto* t : tools[(size_t) l]) t->setBounds (tcol.removeFromTop (bh).reduced (0, 2));
+                ps[(size_t) l]->setBounds (row.removeFromLeft (430));
+                auto tcol = row.removeFromRight (236).reduced (4, 6);
+                const int cols = 3, rows = 5;
+                const int bw = tcol.getWidth() / cols, bh = tcol.getHeight() / rows;
+                for (int k = 0; k < (int) tools[(size_t) l].size(); ++k)
+                    tools[(size_t) l][(size_t) k]->setBounds (Rectangle<int> (tcol.getX() + (k % cols) * bw, tcol.getY() + (k / cols) * bh, bw, bh).reduced (2, 2));
                 (*lanesPtr)[l]->setBounds (row.reduced (6, 10));
             }
         };
@@ -515,50 +620,37 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
         addLive ({ arpGrid });
     }
 
-    // ---------------- FX: a rack of 10 slots in cascade ----------------
+    // ---------------- FX and MIXBUS: two racks of 10 slots in cascade ----------------
+    auto buildRack = [this, &st, addLive] (const String& tabName, bool mixbus, std::map<int, Panel*> (*makePanels) (Page&, APVTS&))
     {
         auto* page = new Page(); pages.add (page);
-        std::map<int, Panel*> fxPanels;
-        fxPanels[pg::FX_Filter1] = page->add (new Panel (st, "Filter 1", items ({ "ff1_on:On", "ff1_type:Type", "ff1_freq:Freq", "ff1_res:Reso",
-                                        "ff1_morph:Morph / Vowel", "ff1_poles:Poles", "ff1_spread:Spread", "ff1_drive:Drive", "ff1_mix:Mix" }), 5, cosmos::neon));
-        fxPanels[pg::FX_Filter2] = page->add (new Panel (st, "Filter 2", items ({ "ff2_on:On", "ff2_type:Type", "ff2_freq:Freq", "ff2_res:Reso",
-                                        "ff2_morph:Morph / Vowel", "ff2_poles:Poles", "ff2_spread:Spread", "ff2_drive:Drive", "ff2_mix:Mix" }), 5, cosmos::orchid));
-        fxPanels[pg::FX_Stereo] = page->add (new Panel (st, "Stereo", items ({ "fx_st_on:On", "fx_st_width:Width", "fx_st_bass:Mono Bass", "fx_st_haas:Haas ms" }), 4));
-        fxPanels[pg::FX_Flanger] = page->add (new Panel (st, "Flanger", items ({ "fx_fl_on:On", "fx_fl_rate:Rate", "fx_fl_depth:Depth", "fx_fl_fb:Feedback", "fx_fl_delay:Delay", "fx_fl_mix:Mix" }), 6));
-        fxPanels[pg::FX_Phaser] = page->add (new Panel (st, "Phaser", items ({ "fx_ph_on:On", "fx_ph_rate:Rate", "fx_ph_depth:Depth", "fx_ph_fb:Feedback", "fx_ph_center:Center", "fx_ph_stages:Stages", "fx_ph_mix:Mix" }), 7));
-        fxPanels[pg::FX_Delay] = page->add (new Panel (st, "Delay", items ({ "fx_dl_on:On", "fx_dl_sync:Sync", "fx_dl_pp:Ping-Pong", "fx_dl_div:Division", "fx_dl_time:Time ms",
-                                        "fx_dl_fb:Feedback", "fx_dl_lowcut:Low Cut", "fx_dl_highcut:High Cut", "fx_dl_mix:Mix" }), 5));
-        fxPanels[pg::FX_Rings] = page->add (new Panel (st, "Resonator (Rings)", items ({ "fx_rn_on:On", "fx_rn_model:Model", "fx_rn_poly:Poly", "fx_rn_follow:Follow Keys", "fx_rn_note:Note",
-                                        "fx_rn_structure:Structure", "fx_rn_bright:Brightness", "fx_rn_damping:Damping", "fx_rn_pos:Position", "fx_rn_mix:Mix" }), 5, colours::warn));
-        fxPanels[pg::FX_Clouds] = page->add (new Panel (st, "Granular (Clouds)", items ({ "fx_gr_on:On", "fx_gr_mode:Mode", "fx_gr_quality:Quality", "fx_gr_freeze:Freeze",
-                                        "fx_gr_pos:Position", "fx_gr_size:Size", "fx_gr_pitch:Pitch", "fx_gr_density:Density", "fx_gr_texture:Texture",
-                                        "fx_gr_spread:Spread", "fx_gr_fb:Feedback", "fx_gr_reverb:Reverb", "fx_gr_mix:Mix" }), 7, colours::warn));
-        fxPanels[pg::FX_Reverb] = page->add (new Panel (st, "Reverb", items ({ "fx_rv_on:On", "fx_rv_size:Size", "fx_rv_decay:Decay", "fx_rv_damp:Damping",
-                                        "fx_rv_pre:Pre-Delay", "fx_rv_mod:Modulation", "fx_rv_width:Width", "fx_rv_mix:Mix" }), 4, cosmos::fuchsia));
-        auto* rackTitle = makeLabel (*page, "FX RACK  -  CASCADE  (top > bottom)", 12.5f, colours::text);
-        auto* rackTip = makeLabel (*page, "Pick an effect in each slot, the dot switches it on. Arrows move it in the chain. Click a slot to edit it.", 11.0f);
+        auto fxPanels = makePanels (*page, st);
+        auto* rackTitle = makeLabel (*page, mixbus ? "MIXBUS  -  CASCADE  (top > bottom)" : "FX RACK  -  CASCADE  (top > bottom)", 12.5f, colours::text);
+        auto* rackTip = makeLabel (*page, mixbus ? "Mix processors for the whole synth. Set the order of FX RACK and MIXBUS on the ROUTING page."
+                                                 : "Pick an effect in each slot, the dot switches it on. Arrows move it in the chain. Click a slot to edit it.", 11.0f);
         rackTip->setJustificationType (Justification::topLeft);
         std::vector<FxSlotRow*> rows;
-        for (int s2 = 0; s2 < 10; ++s2) rows.push_back (page->add (new FxSlotRow (st, s2)));
+        for (int s2 = 0; s2 < 10; ++s2) rows.push_back (page->add (new FxSlotRow (st, s2, mixbus)));
         auto selected = std::make_shared<int> (0);
         auto* emptyNote = makeLabel (*page, "Empty slot: choose an effect from the menu.", 13.0f);
         emptyNote->setJustificationType (Justification::centred);
         auto showSel = [rows, fxPanels, selected, emptyNote] ()
         {
-            emptyNote->setVisible (rows[(size_t) *selected]->type() == pg::FX_Empty);
+            emptyNote->setVisible (rows[(size_t) *selected]->type() == 0);
             for (int i = 0; i < (int) rows.size(); ++i) { rows[(size_t) i]->selected = i == *selected; rows[(size_t) i]->repaint(); }
             const int type = rows[(size_t) *selected]->type();
             for (auto& kv : fxPanels) kv.second->setVisible (kv.first == type);
         };
+        const String prefix = mixbus ? "mb_slot" : "fx_slot";
         for (auto* row : rows)
         {
             row->onSelect = [selected, showSel] (int sl) { *selected = sl; showSel(); };
-            row->onMove = [this, selected, showSel] (int sl, int dir)
+            row->onMove = [this, selected, showSel, prefix] (int sl, int dir)
             {
                 const int other = sl + dir;
                 if (other < 0 || other > 9) return;
-                auto* a = proc.apvts.getParameter ("fx_slot" + String (sl + 1));
-                auto* b = proc.apvts.getParameter ("fx_slot" + String (other + 1));
+                auto* a = proc.apvts.getParameter (prefix + String (sl + 1));
+                auto* b = proc.apvts.getParameter (prefix + String (other + 1));
                 const float va = a->getValue(), vb = b->getValue();
                 a->setValueNotifyingHost (vb);
                 b->setValueNotifyingHost (va);
@@ -566,7 +658,7 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
                 showSel();
             };
         }
-        auto* chain = page->add (new FxChainView (st));
+        auto* chain = page->add (new FxChainView (st, mixbus));
         page->layout = [=] (Rectangle<int> r)
         {
             auto left = r.removeFromLeft (330);
@@ -582,15 +674,87 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
             chain->setBounds (r);
             showSel();
         };
-        tabs.addTab ("FX", Colours::transparentBlack, page, false);
+        tabs.addTab (tabName, Colours::transparentBlack, page, false);
         std::vector<Component*> v (rows.begin(), rows.end());
         v.push_back (chain);
         live.push_back (v);
+        juce::ignoreUnused (addLive);
+    };
+    buildRack ("FX", false, [] (Page& page, APVTS& st) -> std::map<int, Panel*>
+    {
+        std::map<int, Panel*> m;
+        m[pg::FX_Filter1] = page.add (new Panel (st, "Filter 1", items ({ "ff1_on:On", "ff1_type:Type", "ff1_freq:Freq", "ff1_res:Reso",
+                                        "ff1_morph:Morph / Vowel", "ff1_poles:Poles", "ff1_spread:Spread", "ff1_drive:Drive", "ff1_mix:Mix" }), 5, cosmos::neon));
+        m[pg::FX_Filter2] = page.add (new Panel (st, "Filter 2", items ({ "ff2_on:On", "ff2_type:Type", "ff2_freq:Freq", "ff2_res:Reso",
+                                        "ff2_morph:Morph / Vowel", "ff2_poles:Poles", "ff2_spread:Spread", "ff2_drive:Drive", "ff2_mix:Mix" }), 5, cosmos::orchid));
+        m[pg::FX_Stereo] = page.add (new Panel (st, "Stereo", items ({ "fx_st_on:On", "fx_st_width:Width", "fx_st_bass:Mono Bass", "fx_st_haas:Haas ms" }), 4));
+        m[pg::FX_Flanger] = page.add (new Panel (st, "Flanger", items ({ "fx_fl_on:On", "fx_fl_rate:Rate", "fx_fl_depth:Depth", "fx_fl_fb:Feedback", "fx_fl_delay:Delay", "fx_fl_mix:Mix" }), 6));
+        m[pg::FX_Phaser] = page.add (new Panel (st, "Phaser", items ({ "fx_ph_on:On", "fx_ph_rate:Rate", "fx_ph_depth:Depth", "fx_ph_fb:Feedback", "fx_ph_center:Center", "fx_ph_stages:Stages", "fx_ph_mix:Mix" }), 7));
+        m[pg::FX_Delay] = page.add (new Panel (st, "Delay", items ({ "fx_dl_on:On", "fx_dl_sync:Sync", "fx_dl_pp:Ping-Pong", "fx_dl_div:Division", "fx_dl_time:Time ms",
+                                        "fx_dl_fb:Feedback", "fx_dl_lowcut:Low Cut", "fx_dl_highcut:High Cut", "fx_dl_mix:Mix" }), 5));
+        m[pg::FX_Rings] = page.add (new Panel (st, "Resonator (Rings)", items ({ "fx_rn_on:On", "fx_rn_model:Model", "fx_rn_poly:Poly", "fx_rn_follow:Follow Keys", "fx_rn_note:Note",
+                                        "fx_rn_structure:Structure", "fx_rn_bright:Brightness", "fx_rn_damping:Damping", "fx_rn_pos:Position", "fx_rn_mix:Mix" }), 5, colours::warn));
+        m[pg::FX_Clouds] = page.add (new Panel (st, "Granular (Clouds)", items ({ "fx_gr_on:On", "fx_gr_mode:Mode", "fx_gr_quality:Quality", "fx_gr_freeze:Freeze",
+                                        "fx_gr_pos:Position", "fx_gr_size:Size", "fx_gr_pitch:Pitch", "fx_gr_density:Density", "fx_gr_texture:Texture",
+                                        "fx_gr_spread:Spread", "fx_gr_fb:Feedback", "fx_gr_reverb:Reverb", "fx_gr_mix:Mix" }), 7, colours::warn));
+        m[pg::FX_Reverb] = page.add (new Panel (st, "Reverb", items ({ "fx_rv_on:On", "fx_rv_size:Size", "fx_rv_decay:Decay", "fx_rv_damp:Damping",
+                                        "fx_rv_pre:Pre-Delay", "fx_rv_mod:Modulation", "fx_rv_width:Width", "fx_rv_mix:Mix" }), 4, cosmos::fuchsia));
+        return m;
+    });
+    buildRack ("MIXBUS", true, [] (Page& page, APVTS& st) -> std::map<int, Panel*>
+    {
+        std::map<int, Panel*> m;
+        m[pg::MB_Tape] = page.add (new Panel (st, "Tape", items ({ "mb_tp_on:On", "mb_tp_drive:Drive", "mb_tp_wow:Wow & Flutter", "mb_tp_tone:Tone", "mb_tp_mix:Mix" }), 5, cosmos::gold));
+        m[pg::MB_EQ] = page.add (new Panel (st, "EQ", items ({ "mb_eq_on:On", "mb_eq_lcut:Low Cut", "mb_eq_low:Low", "mb_eq_mid:Mid", "mb_eq_mfreq:Mid Freq", "mb_eq_high:High", "mb_eq_hcut:High Cut" }), 7, cosmos::neon));
+        m[pg::MB_Comp] = page.add (new Panel (st, "Compressor", items ({ "mb_cp_on:On", "mb_cp_thr:Threshold", "mb_cp_ratio:Ratio", "mb_cp_att:Attack ms", "mb_cp_rel:Release ms", "mb_cp_gain:Makeup", "mb_cp_mix:Mix" }), 7, cosmos::orchid));
+        m[pg::MB_Chorus] = page.add (new Panel (st, "Chorus", items ({ "mb_ch_on:On", "mb_ch_rate:Rate", "mb_ch_depth:Depth", "mb_ch_mix:Mix" }), 4, cosmos::azure));
+        m[pg::MB_Imager] = page.add (new Panel (st, "Imager", items ({ "mb_im_on:On", "mb_im_width:Width", "mb_im_bass:Mono Bass" }), 3, cosmos::teal));
+        m[pg::MB_Gate] = page.add (new Panel (st, "Trance Gate", items ({ "mb_tg_on:On", "mb_tg_pat:Pattern", "mb_tg_div:Division", "mb_tg_depth:Depth", "mb_tg_smooth:Smooth" }), 5, cosmos::fuchsia));
+        m[pg::MB_DJ] = page.add (new Panel (st, "DJ Filter", items ({ "mb_dj_on:On", "mb_dj_pos:LP < > HP", "mb_dj_res:Reso" }), 3, cosmos::neon));
+        m[pg::MB_Crush] = page.add (new Panel (st, "Bitcrusher", items ({ "mb_bc_on:On", "mb_bc_bits:Bits", "mb_bc_rate:Downsample", "mb_bc_mix:Mix" }), 4, cosmos::electric));
+        m[pg::MB_Transient] = page.add (new Panel (st, "Transient Shaper", items ({ "mb_tr_on:On", "mb_tr_att:Attack", "mb_tr_sus:Sustain" }), 3, cosmos::gold));
+        m[pg::MB_Limiter] = page.add (new Panel (st, "Limiter", items ({ "mb_lm_on:On", "mb_lm_in:Input", "mb_lm_ceil:Ceiling", "mb_lm_rel:Release ms" }), 4, cosmos::fuchsia));
+        return m;
+    });
+
+    // ---------------- ROUTING / MIX ----------------
+    {
+        auto* page = new Page(); pages.add (page);
+        auto* flow = page->add (new RoutingView (st));
+        auto* mixer = page->add (new Panel (st, "Source Mixer", items ({ "wtA_level:WT A", "wtB_level:WT B", "wtC_level:WT C", "sp_level:Spectral",
+                                            "gr_level:Grain", "pl_level:Plaits", "sub_level:Sub", "noise_level:Noise", "smp_level:One-Shot" }), 9, cosmos::neon));
+        auto* routes = page->add (new Panel (st, "Through the filter  (off = goes straight to the amp)", items ({ "rt_flt_a:WT A", "rt_flt_b:WT B", "rt_flt_c:WT C",
+                                            "rt_flt_sp:Spectral", "rt_flt_gr:Grain", "rt_flt_pl:Plaits", "rt_flt_sub:Sub + Noise", "rt_flt_smp:One-Shot" }), 4, cosmos::orchid));
+        auto* dist = page->add (new Panel (st, "MultiDistortion", items ({ "bite_post:After Filter", "rt_dist_sp:Spectral In", "bite_drive:Drive", "bite_mix:Mix" }), 2, colours::warn));
+        auto* bus = page->add (new Panel (st, "Buses & Engine", items ({ "rt_order:FX Bus Order", "oversampling:Oversampling", "polyphony:Voices", "master_gain:Master" }), 2, cosmos::fuchsia));
+        auto* skinBox = page->add (new ComboBox());
+        skinBox->setTooltip ("Look of the whole interface");
+        for (int k = 0; k < (int) skins().size(); ++k) skinBox->addItem (skins()[(size_t) k].name, k + 1);
+        skinBox->setSelectedId (skinIndex() + 1, dontSendNotification);
+        skinBox->onChange = [this, skinBox] { setSkin (skinBox->getSelectedId() - 1); };
+        auto* skinLbl = makeLabel (*page, "SKIN", 11.0f, colours::text);
+        page->layout = [=] (Rectangle<int> r)
+        {
+            auto top = r.removeFromTop (r.getHeight() * 42 / 100);
+            flow->setBounds (top);
+            r.removeFromTop (6);
+            auto rows = split (r, { 0.9f, 1.25f }, false);
+            mixer->setBounds (rows[0]);
+            auto b = split (rows[1], { 1.4f, 0.75f, 0.85f });
+            routes->setBounds (b[0]); dist->setBounds (b[1]);
+            auto right = b[2];
+            auto sk = right.removeFromBottom (40).reduced (14, 6);
+            skinLbl->setBounds (sk.removeFromLeft (50));
+            skinBox->setBounds (sk);
+            bus->setBounds (right);
+        };
+        tabs.addTab ("ROUTING", Colours::transparentBlack, page, false);
+        live.push_back ({ flow });
     }
 
     setResizable (true, true);
-    setResizeLimits (1040, 700, 2000, 1400);
-    setSize (1180, 780);
+    setResizeLimits (1180, 740, 2200, 1500);
+    setSize (1280, 800);
     startTimerHz (30);
 }
 
@@ -604,16 +768,50 @@ SynthgularityEditor::~SynthgularityEditor()
 void SynthgularityEditor::paint (Graphics& g)
 {
     using namespace pg::ui;
+    const int sk = skinIndex();
     if (stars.getWidth() != getWidth() || stars.getHeight() != getHeight())
     {
-        stars = brand::starfield (getWidth(), getHeight(), 7, 0.9f);
-        // the Calabi Yau logo grid, sunk into the starfield
-        Graphics sg (stars);
-        sg.setOpacity (0.22f);
-        sg.drawImage (logoGrid, stars.getBounds().toFloat(), RectanglePlacement::centred | RectanglePlacement::fillDestination);
-        sg.setOpacity (1.0f);
-        sg.setGradientFill (ColourGradient (cosmos::voidC, 0.0f, 0.0f, cosmos::voidC.withAlpha (0.0f), 0.0f, (float) getHeight() * 0.55f, false));
-        sg.fillAll();
+        const float W = (float) getWidth(), Hh = (float) getHeight();
+        if (sk == 0)
+        {
+            stars = brand::starfield (getWidth(), getHeight(), 7, 0.9f);
+            // the Calabi Yau logo grid, sunk into the starfield
+            Graphics sg (stars);
+            sg.setOpacity (0.22f);
+            sg.drawImage (logoGrid, stars.getBounds().toFloat(), RectanglePlacement::centred | RectanglePlacement::fillDestination);
+            sg.setOpacity (1.0f);
+            sg.setGradientFill (ColourGradient (cosmos::voidC, 0.0f, 0.0f, cosmos::voidC.withAlpha (0.0f), 0.0f, Hh * 0.55f, false));
+            sg.fillAll();
+        }
+        else
+        {
+            stars = Image (Image::RGB, getWidth(), getHeight(), true);
+            Graphics sg (stars);
+            sg.setGradientFill (ColourGradient (skin().bgTop, 0, 0, skin().bgBottom, 0, Hh, false));
+            sg.fillAll();
+            Random rnd (3);
+            if (sk == 1)
+            {
+                // brushed metal / dark walnut strokes
+                for (int k = 0; k < 900; ++k)
+                {
+                    sg.setColour (Colour (0xffffffff).withAlpha (0.012f + rnd.nextFloat() * 0.02f));
+                    const float y = rnd.nextFloat() * Hh;
+                    sg.drawHorizontalLine ((int) y, rnd.nextFloat() * W * 0.5f, W);
+                }
+                sg.setColour (Colour (0xffb08d57).withAlpha (0.5f));
+                sg.fillRect (0.0f, (float) kHeaderH - 2.0f, W, 2.0f);
+            }
+            else
+            {
+                brand::perspectiveGrid (sg, { 0.0f, Hh * 0.55f, W, Hh * 0.45f }, cosmos::neon, 0.18f, 22, 12);
+                for (int k = 0; k < 160; ++k)
+                {
+                    sg.setColour (cosmos::starlight.withAlpha (0.15f + rnd.nextFloat() * 0.4f));
+                    sg.fillRect (rnd.nextFloat() * W, rnd.nextFloat() * Hh * 0.5f, 1.2f, 1.2f);
+                }
+            }
+        }
     }
     g.drawImageAt (stars, 0, 0);
 
@@ -621,6 +819,24 @@ void SynthgularityEditor::paint (Graphics& g)
     auto header = getLocalBounds().removeFromTop (kHeaderH).reduced (18, 0).toFloat();
     // official isologo file (opens the About card)
     isologoArea = Rectangle<float> (header.getX(), header.getCentreY() - 23.0f, 46.0f, 46.0f);
+    {
+        // animated aura: two slow rings breathing out of the isologo, a few twinkling sparks
+        const float t = (float) animT;
+        for (int k = 0; k < 2; ++k)
+        {
+            const float ph = std::fmod (t * 0.35f + (float) k * 0.5f, 1.0f);
+            const float rad = 23.0f + ph * 16.0f;
+            g.setColour ((k == 0 ? cosmos::fuchsia : cosmos::neon).withAlpha (0.35f * (1.0f - ph)));
+            g.drawEllipse (Rectangle<float> (rad * 2, rad * 2).withCentre (isologoArea.getCentre()), 1.5f);
+        }
+        Random rnd (21);
+        for (int k = 0; k < 9; ++k)
+        {
+            const Point<float> pt (header.getX() + 40.0f + rnd.nextFloat() * 280.0f, 6.0f + rnd.nextFloat() * ((float) kHeaderH - 12.0f));
+            const float a = 0.5f + 0.5f * std::sin (t * (1.2f + rnd.nextFloat() * 2.0f) + (float) k * 1.7f);
+            brand::sparkle (g, pt, 2.0f + 5.0f * a, cosmos::starlight.withAlpha (0.25f + 0.6f * a));
+        }
+    }
     g.drawImage (isologo, isologoArea, RectanglePlacement::centred);
     g.setColour (cosmos::starlight);
     g.setFont (fonts::display (16.5f));
@@ -643,7 +859,16 @@ void SynthgularityEditor::paint (Graphics& g)
         g.setFont (fonts::label (10.0f));
         g.drawText ("BY CALABI YAU", sig, Justification::centredLeft);
     }
-    brand::checker (g, Rectangle<float> (0.0f, (float) kHeaderH, (float) getWidth(), 8.0f), 4.0f);
+    if (sk != 1) brand::checker (g, Rectangle<float> (0.0f, (float) kHeaderH, (float) getWidth(), 8.0f), 4.0f);
+}
+
+void SynthgularityEditor::setSkin (int index)
+{
+    skinIndex() = jlimit (0, (int) skins().size() - 1, index);
+    proc.uiSkin = skinIndex();
+    stars = Image();
+    sendLookAndFeelChange();
+    repaint();
 }
 
 void SynthgularityEditor::mouseDown (const MouseEvent& e)
@@ -662,7 +887,7 @@ void SynthgularityEditor::resized()
     auto header = r.removeFromTop (kHeaderH).reduced (12, 12);
     r.removeFromTop (10);
     header.removeFromLeft (318);
-    master->setBounds (header.removeFromRight (452).withTrimmedTop (-8).withTrimmedBottom (-8));
+    master->setBounds (header.removeFromRight (jmin (600, header.getWidth() - 380)).withTrimmedTop (-8).withTrimmedBottom (-8));
     header.removeFromRight (10);
     auto presetArea = header.withSizeKeepingCentre (jmin (480, header.getWidth()), 30).translated (0, -9);
     voicesLabel.setBounds (presetArea.translated (0, 31).withHeight (16));
@@ -681,6 +906,8 @@ void SynthgularityEditor::resized()
 
 void SynthgularityEditor::timerCallback()
 {
+    animT += 1.0 / 30.0;
+    repaint (0, 0, 340, kHeaderH);   // the header aura
     const int tab = tabs.getCurrentTabIndex();
     if (tab >= 0 && tab < (int) live.size())
         for (auto* c : live[(size_t) tab]) if (c != nullptr && c->isVisible()) c->repaint();

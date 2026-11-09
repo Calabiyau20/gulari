@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <vector>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 // Calabi Yau brand system (manual "calabi-yau-brand.js" v1.2.0) translated to JUCE.
@@ -48,6 +49,18 @@ namespace colours
     const juce::Colour warn    = cosmos::gold;       // Mutable Instruments modules, locks
 }
 
+// ---- Skins: panel colours, frame tint and knob style ----
+struct Skin
+{
+    juce::String name;
+    juce::Colour panelFill, frameTint, text, bgTop, bgBottom;
+    int knob;          // 0 isologo, 1 analog, 2 neon drop
+    bool tintFrames;   // use frameTint for every panel frame instead of the section accent
+};
+const std::vector<Skin>& skins();
+int& skinIndex();
+inline const Skin& skin() { return skins()[(size_t) juce::jlimit (0, (int) skins().size() - 1, skinIndex())]; }
+
 // ---- Type: Syncopate for display (never the logotype), Montserrat for everything else ----
 namespace fonts
 {
@@ -88,11 +101,13 @@ public:
     juce::Font getLabelFont (juce::Label&) override { return fonts::sans (11.5f); }
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return fonts::label (11.5f); }
     void drawTabButton (juce::TabBarButton&, juce::Graphics&, bool over, bool down) override;
-    int getTabButtonBestWidth (juce::TabBarButton&, int) override { return 112; }
+    int getTabButtonBestWidth (juce::TabBarButton&, int) override { return 100; }
     void drawTabAreaBehindFrontButton (juce::TabbedButtonBar&, juce::Graphics&, int, int) override {}
     void drawBubble (juce::Graphics&, juce::BubbleComponent&, const juce::Point<float>& tip, const juce::Rectangle<float>& body) override;
 
 private:
+    void drawAnalogKnob (juce::Graphics&, juce::Rectangle<float> b, float angle, float start, float end, bool hot, bool on);
+    void drawDropKnob (juce::Graphics&, juce::Rectangle<float> b, float pos, float angle, float start, float end, bool bipolar, bool hot, bool on, juce::Colour col);
     const juce::Image& knobFace (int px);   // official isologo, pre-scaled per size
     juce::Image isologo;
     std::map<int, juce::Image> faceCache;

@@ -88,9 +88,11 @@ Panel::Panel (APVTS& state, const String& t, const StringArray& items, int colum
 void Panel::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (2.0f);
-    brand::chamferFrame (g, r, 14.0f, 5.0f, cosmos::deepSpace, accentColour.withAlpha (0.85f), true);
-    brand::sparkle (g, { r.getX() + 22.0f, r.getY() + 21.0f }, 6.0f, accentColour);
-    g.setColour (colours::text);
+    const auto& sk = skin();
+    const auto acc = sk.tintFrames ? sk.frameTint : accentColour;
+    brand::chamferFrame (g, r, 14.0f, 5.0f, sk.panelFill, acc.withAlpha (0.85f), sk.knob != 1);
+    brand::sparkle (g, { r.getX() + 22.0f, r.getY() + 21.0f }, 6.0f, acc);
+    g.setColour (sk.text);
     g.setFont (fonts::label (11.5f));
     g.drawText (title.toUpperCase(), Rectangle<float> (r.getX() + 34.0f, r.getY() + 10.0f, r.getWidth() - 48.0f, 22.0f), Justification::centredLeft);
 }
@@ -524,6 +526,59 @@ void StepLaneEditor::ramp()
     repaint();
 }
 
+void StepLaneEditor::transform (int op)
+{
+    auto& st = proc.synth.steps;
+    const int len = length();
+    float v[32]; bool lk[32];
+    for (int s2 = 0; s2 < 32; ++s2) { v[s2] = st.seq[(size_t) (laneIndex * 32 + s2)].load(); lk[s2] = st.seqLock[(size_t) (laneIndex * 32 + s2)].load(); }
+    float o[32]; bool ol[32];
+    for (int s2 = 0; s2 < 32; ++s2) { o[s2] = v[s2]; ol[s2] = lk[s2]; }
+    for (int s2 = 0; s2 < len; ++s2)
+    {
+        int src = s2;
+        switch (op)
+        {
+            case Reverse:     src = len - 1 - s2; break;
+            case Mirror:      src = s2 < (len + 1) / 2 ? s2 : len - 1 - s2; break;     // palindrome of the first half
+            case RotateLeft:  src = (s2 + 1) % len; break;
+            case RotateRight: src = (s2 + len - 1) % len; break;
+            case Double:      src = (s2 * 2) % len; break;                             // twice as fast
+            case Half:        src = s2 / 2; break;                                     // twice as slow
+            default: break;
+        }
+        o[s2] = op == Invert ? 1.0f - v[s2] : v[src];
+        ol[s2] = op == Invert ? lk[s2] : lk[src];
+    }
+    for (int s2 = 0; s2 < len; ++s2) { st.seq[(size_t) (laneIndex * 32 + s2)].store (o[s2]); st.seqLock[(size_t) (laneIndex * 32 + s2)].store (ol[s2]); }
+    repaint();
+}
+
+namespace { float laneClip[32]; bool laneClipLock[32]; bool laneClipFull = false; }
+
+void StepLaneEditor::copyLane()
+{
+    for (int s2 = 0; s2 < 32; ++s2)
+    {
+        laneClip[s2] = proc.synth.steps.seq[(size_t) (laneIndex * 32 + s2)].load();
+        laneClipLock[s2] = proc.synth.steps.seqLock[(size_t) (laneIndex * 32 + s2)].load();
+    }
+    laneClipFull = true;
+}
+
+bool StepLaneEditor::canPaste() { return laneClipFull; }
+
+void StepLaneEditor::pasteLane()
+{
+    if (! laneClipFull) return;
+    for (int s2 = 0; s2 < 32; ++s2)
+    {
+        proc.synth.steps.seq[(size_t) (laneIndex * 32 + s2)].store (laneClip[s2]);
+        proc.synth.steps.seqLock[(size_t) (laneIndex * 32 + s2)].store (laneClipLock[s2]);
+    }
+    repaint();
+}
+
 void StepLaneEditor::clear()
 {
     for (int s = 0; s < 32; ++s)
@@ -535,12 +590,12 @@ void StepLaneEditor::clear()
 // =============================================================================
 // ArpGrid
 // =============================================================================
-static const char* arpRowNames[] = { "ON", "PITCH", "VEL", "TIE", "RATCHET" };
+static const char* arpRowNames[] = { "ON", "PITCH", "VEL", "PROB", "GATE", "TIE", "RATCHET" };
 
 Rectangle<float> ArpGrid::row (int r) const
 {
     auto b = getLocalBounds().toFloat().withTrimmedLeft (70.0f);
-    const float heights[] = { 0.12f, 0.36f, 0.28f, 0.12f, 0.12f };
+    const float heights[] = { 0.09f, 0.27f, 0.18f, 0.15f, 0.15f, 0.08f, 0.08f };
     float y = b.getY();
     for (int i = 0; i < r; ++i) y += heights[i] * b.getHeight();
     return { b.getX(), y, b.getWidth(), heights[r] * b.getHeight() };
@@ -551,7 +606,7 @@ void ArpGrid::paint (Graphics& g)
     auto& st = proc.synth.steps;
     const int len = jlimit (1, 32, (int) proc.paramCache()[pg::arp_len]);
     const int play = st.arpPlayStep.load();
-    for (int r = 0; r < 5; ++r)
+    for (int r = 0; r < 7; ++r)
     {
         auto rr = row (r);
         g.setColour (colours::textDim);
@@ -564,7 +619,7 @@ void ArpGrid::paint (Graphics& g)
             const bool active = s < len;
             g.setColour (active ? cosmos::deepSpace : cosmos::night);
             g.fillRoundedRectangle (cell, 2.0f);
-            const Colour rowCol[] = { cosmos::neon, cosmos::orchid, cosmos::electric, cosmos::fuchsia, cosmos::gold };
+            const Colour rowCol[] = { cosmos::neon, cosmos::orchid, cosmos::electric, cosmos::teal, cosmos::azure, cosmos::fuchsia, cosmos::gold };
             const auto col = (s == play ? cosmos::starlight : rowCol[r]).withAlpha (active ? 1.0f : 0.25f);
             g.setColour (col);
             switch (r)
@@ -583,8 +638,26 @@ void ArpGrid::paint (Graphics& g)
                     break;
                 }
                 case 2: g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - st.arpVel[(size_t) s].load())), 2.0f); break;
-                case 3: if (st.arpTie[(size_t) s].load()) g.fillRoundedRectangle (cell.reduced (2.0f, 4.0f), 2.0f); break;
+                case 3:
+                {
+                    const float pv = st.arpProb[(size_t) s].load();
+                    g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - pv)), 2.0f);
+                    if (pv < 0.995f && cell.getWidth() > 18.0f)
+                    {
+                        g.setColour (colours::text.withAlpha (0.8f)); g.setFont (fonts::sans (8.5f));
+                        g.drawText (String (roundToInt (pv * 100.0f)), cell, Justification::centredTop);
+                    }
+                    break;
+                }
                 case 4:
+                {
+                    // gate length drawn as a bar growing to the right inside the step
+                    const float gv = st.arpGate[(size_t) s].load();
+                    g.fillRoundedRectangle (cell.reduced (0.0f, cell.getHeight() * 0.3f).withWidth (cell.getWidth() * gv), 2.0f);
+                    break;
+                }
+                case 5: if (st.arpTie[(size_t) s].load()) g.fillRoundedRectangle (cell.reduced (2.0f, 4.0f), 2.0f); break;
+                case 6:
                 {
                     const int n = st.arpRatchet[(size_t) s].load();
                     for (int k = 0; k < n; ++k)
@@ -602,7 +675,7 @@ void ArpGrid::edit (Point<float> p, bool click)
     if (click)
     {
         dragRow = -1;
-        for (int r = 0; r < 5; ++r) if (row (r).contains (p)) dragRow = r;
+        for (int r = 0; r < 7; ++r) if (row (r).contains (p)) dragRow = r;
     }
     if (dragRow < 0) return;
     auto rr = row (dragRow);
@@ -613,8 +686,16 @@ void ArpGrid::edit (Point<float> p, bool click)
         case 0: if (click) st.arpOn[(size_t) s].store (! st.arpOn[(size_t) s].load()); break;
         case 1: st.arpTranspose[(size_t) s].store (jlimit (-24, 24, (int) std::round ((v * 2.0f - 1.0f) * 24.0f))); break;
         case 2: st.arpVel[(size_t) s].store (jmax (0.05f, v)); break;
-        case 3: if (click) st.arpTie[(size_t) s].store (! st.arpTie[(size_t) s].load()); break;
-        case 4: if (click) st.arpRatchet[(size_t) s].store (st.arpRatchet[(size_t) s].load() % 4 + 1); break;
+        case 3: st.arpProb[(size_t) s].store (jlimit (0.0f, 1.0f, std::round (v * 20.0f) / 20.0f)); break;
+        case 4:
+        {
+            const float cw = rr.getWidth() / 32.0f;
+            const float within = (p.x - (rr.getX() + (float) s * cw)) / cw;
+            st.arpGate[(size_t) s].store (jlimit (0.05f, 1.0f, click ? within : jmax (v, within)));
+            break;
+        }
+        case 5: if (click) st.arpTie[(size_t) s].store (! st.arpTie[(size_t) s].load()); break;
+        case 6: if (click) st.arpRatchet[(size_t) s].store (st.arpRatchet[(size_t) s].load() % 4 + 1); break;
         default: break;
     }
     repaint();

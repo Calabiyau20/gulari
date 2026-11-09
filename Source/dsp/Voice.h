@@ -19,6 +19,7 @@ struct GlobalMod
     float seq[8] {};       // lane outputs
     float modWheel = 0, aftertouch = 0, pitchBend = 0;   // pitchBend -1..1
     double bpm = 120.0;
+    double beat = 0.0;     // musical position at the start of the block
 };
 
 struct VoiceContext
@@ -111,11 +112,13 @@ private:
     float grLevel = 0, grGainL = 1, grGainR = 1;
     float subLevel = 0, noiseLevel = 0;
     float plLevel = 0, plGainL = 1, plGainR = 1;
-    float fm[5][3] {};   // [src a,b,c,g,n][dst a,b,c]
-    int fmType[3] {};    // per destination (A, B, C): choices::fmModes
-    float fmDepth[3] {}; // summed amounts per destination (for AM / ring depth)
-    float tz[3] {};      // thru-zero accumulated phase
-    float prevA = 0, prevB = 0, prevC = 0, prevG = 0, prevN = 0;
+    float fm[6][4] {};   // [src a,b,c,spectral,grain,noise][dst a,b,c,spectral]
+    int fmType[4] {};    // per destination: choices::fmModes
+    float fmDepth[4] {}; // summed amounts per destination (for AM / ring depth)
+    float tz[4] {};      // thru-zero accumulated phase
+    float prevA = 0, prevB = 0, prevC = 0, prevS = 0, prevG = 0, prevN = 0;
+    bool rtFilter[8] { true, true, true, true, true, true, true, false };
+    bool spDist = true;
     float volL = 1, volR = 1;
     float cutoffBase = 1000.0f;
     int ctrlCounter = 0;

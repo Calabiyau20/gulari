@@ -32,6 +32,8 @@ public:
         float pos = 0, scan = 0, tilt = 0, stretch = 0, shift = 0, oddEven = 0, blur = 0, shimmer = 0, width = 0.4f;
         int partials = 48;
         bool freeze = false;
+        int warp = 0;
+        float warpAmt = 0.0f, partialDecay = 0.0f, jitter = 0.0f;
     };
     void prepare (double sampleRate, uint32_t seed);
     void noteOn (float startPos);
@@ -54,6 +56,23 @@ public:
         outL = l;
         outR = r;
     }
+    // phase-modulated version: the analytic (quadrature) sum lets the whole spectrum be phase shifted
+    inline void tickPM (float pm, float& outL, float& outR)
+    {
+        float l = 0.0f, r = 0.0f, ql = 0.0f, qr = 0.0f;
+        for (int k = 0; k < active; ++k)
+        {
+            const float s = sn[k], c = cs[k];
+            l += s * aL[k]; r += s * aR[k];
+            ql += c * aL[k]; qr += c * aR[k];
+            aL[k] += dL[k]; aR[k] += dR[k];
+            cs[k] = c * rc[k] - s * rs[k];
+            sn[k] = c * rs[k] + s * rc[k];
+        }
+        const float cp = std::cos (kTwoPi * pm), sp = std::sin (kTwoPi * pm);
+        outL = l * cp + ql * sp;
+        outR = r * cp + qr * sp;
+    }
     float position() const { return playPos; }
 
 private:
@@ -62,7 +81,8 @@ private:
     float aL[kN] {}, aR[kN] {}, dL[kN] {}, dR[kN] {};
     float smoothAmp[kN] {};
     float flicker[kN] {}, flickerTarget[kN] {};
-    float playPos = 0.0f;
+    float playPos = 0.0f, noteTime = 0.0f;
+    float jit[kN] {};
     int active = 0;
     Rng rng;
 };

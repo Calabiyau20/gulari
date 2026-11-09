@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include "Params.h"
 #include "dsp/Synth.h"
 #include "dsp/Fx.h"
@@ -64,6 +65,7 @@ public:
     static juce::StringArray factoryPresetNames();
     void initPreset();
     juce::String currentPresetName { "Init" };
+    int uiSkin = 0;   // interface skin, saved with the session (not with presets)
 
     juce::AudioProcessorValueTreeState apvts;
     pg::Synth synth;
@@ -92,6 +94,12 @@ private:
     pg::FxChain fx;
     int lastStrumCount = 0;
     juce::AudioBuffer<float> work;
+    // oversampling of the voices (Off / 4x / 8x)
+    std::unique_ptr<juce::dsp::Oversampling<float>> os[2];
+    juce::MidiBuffer osMidi;
+    double baseRate = 48000.0;
+    int maxBlock = 512, osMode = 0;
+    void applyOversampling (int mode);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthgularityProcessor)
 };

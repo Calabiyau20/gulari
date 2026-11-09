@@ -38,7 +38,16 @@ bool SynthgularityProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
 
 void SynthgularityProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    synth.prepare (sampleRate, samplesPerBlock);
+    baseRate = sampleRate;
+    maxBlock = juce::jmax (1, samplesPerBlock);
+    for (int k = 0; k < 2; ++k)
+    {
+        os[k] = std::make_unique<juce::dsp::Oversampling<float>> (2, k == 0 ? 2 : 3, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+        os[k]->initProcessing ((size_t) maxBlock);
+    }
+    osMidi.ensureSize (4096);
+    osMode = -1;
+    applyOversampling ((int) cache[oversampling]);
     fx.prepare (sampleRate, samplesPerBlock);
     meter.prepare (sampleRate);
     work.setSize (2, samplesPerBlock);
@@ -65,7 +74,25 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::Optional<juce::AudioPlayHead::PositionInfo> pos;
     if (auto* ph = getPlayHead()) pos = ph->getPosition();
 
-    synth.render (buffer, midi, cache.data(), smp.get(), tptr, spec.get(), shot.get(), pos ? &*pos : nullptr);
+    const int wantOs = juce::jlimit (0, 2, (int) cache[oversampling]);
+    if (wantOs != osMode || n > maxBlock) { if (n > maxBlock) prepareToPlay (baseRate, n); else applyOversampling (wantOs); }
+    if (osMode == 0)
+        synth.render (buffer, midi, cache.data(), smp.get(), tptr, spec.get(), shot.get(), pos ? &*pos : nullptr);
+    else
+    {
+        // voices run at 4x / 8x the host rate, then the half-band filters bring them down
+        auto& o = *os[osMode - 1];
+        const int factor = (int) o.getOversamplingFactor();
+        juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), 2, (size_t) n);
+        auto up = o.processSamplesUp (block);
+        float* chans[2] = { up.getChannelPointer (0), up.getChannelPointer (1) };
+        juce::AudioBuffer<float> ub (chans, 2, n * factor);
+        ub.clear();
+        osMidi.clear();
+        for (const auto meta : midi) osMidi.addEvent (meta.getMessage(), meta.samplePosition * factor);
+        synth.render (ub, osMidi, cache.data(), smp.get(), tptr, spec.get(), shot.get(), pos ? &*pos : nullptr);
+        o.processSamplesDown (block);
+    }
 
     const int strums = synth.noteOnCounter.load();
     const bool strum = strums != lastStrumCount;
@@ -82,7 +109,7 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             if (! std::isfinite (v)) v = 0.0f;
             // transparent below -3 dBFS, soft above
             const float a = std::abs (v);
-            if (a > 0.7f) v = std::copysign (0.7f + 0.3f * fastTanh ((a - 0.7f) / 0.3f), v);
+            if (a > 0.7f) v = std::copysign (0.7f + 0.3f * std::tanh ((a - 0.7f) / 0.3f), v);
             d[i] = v;
         }
     }
@@ -92,6 +119,15 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 // ---------------------------------------------------------------------------
 // Sources
 // ---------------------------------------------------------------------------
+void SynthgularityProcessor::applyOversampling (int mode)
+{
+    osMode = juce::jlimit (0, 2, mode);
+    const int factor = osMode == 0 ? 1 : (osMode == 1 ? 4 : 8);
+    synth.prepare (baseRate * factor, maxBlock * factor);
+    if (osMode > 0) os[osMode - 1]->reset();
+    setLatencySamples (osMode > 0 ? juce::roundToInt (os[osMode - 1]->getLatencyInSamples()) : 0);
+}
+
 bool SynthgularityProcessor::loadSample (const juce::File& file, juce::String& error)
 {
     auto s = loadSampleFile (file, error);
@@ -255,13 +291,19 @@ void SynthgularityProcessor::applyState (const juce::ValueTree& root)
 
 void SynthgularityProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    if (auto xml = buildState().createXml()) copyXmlToBinary (*xml, dest);
+    auto st = buildState();
+    st.setProperty ("skin", uiSkin, nullptr);
+    if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
 
 void SynthgularityProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
-        applyState (juce::ValueTree::fromXml (*xml));
+    {
+        auto st = juce::ValueTree::fromXml (*xml);
+        uiSkin = (int) st.getProperty ("skin", uiSkin);
+        applyState (st);
+    }
 }
 
 // ---------------------------------------------------------------------------

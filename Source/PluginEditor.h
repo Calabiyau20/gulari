@@ -21,11 +21,27 @@ private:
     void loadWavetableDialog (int osc);
     void loadFileDialog (const juce::String& title, std::function<bool (const juce::File&, juce::String&)> loader);
     void showError (const juce::String& message);
+    void setSkin (int index);
+
+    // tabs that fade their page in when you switch
+    struct AnimatedTabs : public juce::TabbedComponent
+    {
+        AnimatedTabs() : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop) {}
+        void currentTabChanged (int, const juce::String&) override
+        {
+            if (auto* c = getCurrentContentComponent())
+            {
+                c->setAlpha (0.0f);
+                juce::Desktop::getInstance().getAnimator().animateComponent (c, c->getBounds(), 1.0f, 220, false, 0.0, 0.0);
+            }
+        }
+    };
 
     SynthgularityProcessor& proc;
     static constexpr int kHeaderH = 84;
     juce::Image stars, logo, logoGrid, isologo;
     juce::Rectangle<float> isologoArea;
+    double animT = 0.0;
     pg::ui::AboutOverlay about;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -38,7 +54,7 @@ private:
     std::unique_ptr<pg::ui::MasterSection> master;
     juce::Label voicesLabel;
 
-    juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
+    AnimatedTabs tabs;
     juce::OwnedArray<juce::Component> pages;
 
     // widgets that need repaint from the timer

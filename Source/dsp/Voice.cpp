@@ -78,7 +78,7 @@ void Voice::start (int midiNote, float vel, bool retrigger, const VoiceContext& 
         {
             filter.reset();
             for (auto& t : tz) t = 0.0f;
-            prevA = prevB = prevC = prevG = prevN = 0.0f;
+            prevA = prevB = prevC = prevS = prevG = prevN = 0.0f;
             plaits.reset();
         }
     }
@@ -182,6 +182,14 @@ void Voice::controlUpdate (const VoiceContext& ctx)
         if (via != MS_None) v *= applyPolarity (val (via), via, pol == 2 ? 0 : pol, p);
         mod[dst] += v * modDepth (dst);
     }
+    // SEQ lanes routed from their own page (Route to matrix)
+    for (int l = 0; l < 8; ++l)
+    {
+        const int base = seq1_on + l * (seq2_on - seq1_on);
+        const int dst = (int) p[base + (seq1_dst - seq1_on)];
+        if (dst == MD_None || dst >= MD_VoiceCount || p[base] < 0.5f) continue;
+        mod[dst] += g.seq[l] * p[base + (seq1_amt - seq1_on)] * modDepth (dst);
+    }
 
     // ---- pitch ----
     const float bend = g.pitchBend * p[bend_range];
@@ -263,6 +271,10 @@ void Voice::controlUpdate (const VoiceContext& ctx)
         sp.shimmer = p[sp_shimmer];
         sp.width = p[sp_width];
         sp.freeze = p[sp_freeze] > 0.5f;
+        sp.warp = (int) p[sp_warp];
+        sp.warpAmt = clamp01 (p[sp_wamt] + mod[MD_SpWarp]);
+        sp.partialDecay = p[sp_pdecay];
+        sp.jitter = p[sp_jitter];
         spFreqMul = semisToRatio (12.0f * p[sp_oct] + p[sp_semi] + p[sp_fine] * 0.01f + mod[MD_SpPitch]);
         spLevel = clamp01 (p[sp_level] + mod[MD_SpLevel]);
         panGains (p[sp_pan], spGainL, spGainR);
@@ -301,18 +313,28 @@ void Voice::controlUpdate (const VoiceContext& ctx)
         panGains (p[pl_pan], plGainL, plGainR);
     }
 
-    // ---- FM matrix ----
-    fmType[0] = (int) p[fm_type_a]; fmType[1] = (int) p[fm_type_b]; fmType[2] = (int) p[fm_type_c];
+    // ---- FM matrix: sources A, B, C, Spectral, Grain, Noise -> destinations A, B, C, Spectral ----
+    fmType[0] = (int) p[fm_type_a]; fmType[1] = (int) p[fm_type_b]; fmType[2] = (int) p[fm_type_c]; fmType[3] = (int) p[fm_type_s];
     const float fmAmt = clampf (p[fm_amount] + mod[MD_FmAmount], 0.0f, 2.0f);
     const int firstFm = fm_a_a;
-    for (int s = 0; s < 5; ++s)
-        for (int d = 0; d < 3; ++d)
+    for (int sI = 0; sI < 6; ++sI)
+        for (int d = 0; d < 4; ++d)
         {
-            const float v = p[firstFm + s * 3 + d];
-            fm[s][d] = v * v * fmAmt;
+            const float v = p[firstFm + sI * 4 + d];
+            fm[sI][d] = v * v * fmAmt;
         }
-    for (int d = 0; d < 3; ++d)
-        fmDepth[d] = juce::jmin (1.0f, fm[0][d] + fm[1][d] + fm[2][d] + fm[3][d] + fm[4][d]);
+    for (int d = 0; d < 4; ++d)
+    {
+        float t = 0.0f;
+        for (int sI = 0; sI < 6; ++sI) t += fm[sI][d];
+        fmDepth[d] = juce::jmin (1.0f, t);
+    }
+
+    // ---- routing ----
+    rtFilter[0] = p[rt_flt_a] > 0.5f; rtFilter[1] = p[rt_flt_b] > 0.5f; rtFilter[2] = p[rt_flt_c] > 0.5f;
+    rtFilter[3] = p[rt_flt_sp] > 0.5f; rtFilter[4] = p[rt_flt_gr] > 0.5f; rtFilter[5] = p[rt_flt_pl] > 0.5f;
+    rtFilter[6] = p[rt_flt_sub] > 0.5f; rtFilter[7] = p[rt_flt_smp] > 0.5f;
+    spDist = p[rt_dist_sp] > 0.5f;
 
     // ---- bite + filter ----
     bite.drive = clamp01 (p[bite_drive] + mod[MD_BiteDrive]);
@@ -366,13 +388,18 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
         const float n = noise.tick (noiseType);
 
         // Modulation matrix inputs (previous sample of each source), one sum per destination
-        float sum[3];
-        for (int d = 0; d < 3; ++d)
-            sum[d] = fm[0][d] * prevA + fm[1][d] * prevB + fm[2][d] * prevC + fm[3][d] * prevG + fm[4][d] * n;
+        const float srcv[6] = { prevA, prevB, prevC, prevS, prevG, n };
+        float sum[4];
+        for (int d = 0; d < 4; ++d)
+        {
+            float t = 0.0f;
+            for (int sI = 0; sI < 6; ++sI) t += fm[sI][d] * srcv[sI];
+            sum[d] = t;
+        }
         // turn each sum into the destination's kind of modulation
-        float pm[3] = {}, pd[3] = {}, gain[3] = { 1.0f, 1.0f, 1.0f };
-        const float destHz[3] = { baseHz * wtFreqMul[0], baseHz * wtFreqMul[1], baseHz * wtFreqMul[2] };
-        for (int d = 0; d < 3; ++d)
+        float pm[4] = {}, pd[4] = {}, gain[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        const float destHz[4] = { baseHz * wtFreqMul[0], baseHz * wtFreqMul[1], baseHz * wtFreqMul[2], baseHz * spFreqMul };
+        for (int d = 0; d < 4; ++d)
         {
             switch (fmType[d])
             {
@@ -387,14 +414,15 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
                 default: gain[d] = 1.0f - fmDepth[d] + sum[d]; break;                  // ring modulation
             }
         }
-        float l = 0.0f, r = 0.0f;
+        // two buses: F goes through distortion + filter, B bypasses the filter
+        float fl = 0.0f, fr = 0.0f, bl = 0.0f, br = 0.0f, nl = 0.0f, nr = 0.0f;   // n = filtered but not distorted
+        auto add = [&] (int route, float xl, float xr) { if (rtFilter[route]) { fl += xl; fr += xr; } else { bl += xl; br += xr; } };
         for (int o = 0; o < 3; ++o)
         {
             if (! wtOn[o]) continue;
             float wl, wr;
             wt[o].tick (*ctx.table[o], destHz[o], wtPos[o], pm[o], wl, wr, pd[o]);
-            l += wl * wtLevel[o] * gain[o];
-            r += wr * wtLevel[o] * gain[o];
+            add (o, wl * wtLevel[o] * gain[o], wr * wtLevel[o] * gain[o]);
         }
         prevA = wtOn[0] ? wt[0].lastMono() * gain[0] : 0.0f;
         prevB = wtOn[1] ? wt[1].lastMono() * gain[1] : 0.0f;
@@ -403,59 +431,60 @@ void Voice::render (float* outL, float* outR, int numSamples, const VoiceContext
         if (spOn)
         {
             float sl, sr2;
-            spectral.tick (sl, sr2);
-            l += sl * spLevel * spGainL * 1.4142f;
-            r += sr2 * spLevel * spGainR * 1.4142f;
+            if (pm[3] != 0.0f || pd[3] != 0.0f) spectral.tickPM (pm[3] + pd[3] * 0.25f, sl, sr2);
+            else spectral.tick (sl, sr2);
+            sl *= gain[3]; sr2 *= gain[3];
+            prevS = (sl + sr2) * 0.5f;
+            const float xl = sl * spLevel * spGainL * 1.4142f, xr = sr2 * spLevel * spGainR * 1.4142f;
+            if (rtFilter[3] && ! spDist) { nl += xl; nr += xr; }
+            else add (3, xl, xr);
         }
+        else prevS = 0.0f;
 
         if (grOn)
         {
             float gl, gr;
             grain.tick (*ctx.sample, gl, gr);
             prevG = (gl + gr) * 0.5f;
-            l += gl * grLevel * grGainL * 1.4142f;
-            r += gr * grLevel * grGainR * 1.4142f;
+            add (4, gl * grLevel * grGainL * 1.4142f, gr * grLevel * grGainR * 1.4142f);
         }
         else prevG = 0.0f;
 
         if (subLevel > 0.0f)
         {
-            const float s = subOsc.tick (subWave == 2 ? 3 : subWave, baseHz * (ctx.p[sub_oct] < -1.5f ? 0.25f : 0.5f), rate, 0.0f);
-            l += s * subLevel * 0.7f;
-            r += s * subLevel * 0.7f;
+            const float s0 = subOsc.tick (subWave == 2 ? 3 : subWave, baseHz * (ctx.p[sub_oct] < -1.5f ? 0.25f : 0.5f), rate, 0.0f);
+            add (6, s0 * subLevel * 0.7f, s0 * subLevel * 0.7f);
         }
-        if (noiseLevel > 0.0f)
-        {
-            l += n * noiseLevel * 0.7f;
-            r += n * noiseLevel * 0.7f;
-        }
+        if (noiseLevel > 0.0f) add (6, n * noiseLevel * 0.7f, n * noiseLevel * 0.7f);
         prevN = n;
 
         if (plOn)
         {
             const float pl = plaits.tick() * plLevel;
-            l += pl * plGainL * 1.4142f;
-            r += pl * plGainR * 1.4142f;
+            add (5, pl * plGainL * 1.4142f, pl * plGainR * 1.4142f);
+        }
+        float shotL = 0.0f, shotR = 0.0f;
+        if (smpOn)
+        {
+            const float x = shot.tick (*ctx.shot) * smpLevel;
+            if (rtFilter[7]) { fl += x * smpGainL * 1.4142f; fr += x * smpGainR * 1.4142f; }
+            else { shotL = x * smpGainL * 1.4142f; shotR = x * smpGainR * 1.4142f; }
         }
 
         // remove the DC that asymmetric warps (Bloat, Mirror, Pulse) add, before distortion and filter
-        { const float yl = l - dcX[0] + 0.9995f * dcY[0]; dcX[0] = l; dcY[0] = yl; l = yl; }
-        { const float yr = r - dcX[1] + 0.9995f * dcY[1]; dcX[1] = r; dcY[1] = yr; r = yr; }
-        if (! bitePost) bite.process (l, r);
-        l = filter.tick (0, l);
-        r = filter.tick (1, r);
+        { const float yl = fl - dcX[0] + 0.9995f * dcY[0]; dcX[0] = fl; dcY[0] = yl; fl = yl; }
+        { const float yr = fr - dcX[1] + 0.9995f * dcY[1]; dcX[1] = fr; dcY[1] = yr; fr = yr; }
+        if (! bitePost) bite.process (fl, fr);
+        float l = filter.tick (0, fl + nl) + bl;
+        float r = filter.tick (1, fr + nr) + br;
         if (bitePost) bite.process (l, r);
 
         outL[i] += l * env * volL;
         outR[i] += r * env * volR;
 
-        // the one-shot sampler has its own envelope: it skips the amp envelope so clicks stay sharp
-        if (smpOn)
-        {
-            const float x = shot.tick (*ctx.shot) * smpLevel;
-            outL[i] += x * smpGainL * 1.4142f * volL;
-            outR[i] += x * smpGainR * 1.4142f * volR;
-        }
+        // the one-shot sampler has its own envelope: unless routed through the filter it skips the amp envelope so clicks stay sharp
+        outL[i] += shotL * volL;
+        outR[i] += shotR * volR;
 
         if (! amp.active() && ! (smpOn && shot.isPlaying())) break;
     }

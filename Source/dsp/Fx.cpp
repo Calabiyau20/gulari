@@ -20,6 +20,7 @@ void FxChain::prepare (double sampleRate, int maxBlock)
     clouds.prepare (sr);
     filt[0].prepare (sr); filt[1].prepare (sr);
     reverb.prepare (sr);
+    mixbus.prepare (sr);
     tmpL.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
     tmpR.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
 }
@@ -52,11 +53,32 @@ void FxChain::computeMods (const float* p, const GlobalMod& g)
         if (via != MS_None) v *= applyPolarity (val (via), via, pol == 2 ? 0 : pol, p);
         fxMod[dst] += v;
     }
+    for (int l = 0; l < 8; ++l)
+    {
+        const int base = seq1_on + l * (seq2_on - seq1_on);
+        const int dst = (int) p[base + (seq1_dst - seq1_on)];
+        if (dst < MD_VoiceCount || p[base] < 0.5f) continue;
+        fxMod[dst] += g.seq[l] * p[base + (seq1_amt - seq1_on)];
+    }
 }
 
 void FxChain::process (float* L, float* R, int n, const float* p, const GlobalMod& g, int lastNote, bool strum)
 {
     computeMods (p, g);
+    if ((int) p[rt_order] == 1)
+    {
+        mixbus.process (L, R, n, p, fxMod, g.bpm, g.beat);
+        runRack (L, R, n, p, g, lastNote, strum);
+    }
+    else
+    {
+        runRack (L, R, n, p, g, lastNote, strum);
+        mixbus.process (L, R, n, p, fxMod, g.bpm, g.beat);
+    }
+}
+
+void FxChain::runRack (float* L, float* R, int n, const float* p, const GlobalMod& g, int lastNote, bool strum)
+{
     // the rack: every slot runs its effect in order; an effect sits in one slot only
     bool used[FX_Count] {};
     for (int s = 0; s < 10; ++s)

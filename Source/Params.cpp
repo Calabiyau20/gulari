@@ -53,7 +53,7 @@ namespace choices
                  "WT A Position", "WT A Pitch", "WT A Level", "WT A Warp",
                  "WT B Position", "WT B Pitch", "WT B Level", "WT B Warp",
                  "WT C Position", "WT C Pitch", "WT C Level", "WT C Warp",
-                 "Spectral Position", "Spectral Pitch", "Spectral Tilt", "Spectral Stretch", "Spectral Shift", "Spectral Level",
+                 "Spectral Position", "Spectral Pitch", "Spectral Tilt", "Spectral Stretch", "Spectral Shift", "Spectral Level", "Spectral Warp",
                  "Grain Position", "Grain Size", "Grain Density", "Grain Pitch", "Grain Spray", "Grain Level",
                  "FM Amount", "Sub Level", "Noise Level", "Sampler Pitch", "Sampler Level",
                  "Plaits Harmonics", "Plaits Timbre", "Plaits Morph", "Plaits Level",
@@ -63,7 +63,8 @@ namespace choices
                  "FX Resonator Position", "FX Clouds Position", "FX Clouds Size", "FX Clouds Density",
                  "FX Clouds Texture", "FX Clouds Mix", "FX Flanger Mix", "FX Phaser Mix",
                  "FX Filter 1 Freq", "FX Filter 1 Reso", "FX Filter 1 Morph", "FX Filter 2 Freq", "FX Filter 2 Reso", "FX Filter 2 Morph",
-                 "FX Reverb Size", "FX Reverb Mix" };
+                 "FX Reverb Size", "FX Reverb Mix", "MixBus DJ Filter", "MixBus Gate Depth", "MixBus Tape Drive",
+                 "MixBus Crusher Bits", "MixBus Width" };
     }
     juce::StringArray modPolarity()   { return { "Native", "Unipolar", "Bipolar" }; }
     juce::StringArray seqModes()      { return { "Unipolar", "Bipolar" }; }
@@ -93,6 +94,12 @@ namespace choices
         return { "Click", "Tick", "Kick Click", "Rim", "Snap", "Noise Burst", "Hat", "Zap", "Blip", "Metal Hit",
                  "Crackle", "Breath", "User File" };
     }
+    juce::StringArray spectralWarps()  { return { "Off", "Shift", "Fold", "Sieve", "Comb", "Spread", "Mirror", "Squeeze", "Formant Lock" }; }
+    juce::StringArray mixbusTypes()    { return { "Empty", "Tape", "EQ", "Compressor", "Chorus", "Imager", "Trance Gate", "DJ Filter", "Bitcrusher", "Transient", "Limiter" }; }
+    juce::StringArray gatePatterns()   { return { "Straight", "Offbeat", "Psy Roll", "Triplet Feel", "3+3+2", "Stutter", "Half Time", "Syncopated" }; }
+    juce::StringArray routeOrders()    { return { "Rack > MixBus", "MixBus > Rack" }; }
+    juce::StringArray oversamplingModes() { return { "Off", "4x", "8x" }; }
+    juce::StringArray distortionPositions() { return { "Pre Filter", "Post Filter" }; }
     juce::StringArray chaosTypes()    { return { "Rossler", "Henon", "Logistic", "Duffing" }; }
 }
 

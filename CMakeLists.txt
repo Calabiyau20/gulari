@@ -8,7 +8,7 @@ set(PG_COMPANY_NAME   "Calabi Yau")
 set(PG_BUNDLE_ID      "com.calabiyau.synthgularity")
 set(PG_MANUFACTURER   CbYu)   # 4 chars, at least one upper-case letter
 set(PG_PLUGIN_CODE    Sygy)   # 4 chars, unique per plugin
-set(PG_VERSION        "0.4.1")
+set(PG_VERSION        "0.5.0")
 
 # Must be set before project(): lowest macOS the plugin runs on
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version" FORCE)

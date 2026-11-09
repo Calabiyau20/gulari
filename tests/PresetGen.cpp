@@ -124,6 +124,24 @@ struct Gen
     void voice (int mode, int poly = 8, float glide = 0.0f) { s ("voice_mode", (float) mode); s ("polyphony", (float) poly); s ("glide", glide); }
     void bite (float drive, float soft = 0.0f, float fold = 0.0f, float crush = 0.0f, float mix = 1.0f)
     { s ("bite_drive", drive); s ("bite_soft", soft); s ("bite_fold", fold); s ("bite_crush", crush); s ("bite_mix", mix); }
+    // mixbus finishing touches (tape warmth, glue, width), plus per-step arp probability / gate variation
+    void finish (const juce::String& prefix)
+    {
+        if (chance (0.45f)) { s ("mb_tp_on", 1); s ("mb_tp_drive", u (0.1f, 0.45f)); s ("mb_tp_wow", u (0.0f, prefix == "PD" || prefix == "DR" ? 0.4f : 0.1f)); s ("mb_tp_tone", u (-0.3f, 0.2f)); }
+        if (prefix == "BA" || prefix == "BL") { if (chance (0.6f)) { s ("mb_cp_on", 1); s ("mb_cp_thr", u (-18, -8)); s ("mb_cp_ratio", u (2, 5)); s ("mb_cp_att", u (5, 30)); s ("mb_cp_gain", u (1, 4)); } }
+        else if (chance (0.35f)) { s ("mb_im_on", 1); s ("mb_im_width", u (1.1f, 1.5f)); }
+        if ((prefix == "PD" || prefix == "KY") && chance (0.4f)) { s ("mb_ch_on", 1); s ("mb_ch_mix", u (0.2f, 0.45f)); s ("mb_ch_rate", u (0.2f, 1.0f)); }
+        if (prefix == "GN" || prefix == "AR")
+        {
+            auto& st = pr.synth.steps;
+            for (int k = 0; k < 32; ++k)
+            {
+                st.arpProb[(size_t) k].store (chance (prefix == "GN" ? 0.5f : 0.2f) ? u (0.35f, 0.9f) : 1.0f);
+                st.arpGate[(size_t) k].store (chance (0.3f) ? u (0.3f, 1.0f) : 1.0f);
+            }
+        }
+        if (prefix == "FX" && chance (0.4f)) { s ("mb_tg_on", 1); s ("mb_tg_pat", (float) i (0, 7)); s ("mb_tg_depth", u (0.5f, 1.0f)); }
+    }
     void rack (std::initializer_list<int> order)   // FX slot order (FxType values)
     {
         int k = 1;
@@ -458,7 +476,7 @@ void drone (Gen& g)
     g.spectral (g.pick ({ 13, 16, 17, 19, 11, 3 }), g.u (0, 1), g.u (0.02f, 0.1f), g.u (0.4f, 0.9f)); g.s ("sp_shimmer", g.u (0.2f, 0.6f));
     g.wt ('A', g.pick ({ T_Harm, T_Formant }), g.u (0, 1), -1, 0.4f, 5, 0.25f);
     g.s ("sub_level", g.u (0.1f, 0.3f));
-    g.amp (g.u (3, 8), 1, 1, g.u (6, 15));
+    g.amp (g.u (1.5f, 3.5f), 1, 1, g.u (6, 15));
     g.filter (0, 0, 0, g.u (800, 3000), 0.3f);
     g.s ("chaos2_rate", g.u (0.05f, 0.3f)); g.route (MS_Chaos2, MD_Cutoff, 0.4f); g.route (MS_Chaos2Y, MD_SpShift, 0.2f); g.route (MS_Chaos2Z, MD_WtAPos, 0.5f);
     g.reverb (g.u (0.45f, 0.7f), g.u (8.0f, 20.0f), 0.95f);
@@ -612,6 +630,7 @@ int main (int argc, char** argv)
                 g.s ("gr_on", 0);
                 g.rack ({ FX_Filter1, FX_Filter2, FX_Stereo, FX_Flanger, FX_Phaser, FX_Delay, FX_Rings, FX_Clouds, FX_Reverb });
                 c.recipe (g);
+                g.finish (c.prefix);
                 g.s ("master_gain", -6.0f);
                 const float seconds = c.test == 3 ? 7.0f : 5.0f;
                 float peak = 0.0f;
@@ -622,7 +641,7 @@ int main (int argc, char** argv)
                 g.s ("master_gain", gain);
                 play (pr, c.test, seconds, nullptr, &peak);
                 const float lufs2 = pr.meter.lufsI.load(), tp = pr.meter.tpMax.load();
-                ok = std::isfinite (lufs2) && lufs2 > c.targetLufs - 4.0f && tp < 0.5f;
+                ok = std::isfinite (lufs2) && lufs2 > c.targetLufs - 4.0f && lufs2 < c.targetLufs + 2.5f && tp < 0.5f;
                 if (! ok) { std::cout << "  retry (lufs " << lufs2 << " tp " << tp << ")\n"; continue; }
                 const juce::String name = makeName (nameRnd, usedNames, c.prefix);
                 const auto file = out.getChildFile (c.folder).getChildFile (juce::File::createLegalFileName (name) + ".sgpreset");

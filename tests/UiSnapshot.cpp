@@ -19,8 +19,9 @@ int main (int argc, char** argv)
         if (i == 0) for (int n : { 48, 55, 60 }) m.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100), 0);
         proc.processBlock (b, m);
     }
+    if (argc > 4) proc.uiSkin = juce::String (argv[4]).getIntValue();
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-    ed->setSize (1180, 780);
+    ed->setSize (1280, 800);
     auto* tabs = [&]() -> juce::TabbedComponent*
     {
         for (auto* c : ed->getChildren()) if (auto* t = dynamic_cast<juce::TabbedComponent*> (c)) return t;
@@ -31,6 +32,7 @@ int main (int argc, char** argv)
     for (int t = 0; t < tabs->getNumTabs(); ++t)
     {
         tabs->setCurrentTabIndex (t);
+        if (auto* c = tabs->getCurrentContentComponent()) c->setAlpha (1.0f);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         juce::PNGImageFormat png;
         auto f = outDir.getChildFile (juce::String (t) + "_" + tabs->getTabNames()[t].replace (" / ", "_") + ".png");
