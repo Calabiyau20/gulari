@@ -178,3 +178,62 @@ if(PG_BUILD_TESTS)
     target_link_libraries(SynthgularityUiSnapshot PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags)
 endif()
+
+# =============================================================================
+# Calabi-Yau Resonator - second instrument. Shares the FX rack, MIXBUS, meters,
+# look and feel and fonts with Synthgularity (compiled into it, no plugin entry).
+# =============================================================================
+set(CYR_PRODUCT_NAME "Calabi-Yau Resonator")
+set(CYR_VERSION      "1.0.0")
+juce_add_plugin(CalabiYauResonator
+    PRODUCT_NAME "${CYR_PRODUCT_NAME}"
+    COMPANY_NAME "${PG_COMPANY_NAME}"
+    BUNDLE_ID "com.calabiyau.resonator"
+    PLUGIN_MANUFACTURER_CODE ${PG_MANUFACTURER}
+    PLUGIN_CODE CyRs
+    VERSION ${CYR_VERSION}
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    VST3_CATEGORIES Instrument Synth
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice
+    FORMATS ${PG_FORMATS})
+clap_juce_extensions_plugin(TARGET CalabiYauResonator
+    CLAP_ID "com.calabiyau.resonator"
+    CLAP_FEATURES instrument synthesizer stereo)
+
+file(GLOB_RECURSE CYR_SOURCES Resonator/Source/*.cpp Resonator/Source/*.h)
+file(GLOB_RECURSE PG_SHARED_SOURCES Source/*.cpp Source/*.h)
+target_sources(CalabiYauResonator PRIVATE ${CYR_SOURCES} ${PG_SHARED_SOURCES})
+target_include_directories(CalabiYauResonator PRIVATE Resonator/Source Source)
+set(CYR_DEFS
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_DISPLAY_SPLASH_SCREEN=0
+    PG_NO_PLUGIN_ENTRY=1 PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}"
+    PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY} CYR_VERSION_STRING="${CYR_VERSION}")
+target_compile_definitions(CalabiYauResonator PUBLIC ${CYR_DEFS})
+target_link_libraries(CalabiYauResonator
+    PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+
+if(PG_BUILD_TESTS)
+    juce_add_console_app(ResonatorRenderTest PRODUCT_NAME "ResonatorRenderTest")
+    file(GLOB CYR_DSP Resonator/Source/RParams.cpp Resonator/Source/RProcessor.cpp Resonator/Source/RPresets.cpp Resonator/Source/dsp/*.cpp)
+    file(GLOB_RECURSE PG_DSP_ONLY Source/dsp/*.cpp Source/Params.cpp)
+    target_sources(ResonatorRenderTest PRIVATE Resonator/tests/RRenderTest.cpp ${CYR_DSP} ${PG_DSP_ONLY})
+    target_include_directories(ResonatorRenderTest PRIVATE Resonator/Source Source)
+    target_compile_definitions(ResonatorRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 CYR_HEADLESS=1 PG_HEADLESS=1
+        PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}")
+    target_link_libraries(ResonatorRenderTest PRIVATE mutable juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+        juce::juce_recommended_config_flags)
+
+    juce_add_console_app(ResonatorUiSnapshot PRODUCT_NAME "ResonatorUiSnapshot")
+    target_sources(ResonatorUiSnapshot PRIVATE Resonator/tests/RUiSnapshot.cpp ${CYR_SOURCES} ${PG_SHARED_SOURCES})
+    target_include_directories(ResonatorUiSnapshot PRIVATE Resonator/Source Source)
+    target_compile_definitions(ResonatorUiSnapshot PRIVATE ${CYR_DEFS} CYR_NO_PLUGIN_ENTRY=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(ResonatorUiSnapshot PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+        juce::juce_recommended_config_flags)
+endif()

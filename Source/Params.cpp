@@ -140,25 +140,30 @@ int indexOf (const juce::String& id)
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+    addParamsTo (layout, [] (const juce::String&) { return true; });
+    return layout;
+}
+
+void addParamsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout, const std::function<bool (const juce::String&)>& keep)
+{
     using namespace juce;
-    AudioProcessorValueTreeState::ParameterLayout layout;
     const int version = 1;
 
    #define PG_LAYOUT_F(id, nm, mn, mx, df, sk) \
-    { NormalisableRange<float> r (mn, mx); if (sk > 0.0f) r.setSkewForCentre (sk); \
+    if (keep (#id)) { NormalisableRange<float> r (mn, mx); if (sk > 0.0f) r.setSkewForCentre (sk); \
       layout.add (std::make_unique<AudioParameterFloat> (ParameterID { #id, version }, nm, r, df)); }
    #define PG_LAYOUT_I(id, nm, mn, mx, df) \
-      layout.add (std::make_unique<AudioParameterInt> (ParameterID { #id, version }, nm, mn, mx, df));
+      if (keep (#id)) layout.add (std::make_unique<AudioParameterInt> (ParameterID { #id, version }, nm, mn, mx, df));
    #define PG_LAYOUT_C(id, nm, list, df) \
-      layout.add (std::make_unique<AudioParameterChoice> (ParameterID { #id, version }, nm, choices::list(), df));
+      if (keep (#id)) layout.add (std::make_unique<AudioParameterChoice> (ParameterID { #id, version }, nm, choices::list(), df));
    #define PG_LAYOUT_B(id, nm, df) \
-      layout.add (std::make_unique<AudioParameterBool> (ParameterID { #id, version }, nm, df));
+      if (keep (#id)) layout.add (std::make_unique<AudioParameterBool> (ParameterID { #id, version }, nm, df));
     PG_PARAM_LIST (PG_LAYOUT_F, PG_LAYOUT_I, PG_LAYOUT_C, PG_LAYOUT_B)
    #undef PG_LAYOUT_F
    #undef PG_LAYOUT_I
    #undef PG_LAYOUT_C
    #undef PG_LAYOUT_B
-    return layout;
 }
 
 } // namespace pg

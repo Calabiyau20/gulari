@@ -436,6 +436,8 @@ struct ParamInfo
 
 const std::vector<ParamInfo>& paramInfos();
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+// adds the parameters whose id passes 'keep' (used by other Calabi Yau instruments to host this FX rack)
+void addParamsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout, const std::function<bool (const juce::String&)>& keep);
 inline const juce::String& idOf (int pid) { return paramInfos()[(size_t) pid].id; }
 int indexOf (const juce::String& id);   // -1 if unknown
 
