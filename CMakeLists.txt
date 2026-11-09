@@ -106,6 +106,11 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/presets/FactoryLibrary.zip)
     list(APPEND PG_ASSETS Resources/presets/FactoryLibrary.zip)
     set(PG_HAS_LIBRARY 1)
 endif()
+set(PG_HAS_MANUAL 0)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/manual/Manual-EN.pdf AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/manual/Manual-ES.pdf)
+    list(APPEND PG_ASSETS Resources/manual/Manual-EN.pdf Resources/manual/Manual-ES.pdf)
+    set(PG_HAS_MANUAL 1)
+endif()
 set(PG_HAS_LOGO 0)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/logo-calabi-yau.png)
     list(APPEND PG_ASSETS Resources/logo-calabi-yau.png)
@@ -128,7 +133,7 @@ target_compile_definitions(Synthgularity PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0
     PG_PRODUCT_NAME="${PG_PRODUCT_NAME}"
     PG_COMPANY_NAME="${PG_COMPANY_NAME}"
-    PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY})
+    PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY} PG_HAS_MANUAL=${PG_HAS_MANUAL})
 
 target_link_libraries(Synthgularity
     PRIVATE
@@ -179,10 +184,10 @@ if(PG_BUILD_TESTS)
     file(GLOB_RECURSE PG_ALL_SOURCES Source/*.cpp Source/*.h)
     target_sources(SynthgularityUiSnapshot PRIVATE tests/UiSnapshot.cpp ${PG_ALL_SOURCES})
     target_include_directories(SynthgularityUiSnapshot PRIVATE Source)
-    target_compile_definitions(SynthgularityUiSnapshot PRIVATE
+    target_compile_definitions(SynthgularityUiSnapshot PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1
         JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 PG_NO_PLUGIN_ENTRY=1
-        PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}" PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY})
+        PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}" PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY} PG_HAS_MANUAL=${PG_HAS_MANUAL})
     target_link_libraries(SynthgularityUiSnapshot PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags)
 endif()
@@ -221,7 +226,7 @@ set(CYR_DEFS
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_DISPLAY_SPLASH_SCREEN=0
     PG_NO_PLUGIN_ENTRY=1 PG_PRODUCT_NAME="${PG_PRODUCT_NAME}" PG_COMPANY_NAME="${PG_COMPANY_NAME}"
-    PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY} CYR_VERSION_STRING="${CYR_VERSION}")
+    PG_HAS_LOGO=${PG_HAS_LOGO} PG_HAS_LIBRARY=${PG_HAS_LIBRARY} PG_HAS_MANUAL=${PG_HAS_MANUAL} CYR_VERSION_STRING="${CYR_VERSION}")
 target_compile_definitions(CalabiYauResonator PUBLIC ${CYR_DEFS})
 target_link_libraries(CalabiYauResonator
     PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp

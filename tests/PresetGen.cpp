@@ -625,7 +625,7 @@ int main (int argc, char** argv)
             bool ok = false;
             for (int attempt = 0; attempt < 12 && ! ok; ++attempt)
             {
-                pr.initPreset();
+                pr.resetToDefaults();
                 Gen g { pr, juce::Random ((juce::int64) (index * 7919 + attempt * 104729 + 12345)) };
                 g.s ("gr_on", 0);
                 g.rack ({ FX_Filter1, FX_Filter2, FX_Stereo, FX_Flanger, FX_Phaser, FX_Delay, FX_Rings, FX_Clouds, FX_Reverb });

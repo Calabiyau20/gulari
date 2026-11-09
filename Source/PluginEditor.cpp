@@ -212,7 +212,16 @@ SynthgularityEditor::SynthgularityEditor (SynthgularityProcessor& p) : AudioProc
     addAndMakeVisible (presetBox);
     presetBox.setTextWhenNothingSelected ("Presets");
     presetBox.onChange = [this] { choosePreset (presetBox.getSelectedId()); };
-    for (auto* b : { &prevButton, &nextButton, &saveButton, &initButton }) addAndMakeVisible (*b);
+    for (auto* b : { &prevButton, &nextButton, &saveButton, &initButton, &manualButton }) addAndMakeVisible (*b);
+    manualButton.setTooltip ("Open the user manual (PDF, English or Spanish)");
+    manualButton.onClick = [this]
+    {
+        PopupMenu m;
+        m.addSectionHeader ("User manual (PDF)");
+        m.addItem (1, "English");
+        m.addItem (2, "Espanol");
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&manualButton), [this] (int r) { if (r > 0) openManual (r == 2); });
+    };
     prevButton.onClick = [this]
     {
         const int i = presetBox.getSelectedItemIndex();
@@ -1064,14 +1073,16 @@ void SynthgularityEditor::resized()
     auto header = r.removeFromTop (kHeaderH).reduced (12, 12);
     r.removeFromTop (10);
     header.removeFromLeft (318);
-    master->setBounds (header.removeFromRight (jmin (560, header.getWidth() - 440)).withTrimmedTop (-8).withTrimmedBottom (-8));
+    master->setBounds (header.removeFromRight (jmin (480, header.getWidth() - 500)).withTrimmedTop (-8).withTrimmedBottom (-8));
     header.removeFromRight (6);
     gonio->setBounds (header.removeFromRight (64).withTrimmedTop (-8).withTrimmedBottom (-8));
     header.removeFromRight (8);
-    auto presetArea = header.withSizeKeepingCentre (jmin (480, header.getWidth()), 30).translated (0, -9);
+    auto presetArea = header.withSizeKeepingCentre (jmin (600, header.getWidth()), 30).translated (0, -9);
     voicesLabel.setBounds (presetArea.translated (0, 31).withHeight (16));
     prevButton.setBounds (presetArea.removeFromLeft (30));
     presetArea.removeFromLeft (4);
+    manualButton.setBounds (presetArea.removeFromRight (78));
+    presetArea.removeFromRight (4);
     initButton.setBounds (presetArea.removeFromRight (60));
     presetArea.removeFromRight (4);
     saveButton.setBounds (presetArea.removeFromRight (64));
@@ -1218,4 +1229,24 @@ void SynthgularityEditor::loadFileDialog (const String& title, std::function<boo
 void SynthgularityEditor::showError (const String& message)
 {
     AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Synthgularity", message);
+}
+
+// The manual ships inside the plug-in: write it to Documents/Calabi Yau/Synthgularity/Manual and open it
+void SynthgularityEditor::openManual (bool spanish)
+{
+   #if PG_HAS_MANUAL
+    const auto dir = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Calabi Yau").getChildFile ("Synthgularity").getChildFile ("Manual");
+    dir.createDirectory();
+    const auto file = dir.getChildFile (String ("Synthgularity-Manual-0.6.0") + (spanish ? "-ES.pdf" : "-EN.pdf"));
+    const void* data = spanish ? BinaryData::ManualES_pdf : BinaryData::ManualEN_pdf;
+    const int size = spanish ? BinaryData::ManualES_pdfSize : BinaryData::ManualEN_pdfSize;
+    if (file.getSize() != (int64) size && ! file.replaceWithData (data, (size_t) size))
+    {
+        showError ("Could not write the manual to " + dir.getFullPathName());
+        return;
+    }
+    if (! file.startAsProcess()) showError ("The manual is in " + file.getFullPathName());
+   #else
+    juce::ignoreUnused (spanish);
+   #endif
 }

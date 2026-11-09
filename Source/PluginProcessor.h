@@ -63,7 +63,8 @@ public:
     bool loadPreset (const juce::File& file);
     void loadFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
-    void initPreset();
+    void initPreset();          // oscillator 1 only
+    void resetToDefaults();     // every parameter at its default
     juce::String currentPresetName { "Init" };
     int uiSkin = 0;   // interface skin, saved with the session (not with presets)
 

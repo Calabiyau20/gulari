@@ -25,6 +25,7 @@ SynthgularityProcessor::SynthgularityProcessor()
     builtInWavetables();   // build the tables now, not on the audio thread
     builtInSpectra();
     builtInShots();
+    initPreset();        // a new instance starts on INIT: oscillator 1 only
     refreshCache();
     startTimerHz (2);
    #if ! PG_HEADLESS && ! PG_NO_PLUGIN_ENTRY
@@ -438,11 +439,20 @@ bool SynthgularityProcessor::loadPreset (const juce::File& file)
     return true;
 }
 
-void SynthgularityProcessor::initPreset()
+void SynthgularityProcessor::resetToDefaults()
 {
     for (int i = 0; i < kNumParams; ++i)
         params[(size_t) i]->setValueNotifyingHost (params[(size_t) i]->getDefaultValue());
     synth.steps.reset();
+}
+
+// INIT: oscillator 1 (wavetable A) and nothing else - every other source and every effect off
+void SynthgularityProcessor::initPreset()
+{
+    resetToDefaults();
+    auto set = [&] (const char* id, float value) { if (auto* p = apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    set ("gr_on", 0.0f);
+    set ("wtA_on", 1.0f);
     currentPresetName = "Init";
 }
 
@@ -455,7 +465,8 @@ juce::StringArray SynthgularityProcessor::factoryPresetNames()
 
 void SynthgularityProcessor::loadFactoryPreset (int index)
 {
-    initPreset();
+    if (index <= 0) { initPreset(); return; }
+    resetToDefaults();   // the built-in sounds were designed on the parameter defaults
     auto set = [&] (const char* id, float value)
     {
         if (auto* p = apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (value));

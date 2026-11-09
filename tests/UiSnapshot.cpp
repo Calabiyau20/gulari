@@ -36,6 +36,13 @@ int main (int argc, char** argv)
     for (int t = 0; t < tabs->getNumTabs(); ++t)
     {
         tabs->setCurrentTabIndex (t);
+        // keep the chord sounding and let the timers (analyzers, rings, animations) run
+        for (int k = 0; k < 8; ++k)
+        {
+            juce::MidiBuffer m;
+            proc.processBlock (b, m);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (35);
+        }
         if (auto* c = tabs->getCurrentContentComponent()) c->setAlpha (1.0f);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         juce::PNGImageFormat png;

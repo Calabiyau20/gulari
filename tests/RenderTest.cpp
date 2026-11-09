@@ -80,7 +80,7 @@ int main (int argc, char** argv)
     {
         SynthgularityProcessor proc;
         proc.setPlayConfigDetails (0, 2, sr, block);
-        proc.initPreset();
+        proc.resetToDefaults();
         setup (proc);
         proc.prepareToPlay (sr, block);
         const int total = (int) (sr * 1.5);

@@ -56,7 +56,8 @@ private:
 
     // header
     juce::ComboBox presetBox;
-    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" };
+    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "SAVE" }, initButton { "INIT" }, manualButton { "MANUAL" };
+    void openManual (bool spanish);
     std::unique_ptr<pg::ui::MasterSection> master;
     std::unique_ptr<pg::ui::GonioMini> gonio;
     juce::OwnedArray<pg::ui::SourceChip> chips;
