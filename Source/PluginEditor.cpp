@@ -1249,7 +1249,7 @@ void SynthgularityEditor::openManual (bool spanish)
    #if PG_HAS_MANUAL
     const auto dir = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Calabi Yau").getChildFile ("Synthgularity").getChildFile ("Manual");
     dir.createDirectory();
-    const auto file = dir.getChildFile (String ("Synthgularity-Manual-0.6.0") + (spanish ? "-ES.pdf" : "-EN.pdf"));
+    const auto file = dir.getChildFile (String ("Synthgularity-Manual-0.6.1") + (spanish ? "-ES.pdf" : "-EN.pdf"));
     const void* data = spanish ? BinaryData::ManualES_pdf : BinaryData::ManualEN_pdf;
     const int size = spanish ? BinaryData::ManualES_pdfSize : BinaryData::ManualEN_pdfSize;
     if (file.getSize() != (int64) size && ! file.replaceWithData (data, (size_t) size))

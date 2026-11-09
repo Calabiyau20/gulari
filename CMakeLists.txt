@@ -8,7 +8,7 @@ set(PG_COMPANY_NAME   "Calabi Yau")
 set(PG_BUNDLE_ID      "com.calabiyau.synthgularity")
 set(PG_MANUFACTURER   CbYu)   # 4 chars, at least one upper-case letter
 set(PG_PLUGIN_CODE    Sygy)   # 4 chars, unique per plugin
-set(PG_VERSION        "0.6.0")
+set(PG_VERSION        "0.6.1")
 
 # Must be set before project(): lowest macOS the plugin runs on
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version" FORCE)
@@ -197,7 +197,7 @@ endif()
 # look and feel and fonts with Synthgularity (compiled into it, no plugin entry).
 # =============================================================================
 set(CYR_PRODUCT_NAME "Calabi-Yau Resonator")
-set(CYR_VERSION      "1.1.0")
+set(CYR_VERSION      "1.1.1")
 juce_add_plugin(CalabiYauResonator
     PRODUCT_NAME "${CYR_PRODUCT_NAME}"
     COMPANY_NAME "${PG_COMPANY_NAME}"
