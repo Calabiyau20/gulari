@@ -353,6 +353,7 @@ void SynthgularityProcessor::installFactoryLibrary()
     juce::MemoryInputStream in (BinaryData::FactoryLibrary_zip, BinaryData::FactoryLibrary_zipSize, false);
     juce::ZipFile zip (in);
     if (zip.getNumEntries() == 0) return;
+    dest.deleteRecursively();   // a new library replaces the old one completely (user presets live outside this folder)
     dest.createDirectory();
     zip.uncompressTo (dest, true);
     marker.replaceWithText (tag);
