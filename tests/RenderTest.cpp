@@ -75,6 +75,54 @@ int main (int argc, char** argv)
                   << "  rms " << juce::String (rms, 4) << "  cpu x" << juce::String (6000.0 / ms, 1) << " realtime\n";
         writeWav (outDir.getChildFile (juce::String (preset).paddedLeft ('0', 2) + " " + names[preset] + ".wav"), out, sr);
     }
+    // ---- feature sweep: every spectral sound, sampler sound, filter FX type, seq direction, reverb ----
+    auto renderCase = [&] (const juce::String& name, std::function<void (SynthgularityProcessor&)> setup)
+    {
+        SynthgularityProcessor proc;
+        proc.setPlayConfigDetails (0, 2, sr, block);
+        proc.initPreset();
+        setup (proc);
+        proc.prepareToPlay (sr, block);
+        const int total = (int) (sr * 1.5);
+        juce::AudioBuffer<float> buf (2, block);
+        float peak = 0.0f; bool finite = true;
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            if (pos == 0) { midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 100), 10); midi.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 10); }
+            if (pos <= (int) (sr * 1.0) && pos + block > (int) (sr * 1.0)) { midi.addEvent (juce::MidiMessage::noteOff (1, 48), 0); midi.addEvent (juce::MidiMessage::noteOff (1, 64), 0); }
+            buf.clear();
+            proc.processBlock (buf, midi);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < block; ++i) { const float v = buf.getSample (ch, i); if (! std::isfinite (v)) finite = false; peak = std::max (peak, std::abs (v)); }
+        }
+        const bool ok = finite && peak > 0.005f && peak <= 1.0f;
+        if (! ok) ++failures;
+        std::cout << (ok ? "OK   " : "FAIL ") << name.paddedRight (' ', 34) << " peak " << juce::String (peak, 3)
+                  << "  TP " << juce::String (proc.meter.tpMax.load(), 1) << " dBTP  M " << juce::String (proc.meter.lufsM.load(), 1) << " LUFS\n";
+    };
+    auto setP = [] (SynthgularityProcessor& pr, const char* id, float v) { if (auto* q = pr.apvts.getParameter (id)) q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+    for (int k = 0; k < 20; ++k)
+        renderCase ("Spectral " + pg::choices::spectralSounds()[k], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "sp_on", 1); setP (pr, "sp_sound", (float) k); setP (pr, "sp_scan", 0.5f); });
+    for (int k = 0; k < 12; ++k)
+        renderCase ("Sampler " + pg::choices::samplerSounds()[k], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "smp_on", 1); setP (pr, "smp_sound", (float) k); setP (pr, "smp_decay", 1.0f); });
+    for (int k = 0; k < 7; ++k)
+        for (int poles : { 1, 4, 8 })
+            renderCase ("Filter FX " + pg::choices::filterFxTypes()[k] + " p" + juce::String (poles), [&] (SynthgularityProcessor& pr)
+            { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "ff1_on", 1); setP (pr, "ff1_type", (float) k); setP (pr, "ff1_poles", (float) poles);
+              setP (pr, "ff1_res", 0.9f); setP (pr, "ff1_drive", 0.5f); });
+    renderCase ("Reverb", [&] (SynthgularityProcessor& pr) { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "fx_rv_on", 1); setP (pr, "fx_rv_mix", 1.0f); setP (pr, "fx_rv_decay", 20.0f); });
+    renderCase ("WT C + double warp", [&] (SynthgularityProcessor& pr) { setP (pr, "gr_on", 0); setP (pr, "wtC_on", 1); setP (pr, "wtC_warp", 9); setP (pr, "wtC_wamt", 0.8f); setP (pr, "wtC_warp2", 13); setP (pr, "wtC_wamt2", 0.7f); setP (pr, "fm_c_c", 0.5f); });
+    for (int d = 0; d < 7; ++d)
+        renderCase ("Seq dir " + pg::choices::seqDirections()[d], [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "seq8_dir", (float) d); setP (pr, "seq8_div", 0); setP (pr, "mtx01_src", (float) pg::MS_Seq8); setP (pr, "mtx01_dst", (float) pg::MD_WtALevel); setP (pr, "mtx01_amt", -1.0f); setP (pr, "wtA_level", 1.0f); });
+    for (int c = 0; c < 4; ++c)
+        renderCase ("Chaos 1 " + pg::choices::chaosTypes()[c] + " + Lorenz", [&] (SynthgularityProcessor& pr)
+        { setP (pr, "gr_on", 0); setP (pr, "wtA_on", 1); setP (pr, "chaos1_type", (float) c); setP (pr, "chaos1_rate", 20.0f);
+          setP (pr, "mtx01_src", (float) pg::MS_Chaos1); setP (pr, "mtx01_dst", (float) pg::MD_WtAPitch); setP (pr, "mtx01_amt", 0.5f);
+          setP (pr, "mtx02_src", (float) pg::MS_Chaos2Z); setP (pr, "mtx02_dst", (float) pg::MD_Cutoff); setP (pr, "mtx02_amt", 0.5f); });
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES: " + juce::String (failures)) << "\n";
     return failures == 0 ? 0 : 1;
 }

@@ -20,7 +20,6 @@ namespace choices
     juce::StringArray grainModShapes();
     juce::StringArray grainWindows();
     juce::StringArray grainModes();
-    juce::StringArray modWaves();
     juce::StringArray subWaves();
     juce::StringArray noiseTypes();
     juce::StringArray plaitsEngines();
@@ -40,6 +39,14 @@ namespace choices
     juce::StringArray ringsPoly();
     juce::StringArray cloudsModes();
     juce::StringArray cloudsQuality();
+    juce::StringArray seqDirections();
+    juce::StringArray scales();
+    juce::StringArray noteNames();
+    juce::StringArray fxTypes();
+    juce::StringArray filterFxTypes();
+    juce::StringArray spectralSounds();
+    juce::StringArray samplerSounds();
+    juce::StringArray chaosTypes();
 
     double divisionInBeats (int index);
 }
@@ -58,7 +65,8 @@ namespace choices
     PC(seq##n##_div, "Seq " #n " Division", divisions, 4) \
     PF(seq##n##_swing, "Seq " #n " Swing", 0.0f, 0.75f, 0.0f, 0.0f) \
     PC(seq##n##_mode, "Seq " #n " Mode", seqModes, 0) \
-    PF(seq##n##_glide, "Seq " #n " Glide", 0.0f, 1.0f, 0.0f, 0.0f)
+    PF(seq##n##_glide, "Seq " #n " Glide", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PC(seq##n##_dir, "Seq " #n " Direction", seqDirections, 0)
 
 #define PG_MENV(PF, PI, PC, PB, n) \
     PF(menv##n##_a, "Mod Env " #n " Attack", 0.001f, 10.0f, 0.005f, 0.5f) \
@@ -79,6 +87,8 @@ namespace choices
     PF(wt##o##_pos, "WT " #O " Position", 0.0f, 1.0f, 0.0f, 0.0f) \
     PC(wt##o##_warp, "WT " #O " Warp Mode", warpModes, 0) \
     PF(wt##o##_wamt, "WT " #O " Warp Amount", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PC(wt##o##_warp2, "WT " #O " Warp 2 Mode", warpModes, 0) \
+    PF(wt##o##_wamt2, "WT " #O " Warp 2 Amount", 0.0f, 1.0f, 0.0f, 0.0f) \
     PI(wt##o##_oct, "WT " #O " Octave", -4, 4, 0) \
     PI(wt##o##_semi, "WT " #O " Semitone", -12, 12, 0) \
     PF(wt##o##_fine, "WT " #O " Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
@@ -89,6 +99,17 @@ namespace choices
     PF(wt##o##_pan, "WT " #O " Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
     PB(wt##o##_rphase, "WT " #O " Random Phase", true) \
     PF(wt##o##_phase, "WT " #O " Phase", 0.0f, 1.0f, 0.0f, 0.0f)
+
+#define PG_FF(PF, PI, PC, PB, n) \
+    PB(ff##n##_on, "Filter FX " #n " On", false) \
+    PC(ff##n##_type, "Filter FX " #n " Type", filterFxTypes, 0) \
+    PF(ff##n##_freq, "Filter FX " #n " Frequency", 20.0f, 20000.0f, 800.0f, 1000.0f) \
+    PF(ff##n##_res, "Filter FX " #n " Resonance", 0.0f, 1.0f, 0.5f, 0.0f) \
+    PF(ff##n##_morph, "Filter FX " #n " Morph", 0.0f, 1.0f, 0.5f, 0.0f) \
+    PI(ff##n##_poles, "Filter FX " #n " Poles", 1, 8, 2) \
+    PF(ff##n##_spread, "Filter FX " #n " Stereo Spread", 0.0f, 1.0f, 0.2f, 0.0f) \
+    PF(ff##n##_drive, "Filter FX " #n " Drive", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(ff##n##_mix, "Filter FX " #n " Mix", 0.0f, 1.0f, 1.0f, 0.0f)
 
 #define PG_PARAM_LIST(PF, PI, PC, PB) \
     /* ---- global ---- */ \
@@ -150,12 +171,36 @@ namespace choices
     /* ---- wavetables ---- */ \
     PG_WT(PF, PI, PC, PB, A, A) \
     PG_WT(PF, PI, PC, PB, B, B) \
-    /* ---- modulator / sub / noise ---- */ \
-    PC(mo_wave, "Mod Osc Wave", modWaves, 0) \
-    PI(mo_oct, "Mod Osc Octave", -4, 4, 0) \
-    PI(mo_semi, "Mod Osc Semitone", -12, 12, 0) \
-    PF(mo_fine, "Mod Osc Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
-    PF(mo_level, "Mod Osc Level", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PG_WT(PF, PI, PC, PB, C, C) \
+    /* ---- spectral oscillator ---- */ \
+    PB(sp_on, "Spectral On", false) \
+    PC(sp_sound, "Spectral Sound", spectralSounds, 0) \
+    PF(sp_pos, "Spectral Position", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_scan, "Spectral Scan Speed", -2.0f, 2.0f, 0.0f, 0.0f) \
+    PI(sp_partials, "Spectral Partials", 1, 64, 48) \
+    PF(sp_tilt, "Spectral Tilt", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_stretch, "Spectral Stretch", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_shift, "Spectral Formant Shift", -24.0f, 24.0f, 0.0f, 0.0f) \
+    PF(sp_oddeven, "Spectral Odd/Even", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_blur, "Spectral Blur", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_shimmer, "Spectral Shimmer", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PB(sp_freeze, "Spectral Freeze", false) \
+    PI(sp_oct, "Spectral Octave", -4, 4, 0) \
+    PI(sp_semi, "Spectral Semitone", -12, 12, 0) \
+    PF(sp_fine, "Spectral Fine", -100.0f, 100.0f, 0.0f, 0.0f) \
+    PF(sp_level, "Spectral Level", 0.0f, 1.0f, 0.7f, 0.0f) \
+    PF(sp_pan, "Spectral Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
+    PF(sp_width, "Spectral Width", 0.0f, 1.0f, 0.4f, 0.0f) \
+    /* ---- one-shot sampler / sub / noise ---- */ \
+    PB(smp_on, "Sampler On", false) \
+    PC(smp_sound, "Sampler Sound", samplerSounds, 0) \
+    PF(smp_pitch, "Sampler Pitch", -48.0f, 48.0f, 0.0f, 0.0f) \
+    PB(smp_key, "Sampler Keytrack", false) \
+    PF(smp_start, "Sampler Start", 0.0f, 0.9f, 0.0f, 0.0f) \
+    PF(smp_attack, "Sampler Attack", 0.0f, 0.5f, 0.0f, 0.05f) \
+    PF(smp_decay, "Sampler Decay", 0.005f, 5.0f, 0.25f, 0.4f) \
+    PF(smp_level, "Sampler Level", 0.0f, 1.0f, 0.7f, 0.0f) \
+    PF(smp_pan, "Sampler Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
     PC(sub_wave, "Sub Wave", subWaves, 0) \
     PI(sub_oct, "Sub Octave", -2, -1, -1) \
     PF(sub_level, "Sub Level", 0.0f, 1.0f, 0.0f, 0.0f) \
@@ -174,26 +219,26 @@ namespace choices
     PF(pl_colour, "Plaits LPG Colour", 0.0f, 1.0f, 0.5f, 0.0f) \
     PF(pl_level, "Plaits Level", 0.0f, 1.0f, 0.7f, 0.0f) \
     PF(pl_pan, "Plaits Pan", -1.0f, 1.0f, 0.0f, 0.0f) \
-    /* ---- FM matrix: source -> destination (A, B, Mod) ---- */ \
+    /* ---- FM matrix: source -> destination (A, B, C) ---- */ \
     PC(fm_type_a, "Mod Matrix Type A", fmModes, 0) \
     PC(fm_type_b, "Mod Matrix Type B", fmModes, 0) \
-    PC(fm_type_m, "Mod Matrix Type Mod", fmModes, 0) \
+    PC(fm_type_c, "Mod Matrix Type C", fmModes, 0) \
     PF(fm_amount, "FM Amount", 0.0f, 1.0f, 1.0f, 0.0f) \
     PF(fm_a_a, "FM A>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_a_b, "FM A>B", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_a_m, "FM A>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_a_c, "FM A>C", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_b_a, "FM B>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_b_b, "FM B>B", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_b_m, "FM B>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_m_a, "FM Mod>A", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_m_b, "FM Mod>B", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_m_m, "FM Mod>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_b_c, "FM B>C", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_c_a, "FM C>A", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_c_b, "FM C>B", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_c_c, "FM C>C", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_g_a, "FM Grain>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_g_b, "FM Grain>B", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_g_m, "FM Grain>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_g_c, "FM Grain>C", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_a, "FM Noise>A", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(fm_n_b, "FM Noise>B", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(fm_n_m, "FM Noise>Mod", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(fm_n_c, "FM Noise>C", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- bite ---- */ \
     PF(bite_drive, "MultiDistortion Drive", 0.0f, 1.0f, 0.0f, 0.0f) \
     PF(bite_fold, "MultiDistortion Fold", 0.0f, 1.0f, 0.0f, 0.0f) \
@@ -215,18 +260,21 @@ namespace choices
     PF(flt_key, "Filter Keytrack", 0.0f, 1.0f, 0.0f, 0.0f) \
     /* ---- modulation sources ---- */ \
     PG_LFO(PF, PI, PC, PB, 1) PG_LFO(PF, PI, PC, PB, 2) PG_LFO(PF, PI, PC, PB, 3) PG_LFO(PF, PI, PC, PB, 4) \
+    PC(chaos1_type, "Chaos 1 Attractor", chaosTypes, 0) \
     PF(chaos1_rate, "Chaos 1 Rate", 0.05f, 20.0f, 1.0f, 2.0f) \
     PF(chaos1_smooth, "Chaos 1 Smooth", 0.0f, 1.0f, 0.5f, 0.0f) \
-    PF(chaos2_rate, "Chaos 2 Rate", 0.05f, 20.0f, 3.0f, 2.0f) \
-    PF(chaos2_smooth, "Chaos 2 Smooth", 0.0f, 1.0f, 0.2f, 0.0f) \
-    PF(macro1, "Macro 1", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(macro2, "Macro 2", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(macro3, "Macro 3", 0.0f, 1.0f, 0.0f, 0.0f) \
-    PF(macro4, "Macro 4", 0.0f, 1.0f, 0.0f, 0.0f) \
+    PF(chaos1_amt, "Chaos 1 Chaos", 0.0f, 1.0f, 0.5f, 0.0f) \
+    PF(chaos2_rate, "Chaos 2 Lorenz Rate", 0.05f, 20.0f, 1.0f, 2.0f) \
+    PF(chaos2_smooth, "Chaos 2 Lorenz Smooth", 0.0f, 1.0f, 0.2f, 0.0f) \
+    PF(chaos2_rho, "Chaos 2 Lorenz Rho", 0.0f, 1.0f, 0.4f, 0.0f) \
+    PF(chaos2_sigma, "Chaos 2 Lorenz Sigma", 0.0f, 1.0f, 0.5f, 0.0f) \
+    PF(chaos2_beta, "Chaos 2 Lorenz Beta", 0.0f, 1.0f, 0.5f, 0.0f) \
+    PB(chaos2_sync, "Chaos 2 Lorenz Retrig", false) \
     PG_MTX(PF, PI, PC, PB, 01) PG_MTX(PF, PI, PC, PB, 02) PG_MTX(PF, PI, PC, PB, 03) PG_MTX(PF, PI, PC, PB, 04) PG_MTX(PF, PI, PC, PB, 05) PG_MTX(PF, PI, PC, PB, 06) PG_MTX(PF, PI, PC, PB, 07) PG_MTX(PF, PI, PC, PB, 08) \
     PG_MTX(PF, PI, PC, PB, 09) PG_MTX(PF, PI, PC, PB, 10) PG_MTX(PF, PI, PC, PB, 11) PG_MTX(PF, PI, PC, PB, 12) PG_MTX(PF, PI, PC, PB, 13) PG_MTX(PF, PI, PC, PB, 14) PG_MTX(PF, PI, PC, PB, 15) PG_MTX(PF, PI, PC, PB, 16) \
     /* ---- sequencer lanes (modulation) ---- */ \
     PG_SEQ(PF, PI, PC, PB, 1) PG_SEQ(PF, PI, PC, PB, 2) PG_SEQ(PF, PI, PC, PB, 3) PG_SEQ(PF, PI, PC, PB, 4) \
+    PG_SEQ(PF, PI, PC, PB, 5) PG_SEQ(PF, PI, PC, PB, 6) PG_SEQ(PF, PI, PC, PB, 7) PG_SEQ(PF, PI, PC, PB, 8) \
     /* ---- arpeggiator ---- */ \
     PB(arp_on, "Arp On", false) \
     PC(arp_mode, "Arp Mode", arpModes, 0) \
@@ -236,6 +284,8 @@ namespace choices
     PF(arp_gate, "Arp Gate", 0.05f, 1.0f, 0.6f, 0.0f) \
     PF(arp_swing, "Arp Swing", 0.0f, 0.75f, 0.0f, 0.0f) \
     PB(arp_latch, "Arp Latch", false) \
+    PC(arp_scale, "Arp Scale", scales, 0) \
+    PC(arp_root, "Arp Scale Root", noteNames, 0) \
     /* ---- FX: stereo, flanger, phaser, delay, Rings, Clouds ---- */ \
     PB(fx_st_on, "Stereo On", false) \
     PF(fx_st_width, "Stereo Width", 0.0f, 2.0f, 1.3f, 0.0f) \
@@ -286,10 +336,22 @@ namespace choices
     PF(fx_gr_fb, "Clouds Feedback", 0.0f, 1.0f, 0.2f, 0.0f) \
     PF(fx_gr_reverb, "Clouds Reverb", 0.0f, 1.0f, 0.4f, 0.0f) \
     PF(fx_gr_mix, "Clouds Mix", 0.0f, 1.0f, 0.5f, 0.0f) \
-    /* ---- ORB: 4-corner morph ---- */ \
-    PB(orb_on, "ORB On", false) \
-    PF(orb_x, "ORB X", 0.0f, 1.0f, 0.5f, 0.0f) \
-    PF(orb_y, "ORB Y", 0.0f, 1.0f, 0.5f, 0.0f)
+    PG_FF(PF, PI, PC, PB, 1) \
+    PG_FF(PF, PI, PC, PB, 2) \
+    PB(fx_rv_on, "Reverb On", false) \
+    PF(fx_rv_size, "Reverb Size", 0.0f, 1.0f, 0.6f, 0.0f) \
+    PF(fx_rv_decay, "Reverb Decay", 0.2f, 20.0f, 2.5f, 3.0f) \
+    PF(fx_rv_damp, "Reverb Damping", 0.0f, 1.0f, 0.4f, 0.0f) \
+    PF(fx_rv_pre, "Reverb Pre-Delay", 0.0f, 200.0f, 10.0f, 0.0f) \
+    PF(fx_rv_mod, "Reverb Modulation", 0.0f, 1.0f, 0.3f, 0.0f) \
+    PF(fx_rv_width, "Reverb Width", 0.0f, 1.0f, 1.0f, 0.0f) \
+    PF(fx_rv_mix, "Reverb Mix", 0.0f, 1.0f, 0.25f, 0.0f) \
+    /* ---- FX rack: the order of the cascade ---- */ \
+    PC(fx_slot1, "FX Slot 1", fxTypes, 1) PC(fx_slot2, "FX Slot 2", fxTypes, 2) \
+    PC(fx_slot3, "FX Slot 3", fxTypes, 3) PC(fx_slot4, "FX Slot 4", fxTypes, 4) \
+    PC(fx_slot5, "FX Slot 5", fxTypes, 5) PC(fx_slot6, "FX Slot 6", fxTypes, 6) \
+    PC(fx_slot7, "FX Slot 7", fxTypes, 7) PC(fx_slot8, "FX Slot 8", fxTypes, 8) \
+    PC(fx_slot9, "FX Slot 9", fxTypes, 9) PC(fx_slot10, "FX Slot 10", fxTypes, 0)
 
 #define PG_ENUM_F(id, ...) id,
 #define PG_ENUM_I(id, ...) id,
@@ -316,21 +378,28 @@ inline const juce::String& idOf (int pid) { return paramInfos()[(size_t) pid].id
 int indexOf (const juce::String& id);   // -1 if unknown
 
 // Modulation sources / destinations (indices into choices::modSources / modDests)
-enum ModSrc { MS_None, MS_Lfo1, MS_Lfo2, MS_Lfo3, MS_Lfo4, MS_Chaos1, MS_Chaos2,
-              MS_Macro1, MS_Macro2, MS_Macro3, MS_Macro4, MS_Seq1, MS_Seq2, MS_Seq3, MS_Seq4,
+enum ModSrc { MS_None, MS_Lfo1, MS_Lfo2, MS_Lfo3, MS_Lfo4, MS_Chaos1, MS_Chaos2, MS_Chaos2Y, MS_Chaos2Z,
+              MS_Seq1, MS_Seq2, MS_Seq3, MS_Seq4, MS_Seq5, MS_Seq6, MS_Seq7, MS_Seq8,
               MS_ModEnv, MS_FiltEnv, MS_AmpEnv, MS_Velocity, MS_Note, MS_ModWheel,
               MS_Aftertouch, MS_PitchBend, MS_Random, MS_ModEnv2, MS_ModEnv3, MS_ModEnv4, MS_Count };
 
 enum ModDst { MD_None,
-              MD_WtAPos, MD_WtAPitch, MD_WtALevel, MD_WtBPos, MD_WtBPitch, MD_WtBLevel,
+              MD_WtAPos, MD_WtAPitch, MD_WtALevel, MD_WtAWarp,
+              MD_WtBPos, MD_WtBPitch, MD_WtBLevel, MD_WtBWarp,
+              MD_WtCPos, MD_WtCPitch, MD_WtCLevel, MD_WtCWarp,
+              MD_SpPos, MD_SpPitch, MD_SpTilt, MD_SpStretch, MD_SpShift, MD_SpLevel,
               MD_GrPos, MD_GrSize, MD_GrDensity, MD_GrPitch, MD_GrSpray, MD_GrLevel,
-              MD_ModPitch, MD_ModLevel, MD_FmAmount, MD_SubLevel, MD_NoiseLevel,
+              MD_FmAmount, MD_SubLevel, MD_NoiseLevel, MD_SmpPitch, MD_SmpLevel,
               MD_PlHarm, MD_PlTimbre, MD_PlMorph, MD_PlLevel,
               MD_BiteDrive, MD_BiteFold, MD_BiteCrush,
               MD_Cutoff, MD_Resonance, MD_Pan, MD_Volume,
               MD_VoiceCount,                      // ---- below: global (FX) destinations ----
-              MD_DelayMix = MD_VoiceCount, MD_DelayFb, MD_RnStructure, MD_RnBright, MD_RnPos,
+              MD_DelayMix = MD_VoiceCount, MD_DelayFb, MD_DelayTime, MD_RnStructure, MD_RnBright, MD_RnPos,
               MD_GrfxPos, MD_GrfxSize, MD_GrfxDensity, MD_GrfxTexture, MD_GrfxMix,
-              MD_FlMix, MD_PhMix, MD_DelayTime, MD_Count };
+              MD_FlMix, MD_PhMix, MD_Ff1Freq, MD_Ff1Res, MD_Ff1Morph, MD_Ff2Freq, MD_Ff2Res, MD_Ff2Morph,
+              MD_RvSize, MD_RvMix, MD_Count };
+
+// FX rack slot types (choices::fxTypes)
+enum FxType { FX_Empty, FX_Filter1, FX_Filter2, FX_Stereo, FX_Flanger, FX_Phaser, FX_Delay, FX_Rings, FX_Clouds, FX_Reverb, FX_Count };
 
 } // namespace pg

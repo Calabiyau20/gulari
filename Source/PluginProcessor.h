@@ -5,6 +5,9 @@
 #include "dsp/Fx.h"
 #include "dsp/Sample.h"
 #include "dsp/Wavetable.h"
+#include "dsp/Spectral.h"
+#include "dsp/OneShot.h"
+#include "dsp/Meter.h"
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -44,11 +47,11 @@ public:
     bool loadUserWavetable (int osc, const juce::File& file, juce::String& error);
     pg::WavetablePtr getActiveTable (int osc) const;
 
-    // ---- ORB (4-corner morph) ----
-    void captureCorner (int corner);
-    void clearCorner (int corner);
-    bool cornerFilled (int corner) const { return orbFilled[(size_t) corner].load(); }
-    bool loadPresetIntoCorner (int corner, const juce::File& file);
+    bool loadSpectralFile (const juce::File& file, juce::String& error);
+    pg::SpectralPtr getActiveSpectral() const;
+    bool loadShot (const juce::File& file, juce::String& error);
+    pg::ShotPtr getActiveShot() const;
+    pg::MasterMeter meter;
 
     // ---- presets ----
     juce::File presetFolder() const;
@@ -68,17 +71,19 @@ private:
     void timerCallback() override;
     void refreshCache();
     juce::ValueTree buildState();
-    void applyState (const juce::ValueTree& state, bool includeOrb);
+    void applyState (const juce::ValueTree& state);
+    void retire (std::shared_ptr<const void> p);
 
     std::array<std::atomic<float>*, pg::kNumParams> raw {};
     std::array<juce::RangedAudioParameter*, pg::kNumParams> params {};
     std::array<float, pg::kNumParams> cache {};
 
-    std::array<std::array<std::atomic<float>, pg::kNumParams>, 4> orbCorners;
-    std::array<std::atomic<bool>, 4> orbFilled {};
 
     pg::SamplePtr sample;
-    pg::WavetablePtr userTable[2];
+    pg::WavetablePtr userTable[3];
+    pg::SpectralPtr userSpectral;
+    pg::ShotPtr userShot;
+    juce::String userTablePath[3], spectralPath, shotPath;
     std::vector<std::shared_ptr<const void>> graveyard;   // released on the message thread
     std::mutex graveyardLock;
 

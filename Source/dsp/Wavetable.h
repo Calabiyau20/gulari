@@ -44,11 +44,14 @@ public:
     void setup (int unison, float detune, float spread, float pan);
     // Warp modes (choices::warpModes): reshape the phase or the read sample of each cycle
     void setWarp (int mode, float amount) { warpMode = mode; warpAmt = clamp01 (amount); }
+    // Second warp stage, applied after the first one
+    void setWarp2 (int mode, float amount) { warpMode2 = mode; warpAmt2 = clamp01 (amount); }
     // pd: phase distortion (-0.95..0.95) bends each cycle around its middle, Casio-CZ style
     void tick (const Wavetable& wt, float freqHz, float pos, float phaseMod, float& outL, float& outR, float pd = 0.0f);
     float lastMono() const { return last; }
     // One cycle as the oscillator plays it (warp included), for displays
-    static void renderCycle (const Wavetable& wt, float pos, int warpMode, float warpAmount, float* out, int n);
+    static void renderCycle (const Wavetable& wt, float pos, int warpMode, float warpAmount, float* out, int n,
+                             int warpMode2 = 0, float warpAmount2 = 0.0f);
 
 private:
     static constexpr int kMaxUnison = 7;
@@ -57,8 +60,8 @@ private:
     float detuneRatio[kMaxUnison] {};
     float gainL[kMaxUnison] {}, gainR[kMaxUnison] {};
     int voices = 1;
-    int warpMode = 0;
-    float warpAmt = 0.0f;
+    int warpMode = 0, warpMode2 = 0;
+    float warpAmt = 0.0f, warpAmt2 = 0.0f;
     float norm = 1.0f;
     float last = 0.0f;
     Rng rng;

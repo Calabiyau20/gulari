@@ -5,6 +5,8 @@
 #include "GranularOsc.h"
 #include "Wavetable.h"
 #include "MutableWrappers.h"
+#include "Spectral.h"
+#include "OneShot.h"
 
 namespace pg
 {
@@ -13,9 +15,8 @@ struct GlobalMod
 {
     float lfo[4] {};       // free-running LFOs (-1..1)
     float lfoPhase[4] {};
-    float chaos[2] {};     // -1..1
-    float macro[4] {};     // 0..1
-    float seq[4] {};       // lane outputs
+    float chaos[4] {};     // -1..1: Chaos 1, Lorenz X, Y, Z
+    float seq[8] {};       // lane outputs
     float modWheel = 0, aftertouch = 0, pitchBend = 0;   // pitchBend -1..1
     double bpm = 120.0;
 };
@@ -24,7 +25,9 @@ struct VoiceContext
 {
     const float* p = nullptr;        // parameter cache (denormalised values, PID index)
     const SampleData* sample = nullptr;
-    const Wavetable* table[2] {};
+    const Wavetable* table[3] {};
+    const SpectralTable* spectral = nullptr;
+    const ShotData* shot = nullptr;
     const GlobalMod* global = nullptr;
     GrainViz* viz = nullptr;         // only set for the voice that feeds the display
 };
@@ -37,9 +40,9 @@ inline bool isBipolarSource (int s, const float* p)
 {
     switch (s)
     {
-        case MS_Lfo1: case MS_Lfo2: case MS_Lfo3: case MS_Lfo4: case MS_Chaos1: case MS_Chaos2:
+        case MS_Lfo1: case MS_Lfo2: case MS_Lfo3: case MS_Lfo4: case MS_Chaos1: case MS_Chaos2: case MS_Chaos2Y: case MS_Chaos2Z:
         case MS_Note: case MS_PitchBend: case MS_Random: return true;
-        case MS_Seq1: case MS_Seq2: case MS_Seq3: case MS_Seq4:
+        case MS_Seq1: case MS_Seq2: case MS_Seq3: case MS_Seq4: case MS_Seq5: case MS_Seq6: case MS_Seq7: case MS_Seq8:
             return (int) p[seq1_mode + (s - MS_Seq1) * (seq2_on - seq1_on)] == 1;
         default: return false;
     }
@@ -62,7 +65,7 @@ public:
     void moveTo (int midiNote, const VoiceContext& ctx);   // legato pitch change
     void release();
     void kill();
-    bool isActive() const { return amp.active(); }
+    bool isActive() const { return amp.active() || shot.isPlaying(); }
     bool isHeld() const { return held; }
     int getNote() const { return note; }
     uint64_t getAge() const { return age; }
@@ -90,8 +93,11 @@ private:
     float mod[MD_Count] {};
 
     GranularOsc grain;
-    WavetableOsc wt[2];
-    BasicOsc modOsc, subOsc;
+    WavetableOsc wt[3];
+    BasicOsc subOsc;
+    SpectralOsc spectral;
+    SpectralOsc::Params spParams;
+    OneShotPlayer shot;
     Noise noise;
     PlaitsSource plaits;
     VoiceFilter filter;
@@ -99,21 +105,22 @@ private:
 
     // per control block derived values
     GranularOsc::Params grainParams;
-    float wtPos[2] {}, wtFreqMul[2] {}, wtLevel[2] {};
-    float wtGainL[2] {}, wtGainR[2] {};
+    float wtPos[3] {}, wtFreqMul[3] {}, wtLevel[3] {};
+    float spFreqMul = 1, spLevel = 0, spGainL = 1, spGainR = 1;
+    float smpLevel = 0, smpGainL = 1, smpGainR = 1;
     float grLevel = 0, grGainL = 1, grGainR = 1;
-    float modFreqMul = 1, modLevel = 0, subLevel = 0, noiseLevel = 0;
+    float subLevel = 0, noiseLevel = 0;
     float plLevel = 0, plGainL = 1, plGainR = 1;
-    float fm[5][3] {};   // [src a,b,m,g,n][dst a,b,m]
-    int fmType[3] {};    // per destination (A, B, Mod): choices::fmModes
+    float fm[5][3] {};   // [src a,b,c,g,n][dst a,b,c]
+    int fmType[3] {};    // per destination (A, B, C): choices::fmModes
     float fmDepth[3] {}; // summed amounts per destination (for AM / ring depth)
     float tz[3] {};      // thru-zero accumulated phase
-    float prevA = 0, prevB = 0, prevM = 0, prevG = 0, prevN = 0;
+    float prevA = 0, prevB = 0, prevC = 0, prevG = 0, prevN = 0;
     float volL = 1, volR = 1;
     float cutoffBase = 1000.0f;
     int ctrlCounter = 0;
     float dcX[2] {}, dcY[2] {};
-    bool grOn = false, wtOn[2] {}, plOn = false, bitePost = false;
-    int modWave = 0, subWave = 0, noiseType = 0;
+    bool grOn = false, wtOn[3] {}, plOn = false, spOn = false, smpOn = false, bitePost = false;
+    int subWave = 0, noiseType = 0;
 };
 } // namespace pg

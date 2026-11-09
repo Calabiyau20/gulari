@@ -26,6 +26,8 @@ int main (int argc, char** argv)
         for (auto* c : ed->getChildren()) if (auto* t = dynamic_cast<juce::TabbedComponent*> (c)) return t;
         return nullptr;
     }();
+    for (auto* c : ed->getChildren())
+        if (auto* ms = dynamic_cast<pg::ui::MasterSection*> (c)) for (int k = 0; k < 20; ++k) ms->refreshNow();
     for (int t = 0; t < tabs->getNumTabs(); ++t)
     {
         tabs->setCurrentTabIndex (t);

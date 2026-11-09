@@ -10,7 +10,7 @@ namespace pg
 // Step data for the 4 modulation lanes and the arpeggiator (edited by the UI, read by audio)
 struct StepData
 {
-    static constexpr int kLanes = 4, kSteps = 32;
+    static constexpr int kLanes = 8, kSteps = 32;
     std::array<std::atomic<float>, kLanes * kSteps> seq {};
     std::array<std::atomic<bool>, kLanes * kSteps> seqLock {};
     std::array<std::atomic<bool>, kSteps> arpOn {}, arpTie {};
@@ -34,8 +34,8 @@ public:
 
     void prepare (double sampleRate, int maxBlock);
     void render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const float* params,
-                 const SampleData* sample, const Wavetable* tableA, const Wavetable* tableB,
-                 const juce::AudioPlayHead::PositionInfo* pos);
+                 const SampleData* sample, const Wavetable* const* tables, const SpectralTable* spectral,
+                 const ShotData* shot, const juce::AudioPlayHead::PositionInfo* pos);
     void allNotesOff();
 
     StepData steps;
@@ -79,9 +79,11 @@ private:
 
     // global modulators
     Lfo gLfo[4];
-    float lorenz[2][3] { { 0.1f, 0.0f, 0.0f }, { -0.1f, 0.2f, 0.1f } };
-    float chaosSmooth[2] {};
-    float seqSmooth[4] {};
+    float chaos1State[3] { 0.1f, 0.0f, 0.0f };
+    float lorenz[3] { -0.1f, 0.2f, 0.1f };
+    float chaosSmooth[4] {};
+    float seqSmooth[8] {};
+    int quantize (int note) const;
     Rng rng;
 };
 } // namespace pg

@@ -136,22 +136,6 @@ private:
     int dragRow = -1;
 };
 
-// ORB: 4-corner morph pad
-class OrbPad : public juce::Component
-{
-public:
-    explicit OrbPad (SynthgularityProcessor& p) : proc (p) {}
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-private:
-    void setFromMouse (juce::Point<float> p);
-    juce::Rectangle<float> padArea() const;
-    SynthgularityProcessor& proc;
-    juce::Image art;
-};
-
 // Brand "about" card: Calabi Yau artwork, version and credits. Click anywhere to close.
 class AboutOverlay : public juce::Component
 {

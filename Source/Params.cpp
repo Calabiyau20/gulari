@@ -14,7 +14,6 @@ namespace choices
     juce::StringArray grainModShapes() { return { "Sine", "Triangle", "Saw", "Square" }; }
     juce::StringArray grainWindows()  { return { "Hann", "Triangle", "Tukey", "Gauss", "Perc", "Swell" }; }
     juce::StringArray grainModes()    { return { "Cloud", "Pitched" }; }
-    juce::StringArray modWaves()      { return { "Sine", "Triangle", "Saw", "Square" }; }
     juce::StringArray subWaves()      { return { "Sine", "Triangle", "Square" }; }
     juce::StringArray noiseTypes()    { return { "White", "Pink", "Crackle" }; }
     juce::StringArray plaitsEngines()
@@ -43,23 +42,28 @@ namespace choices
     juce::StringArray retrigModes()   { return { "Free", "Note" }; }
     juce::StringArray modSources()
     {
-        return { "None", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Chaos 1", "Chaos 2",
-                 "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Seq 1", "Seq 2", "Seq 3", "Seq 4",
+        return { "None", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Chaos 1", "Chaos 2 Lorenz X", "Chaos 2 Lorenz Y", "Chaos 2 Lorenz Z",
+                 "Seq 1", "Seq 2", "Seq 3", "Seq 4", "Seq 5", "Seq 6", "Seq 7", "Seq 8",
                  "Mod Env 1", "Filter Env", "Amp Env", "Velocity", "Note", "Mod Wheel",
                  "Aftertouch", "Pitch Bend", "Random", "Mod Env 2", "Mod Env 3", "Mod Env 4" };
     }
     juce::StringArray modDests()
     {
         return { "None",
-                 "WT A Position", "WT A Pitch", "WT A Level", "WT B Position", "WT B Pitch", "WT B Level",
+                 "WT A Position", "WT A Pitch", "WT A Level", "WT A Warp",
+                 "WT B Position", "WT B Pitch", "WT B Level", "WT B Warp",
+                 "WT C Position", "WT C Pitch", "WT C Level", "WT C Warp",
+                 "Spectral Position", "Spectral Pitch", "Spectral Tilt", "Spectral Stretch", "Spectral Shift", "Spectral Level",
                  "Grain Position", "Grain Size", "Grain Density", "Grain Pitch", "Grain Spray", "Grain Level",
-                 "Mod Osc Pitch", "Mod Osc Level", "FM Amount", "Sub Level", "Noise Level",
+                 "FM Amount", "Sub Level", "Noise Level", "Sampler Pitch", "Sampler Level",
                  "Plaits Harmonics", "Plaits Timbre", "Plaits Morph", "Plaits Level",
                  "Distortion Drive", "Distortion Fold", "Distortion Crush",
                  "Cutoff", "Resonance", "Pan", "Volume",
-                 "FX Delay Mix", "FX Delay Feedback", "FX Resonator Structure", "FX Resonator Brightness",
+                 "FX Delay Mix", "FX Delay Feedback", "FX Delay Time", "FX Resonator Structure", "FX Resonator Brightness",
                  "FX Resonator Position", "FX Clouds Position", "FX Clouds Size", "FX Clouds Density",
-                 "FX Clouds Texture", "FX Clouds Mix", "FX Flanger Mix", "FX Phaser Mix", "FX Delay Time" };
+                 "FX Clouds Texture", "FX Clouds Mix", "FX Flanger Mix", "FX Phaser Mix",
+                 "FX Filter 1 Freq", "FX Filter 1 Reso", "FX Filter 1 Morph", "FX Filter 2 Freq", "FX Filter 2 Reso", "FX Filter 2 Morph",
+                 "FX Reverb Size", "FX Reverb Mix" };
     }
     juce::StringArray modPolarity()   { return { "Native", "Unipolar", "Bipolar" }; }
     juce::StringArray seqModes()      { return { "Unipolar", "Bipolar" }; }
@@ -68,6 +72,28 @@ namespace choices
     juce::StringArray ringsPoly()     { return { "1", "2", "4" }; }
     juce::StringArray cloudsModes()   { return { "Granular", "Looping Delay", "Spectral" }; }
     juce::StringArray cloudsQuality() { return { "16-bit Stereo", "16-bit Mono", "8-bit Stereo", "8-bit Mono" }; }
+    juce::StringArray seqDirections() { return { "Forward", "Backward", "Ping-Pong", "Random", "Even Steps", "Odd Steps", "Evens > Odds" }; }
+    juce::StringArray scales()
+    {
+        return { "Off (Chromatic)", "Ionian (Major)", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Aeolian (Minor)", "Locrian",
+                 "Harmonic Minor", "Melodic Minor", "Phrygian Dominant", "Hungarian Minor", "Double Harmonic",
+                 "Major Pentatonic", "Minor Pentatonic", "Blues", "Whole Tone", "Hirajoshi", "In Sen" };
+    }
+    juce::StringArray noteNames()     { return { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }; }
+    juce::StringArray fxTypes()       { return { "Empty", "Filter 1", "Filter 2", "Stereo", "Flanger", "Phaser", "Delay", "Resonator", "Clouds", "Reverb" }; }
+    juce::StringArray filterFxTypes() { return { "Filterbank", "Comb +", "Comb -", "Morph LP>BP>HP", "Morph LP>Notch>HP", "Formant (Vowel)", "Allpass" }; }
+    juce::StringArray spectralSounds()
+    {
+        return { "Saw Stack", "Hollow Square", "Drawbar Organ", "Choir Ah-Oh", "Vocal Ee-Oo", "Bell Bloom", "Glass Harmonics",
+                 "Brass Swell", "String Section", "Pluck Decay", "Bass Growl", "Pad Bloom", "Formant Sweep", "Comb Ripple",
+                 "Prime Partials", "Fibonacci", "Odd Shimmer", "Spectral Wind", "Metal Plate", "Singularity", "User File" };
+    }
+    juce::StringArray samplerSounds()
+    {
+        return { "Click", "Tick", "Kick Click", "Rim", "Snap", "Noise Burst", "Hat", "Zap", "Blip", "Metal Hit",
+                 "Crackle", "Breath", "User File" };
+    }
+    juce::StringArray chaosTypes()    { return { "Rossler", "Henon", "Logistic", "Duffing" }; }
 }
 
 static std::vector<ParamInfo> buildInfos()

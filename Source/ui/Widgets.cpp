@@ -244,8 +244,10 @@ void WavetableView::paint (Graphics& g)
     auto t = proc.getActiveTable (oscIndex);
     if (t == nullptr) return;
     const float* cache = proc.paramCache();
-    const float pos = cache[oscIndex == 0 ? pg::wtA_pos : pg::wtB_pos];
-    const bool on = cache[oscIndex == 0 ? pg::wtA_on : pg::wtB_on] > 0.5f;
+    const int base = oscIndex == 0 ? pg::wtA_on : (oscIndex == 1 ? pg::wtB_on : pg::wtC_on);
+    auto q = [&] (int id) { return cache[base + (id - pg::wtA_on)]; };
+    const float pos = q (pg::wtA_pos);
+    const bool on = q (pg::wtA_on) > 0.5f;
     const int frames = t->numFrames;
     const int len = pg::Wavetable::levelLength (0);
 
@@ -270,10 +272,10 @@ void WavetableView::paint (Graphics& g)
     }
     {
         // the current cycle exactly as the oscillator plays it, warp included
-        const int warp = (int) cache[oscIndex == 0 ? pg::wtA_warp : pg::wtB_warp];
-        const float amt = cache[oscIndex == 0 ? pg::wtA_wamt : pg::wtB_wamt];
+        const int warp = (int) q (pg::wtA_warp), warp2 = (int) q (pg::wtA_warp2);
+        const float amt = q (pg::wtA_wamt), amt2 = q (pg::wtA_wamt2);
         float cyc[256];
-        pg::WavetableOsc::renderCycle (*t, pos, warp, amt, cyc, 256);
+        pg::WavetableOsc::renderCycle (*t, pos, warp, amt, cyc, 256, warp2, amt2);
         float peak = 0.01f;
         for (float v : cyc) peak = jmax (peak, std::abs (v));
         Path p;
@@ -285,11 +287,14 @@ void WavetableView::paint (Graphics& g)
         }
         g.setColour (on ? cosmos::neon : cosmos::steel);
         g.strokePath (p, PathStrokeType (2.0f));
-        if (warp > 0 && amt > 0.0f)
+        String w;
+        if (warp > 0 && amt > 0.0f) w = pg::choices::warpModes()[warp].toUpperCase();
+        if (warp2 > 0 && amt2 > 0.0f) w += (w.isEmpty() ? "" : " > ") + pg::choices::warpModes()[warp2].toUpperCase();
+        if (w.isNotEmpty())
         {
             g.setColour (cosmos::gold);
             g.setFont (fonts::label (9.5f));
-            g.drawText ("WARP " + pg::choices::warpModes()[warp].toUpperCase(), r.reduced (8.0f, 4.0f), Justification::topRight);
+            g.drawText ("WARP " + w, r.reduced (8.0f, 4.0f), Justification::topRight);
         }
     }
     g.setColour (colours::textDim);
@@ -621,92 +626,6 @@ void ArpGrid::mouseDrag (const MouseEvent& e) { edit (e.position, false); }
 // =============================================================================
 // OrbPad
 // =============================================================================
-Rectangle<float> OrbPad::padArea() const { return getLocalBounds().toFloat().reduced (48.0f); }
-
-void OrbPad::paint (Graphics& g)
-{
-    auto full = getLocalBounds().toFloat();
-    auto inner = brand::chamferFrame (g, full.reduced (2.0f), 22.0f, 7.0f, cosmos::voidC, cosmos::neon, false);
-    auto r = padArea();
-    const bool on = proc.paramCache()[pg::orb_on] > 0.5f;
-    {
-        Graphics::ScopedSaveState ss (g);
-        g.reduceClipRegion (inner.reduced (4.0f).toNearestInt());
-        if (art.isNull()) art = ImageCache::getFromMemory (BinaryData::orbtorus_jpg, BinaryData::orbtorus_jpgSize);
-        g.setOpacity (on ? 0.42f : 0.18f);
-        g.drawImage (art, inner, RectanglePlacement::centred | RectanglePlacement::fillDestination);
-        g.setOpacity (1.0f);
-        g.setGradientFill (ColourGradient (cosmos::voidC.withAlpha (0.1f), inner.getCentre(), cosmos::voidC.withAlpha (0.85f), inner.getTopLeft(), true));
-        g.fillRect (inner);
-        Random rnd (11);
-        for (int i = 0; i < 160; ++i)
-        {
-            g.setColour (cosmos::starlight.withAlpha (0.2f + rnd.nextFloat() * 0.5f));
-            g.fillRect (inner.getX() + rnd.nextFloat() * inner.getWidth(), inner.getY() + rnd.nextFloat() * inner.getHeight() * 0.55f, 1.2f, 1.2f);
-        }
-        brand::perspectiveGrid (g, inner.withTrimmedTop (inner.getHeight() * 0.5f), cosmos::electric, 0.55f, 14, 9);
-    }
-    g.setColour (cosmos::nebula.withAlpha (0.8f));
-    for (int i = 1; i < 4; ++i)
-    {
-        g.drawVerticalLine ((int) (r.getX() + r.getWidth() * (float) i / 4.0f), r.getY(), r.getBottom());
-        g.drawHorizontalLine ((int) (r.getY() + r.getHeight() * (float) i / 4.0f), r.getX(), r.getRight());
-    }
-
-    const char* names[] = { "A", "B", "C", "D" };
-    const Point<float> corners[] = { r.getTopLeft(), r.getTopRight(), r.getBottomLeft(), r.getBottomRight() };
-    for (int c = 0; c < 4; ++c)
-    {
-        const bool filled = proc.cornerFilled (c);
-        auto b = Rectangle<float> (42.0f, 42.0f).withCentre (corners[c]);
-        g.setColour (filled ? cosmos::fuchsia : cosmos::night);
-        g.fillEllipse (b);
-        g.setColour (filled ? cosmos::starlight : cosmos::electric);
-        g.drawEllipse (b, 2.0f);
-        g.setFont (fonts::display (14.0f));
-        g.drawText (names[c], b.translated (2.0f, 0.0f), Justification::centred);
-    }
-    const float x = proc.apvts.getRawParameterValue ("orb_x")->load();
-    const float y = proc.apvts.getRawParameterValue ("orb_y")->load();
-    const Point<float> pt { r.getX() + x * r.getWidth(), r.getBottom() - y * r.getHeight() };
-    const auto pc = on ? cosmos::neon : cosmos::steel;
-    for (int k = 3; k >= 1; --k)
-    {
-        g.setColour (pc.withAlpha (0.08f * (float) k));
-        g.fillEllipse (Rectangle<float> (18.0f + 14.0f * (float) k, 18.0f + 14.0f * (float) k).withCentre (pt));
-    }
-    brand::bolt (g, pt, 10.0f, pc);
-    brand::sparkle (g, pt.translated (16.0f, -16.0f), 7.0f, cosmos::starlight);
-    if (! on)
-    {
-        g.setColour (cosmos::cream);
-        g.setFont (fonts::sans (13.0f));
-        g.drawText ("ORB is off: turn it on to morph between the corners", r.reduced (20.0f), Justification::centredBottom);
-    }
-}
-
-void OrbPad::setFromMouse (Point<float> p)
-{
-    auto r = padArea();
-    auto* px = proc.apvts.getParameter ("orb_x");
-    auto* py = proc.apvts.getParameter ("orb_y");
-    px->setValueNotifyingHost (jlimit (0.0f, 1.0f, (p.x - r.getX()) / r.getWidth()));
-    py->setValueNotifyingHost (jlimit (0.0f, 1.0f, (r.getBottom() - p.y) / r.getHeight()));
-    repaint();
-}
-
-void OrbPad::mouseDown (const MouseEvent& e)
-{
-    proc.apvts.getParameter ("orb_x")->beginChangeGesture();
-    proc.apvts.getParameter ("orb_y")->beginChangeGesture();
-    setFromMouse (e.position);
-}
-void OrbPad::mouseDrag (const MouseEvent& e) { setFromMouse (e.position); }
-void OrbPad::mouseUp (const MouseEvent&)
-{
-    proc.apvts.getParameter ("orb_x")->endChangeGesture();
-    proc.apvts.getParameter ("orb_y")->endChangeGesture();
-}
 
 // =============================================================================
 // MatrixRow

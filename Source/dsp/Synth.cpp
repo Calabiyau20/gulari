@@ -16,6 +16,10 @@ void StepData::reset()
             if (l == 1) v = (s % 4 == 0) ? 1.0f : 0.25f;
             if (l == 2) v = 0.5f + 0.5f * std::sin ((float) s * kTwoPi / 16.0f);
             if (l == 3) v = (float) ((s * 7) % 11) / 10.0f;
+            if (l == 4) v = (s % 8 < 4) ? 1.0f : 0.0f;
+            if (l == 5) v = 1.0f - (float) (s % 8) / 7.0f;
+            if (l == 6) v = 0.5f + 0.5f * std::sin ((float) s * kTwoPi / 32.0f + 1.0f);
+            if (l == 7) v = (float) ((s * 13 + 5) % 17) / 16.0f;
             seq[(size_t) (l * kSteps + s)].store (v);
             seqLock[(size_t) (l * kSteps + s)].store (false);
         }
@@ -115,6 +119,7 @@ void Synth::allNotesOff()
 void Synth::noteOn (int note, float vel)
 {
     lastNote.store (note);
+    if (p[chaos2_sync] > 0.5f) { lorenz[0] = -0.1f; lorenz[1] = 0.2f; lorenz[2] = 0.1f; }
     noteOnCounter.fetch_add (1);
     const int mode = (int) p[voice_mode];
     if (mode == 0)
@@ -209,32 +214,81 @@ void Synth::updateGlobalMods (int numSamples, double beat, double beatsPerSample
         global.lfoPhase[i] = gLfo[i].phase;
     }
 
-    // chaos: two Lorenz attractors
-    for (int c = 0; c < 2; ++c)
+    // ---- Chaos 1: a choice of attractors / maps ----
     {
-        const float rate = c == 0 ? p[chaos1_rate] : p[chaos2_rate];
-        const float smooth = c == 0 ? p[chaos1_smooth] : p[chaos2_smooth];
-        float* s = lorenz[c];
-        const int sub = 4;
-        const float dt = juce::jmin (0.02f, rate * secs * 0.25f / (float) sub);
-        for (int k = 0; k < sub; ++k)
+        const float rate = p[chaos1_rate], amt = p[chaos1_amt];
+        float* c = chaos1State;
+        float target = 0.0f;
+        switch ((int) p[chaos1_type])
         {
-            const float dx = 10.0f * (s[1] - s[0]);
-            const float dy = s[0] * (28.0f - s[2]) - s[1];
-            const float dz = s[0] * s[1] - 2.6667f * s[2];
-            s[0] += dx * dt; s[1] += dy * dt; s[2] += dz * dt;
+            case 0:   // Rossler (smooth, spiralling)
+            {
+                const float ca = 0.1f + 0.2f * amt, cc = 4.0f + 6.0f * amt;
+                const int sub = 4;
+                const float dt = juce::jmin (0.05f, rate * secs * 1.5f / (float) sub);
+                for (int k = 0; k < sub; ++k)
+                {
+                    const float dx = -c[1] - c[2], dy = c[0] + ca * c[1], dz = 0.2f + c[2] * (c[0] - cc);
+                    c[0] += dx * dt; c[1] += dy * dt; c[2] += dz * dt;
+                }
+                if (! std::isfinite (c[0]) || std::abs (c[0]) > 100.0f) { c[0] = 0.1f; c[1] = c[2] = 0.0f; }
+                target = clampf (c[0] / 10.0f, -1.0f, 1.0f);
+                break;
+            }
+            default:   // maps (Henon, Logistic, Duffing): iterate at 'rate' steps per second
+            {
+                c[2] += rate * secs * 4.0f;
+                while (c[2] >= 1.0f)
+                {
+                    c[2] -= 1.0f;
+                    const int t = (int) p[chaos1_type];
+                    if (t == 1) { const float a = 1.2f + 0.2f * amt; const float nx = 1.0f - a * c[0] * c[0] + c[1]; c[1] = 0.3f * c[0]; c[0] = nx; }
+                    else if (t == 2) { const float r = 3.5f + 0.5f * amt; c[0] = r * c[0] * (1.0f - c[0]); }
+                    else { const float nx = c[1]; c[1] = -0.2f * c[0] + (2.5f + 0.25f * amt) * c[1] - c[1] * c[1] * c[1]; c[0] = nx; }
+                    if (! std::isfinite (c[0]) || std::abs (c[0]) > 10.0f) { c[0] = 0.31f; c[1] = 0.1f; }
+                    if (t == 2 && (c[0] <= 0.0f || c[0] >= 1.0f)) c[0] = 0.31f;
+                }
+                const int t = (int) p[chaos1_type];
+                target = t == 2 ? c[0] * 2.0f - 1.0f : clampf (c[0] / (t == 1 ? 1.3f : 1.6f), -1.0f, 1.0f);
+                break;
+            }
         }
-        const float target = clampf (s[0] / 20.0f, -1.0f, 1.0f);
-        const float a = std::exp (-secs / (0.001f + smooth * smooth * 2.0f));
-        chaosSmooth[c] = target + (chaosSmooth[c] - target) * a;
-        global.chaos[c] = chaosSmooth[c];
+        const float a = std::exp (-secs / (0.001f + p[chaos1_smooth] * p[chaos1_smooth] * 2.0f));
+        chaosSmooth[0] = target + (chaosSmooth[0] - target) * a;
+        global.chaos[0] = chaosSmooth[0];
     }
 
-    global.macro[0] = p[macro1]; global.macro[1] = p[macro2];
-    global.macro[2] = p[macro3]; global.macro[3] = p[macro4];
+    // ---- Chaos 2: Lorenz attractor, X / Y / Z outputs ----
+    {
+        const float sigma = 5.0f + 10.0f * p[chaos2_sigma];
+        const float rho = 20.0f + 30.0f * p[chaos2_rho];
+        const float beta = 1.0f + 3.33f * p[chaos2_beta];
+        float* s3 = lorenz;
+        const int sub = 4;
+        const float dt = juce::jmin (0.02f, p[chaos2_rate] * secs * 0.25f / (float) sub);
+        for (int k = 0; k < sub; ++k)
+        {
+            const float dx = sigma * (s3[1] - s3[0]);
+            const float dy = s3[0] * (rho - s3[2]) - s3[1];
+            const float dz = s3[0] * s3[1] - beta * s3[2];
+            s3[0] += dx * dt; s3[1] += dy * dt; s3[2] += dz * dt;
+        }
+        if (! std::isfinite (s3[0]) || std::abs (s3[0]) > 500.0f) { s3[0] = -0.1f; s3[1] = 0.2f; s3[2] = 0.1f; }
+        const float scale = std::sqrt (beta * (rho - 1.0f)) * 1.6f;
+        const float tx = clampf (s3[0] / scale, -1.0f, 1.0f);
+        const float ty = clampf (s3[1] / (scale * 1.3f), -1.0f, 1.0f);
+        const float tz = clampf ((s3[2] - (rho - 1.0f)) / (rho * 0.6f), -1.0f, 1.0f);
+        const float a = std::exp (-secs / (0.001f + p[chaos2_smooth] * p[chaos2_smooth] * 2.0f));
+        const float t3[3] = { tx, ty, tz };
+        for (int k = 0; k < 3; ++k)
+        {
+            chaosSmooth[1 + k] = t3[k] + (chaosSmooth[1 + k] - t3[k]) * a;
+            global.chaos[1 + k] = chaosSmooth[1 + k];
+        }
+    }
 
-    // sequencer lanes
-    for (int l = 0; l < 4; ++l)
+    // ---- sequencer lanes ----
+    for (int l = 0; l < StepData::kLanes; ++l)
     {
         const int base = seq1_on + l * (seq2_on - seq1_on);
         if (p[base] < 0.5f) { global.seq[l] = 0.0f; steps.seqPlayStep[(size_t) l].store (-1); continue; }
@@ -244,7 +298,36 @@ void Synth::updateGlobalMods (int numSamples, double beat, double beatsPerSample
         const double pos = beat / div;
         long long k = (long long) std::floor (pos);
         if ((k & 1) && (pos - (double) k) < swing) --k;   // delayed odd steps
-        const int step = (int) (((k % len) + len) % len);
+        const long long kk = k < 0 ? 0 : k;
+        int step = 0;
+        switch ((int) p[base + (seq1_dir - seq1_on)])
+        {
+            case 1: step = len - 1 - (int) (kk % len); break;                                       // backward
+            case 2:                                                                                 // ping-pong
+            {
+                const int period = juce::jmax (1, 2 * len - 2);
+                const int q = (int) (kk % period);
+                step = q < len ? q : period - q;
+                break;
+            }
+            case 3:                                                                                 // random (stable per step)
+            {
+                uint32_t h = (uint32_t) kk * 2654435761u + (uint32_t) l * 40503u + 0x9E37u;
+                h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+                step = (int) (h % (uint32_t) len);
+                break;
+            }
+            case 4: { const int c = juce::jmax (1, len / 2); step = len < 2 ? 0 : 1 + 2 * (int) (kk % c); break; }   // even steps 2,4,6...
+            case 5: { const int c = (len + 1) / 2; step = 2 * (int) (kk % c); break; }                               // odd steps 1,3,5...
+            case 6:                                                                                 // evens, then odds
+            {
+                const int ce = len / 2, q = (int) (kk % len);
+                step = q < ce ? 1 + 2 * q : 2 * (q - ce);
+                break;
+            }
+            default: step = (int) (kk % len); break;
+        }
+        step = juce::jlimit (0, len - 1, step);
         steps.seqPlayStep[(size_t) l].store (step);
         float v = steps.seq[(size_t) (l * StepData::kSteps + step)].load (std::memory_order_relaxed);
         if ((int) p[base + (seq1_mode - seq1_on)] == 1) v = v * 2.0f - 1.0f;
@@ -255,6 +338,31 @@ void Synth::updateGlobalMods (int numSamples, double beat, double beatsPerSample
         global.seq[l] = seqSmooth[l];
     }
     juce::ignoreUnused (beatsPerSample);
+}
+
+int Synth::quantize (int note) const
+{
+    static const uint16_t masks[] = {
+        0xFFF,                                                   // chromatic
+        0b101010110101, 0b011010101101, 0b010110101011, 0b101011010101, 0b011010110101, 0b010110101101, 0b010101101011,
+        0b100110101101, 0b101010101101, 0b010110110011, 0b100111001101, 0b100110110011,
+        0b001010010101, 0b010010101001, 0b010011101001, 0b010101010101, 0b000110001101, 0b010010100011 };
+    const int scale = juce::jlimit (0, (int) (sizeof (masks) / sizeof (masks[0])) - 1, (int) p[arp_scale]);
+    if (scale == 0) return note;
+    const uint16_t m = masks[scale];
+    const int root = (int) p[arp_root];
+    // nearest scale degree, ties go down
+    for (int d = 0; d < 12; ++d)
+    {
+        for (int sgn : { -1, 1 })
+        {
+            const int cand = note + sgn * d;
+            const int pc = ((cand - root) % 12 + 12) % 12;
+            if (m & (1 << pc)) return juce::jlimit (0, 127, cand);
+            if (d == 0) break;
+        }
+    }
+    return note;
 }
 
 void Synth::runArp (int numSamples, double beatStart, double bps, std::vector<std::pair<int, juce::MidiMessage>>& events)
@@ -374,7 +482,7 @@ void Synth::runArp (int numSamples, double beatStart, double bps, std::vector<st
                 const double offBeat = (tie && r == ratchet - 1) ? t + sub * 1.02 : t + sub * gate;
                 for (int n : chosen)
                 {
-                    const int note = juce::jlimit (0, 127, n + transpose);
+                    const int note = quantize (juce::jlimit (0, 127, n + transpose));
                     if (t < beatEnd)
                     {
                         // a new note-on of a sounding pitch: close it first
@@ -422,14 +530,15 @@ void Synth::runArp (int numSamples, double beatStart, double bps, std::vector<st
 }
 
 void Synth::render (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, const float* params,
-                    const SampleData* sample, const Wavetable* tableA, const Wavetable* tableB,
-                    const juce::AudioPlayHead::PositionInfo* pos)
+                    const SampleData* sample, const Wavetable* const* tables, const SpectralTable* spectral,
+                    const ShotData* shot, const juce::AudioPlayHead::PositionInfo* pos)
 {
     p = params;
     ctx.p = params;
     ctx.sample = sample;
-    ctx.table[0] = tableA;
-    ctx.table[1] = tableB;
+    for (int t = 0; t < 3; ++t) ctx.table[t] = tables[t];
+    ctx.spectral = spectral;
+    ctx.shot = shot;
     ctx.global = &global;
 
     const int n = out.getNumSamples();

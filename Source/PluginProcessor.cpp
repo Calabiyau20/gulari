@@ -14,10 +14,11 @@ SynthgularityProcessor::SynthgularityProcessor()
         raw[(size_t) i] = apvts.getRawParameterValue (idOf (i));
         params[(size_t) i] = apvts.getParameter (idOf (i));
         jassert (raw[(size_t) i] != nullptr);
-        for (auto& c : orbCorners) c[(size_t) i].store (0.0f);
     }
     std::atomic_store (&sample, makeDefaultSample());
     builtInWavetables();   // build the tables now, not on the audio thread
+    builtInSpectra();
+    builtInShots();
     refreshCache();
     startTimerHz (2);
 }
@@ -33,48 +34,13 @@ void SynthgularityProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 {
     synth.prepare (sampleRate, samplesPerBlock);
     fx.prepare (sampleRate, samplesPerBlock);
+    meter.prepare (sampleRate);
     work.setSize (2, samplesPerBlock);
 }
 
 void SynthgularityProcessor::refreshCache()
 {
-    const bool orb = raw[orb_on]->load() > 0.5f;
-    int filled = 0;
-    for (auto& f : orbFilled) filled += f.load() ? 1 : 0;
-
-    if (! orb || filled == 0)
-    {
-        for (int i = 0; i < kNumParams; ++i) cache[(size_t) i] = raw[(size_t) i]->load (std::memory_order_relaxed);
-        return;
-    }
-
-    // bilinear weights: corner 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right (y = 1 is top)
-    const float x = raw[orb_x]->load(), y = raw[orb_y]->load();
-    const float w[4] = { (1 - x) * y, x * y, (1 - x) * (1 - y), x * (1 - y) };
-    int nearest = 0;
-    for (int c = 1; c < 4; ++c) if (w[c] > w[nearest]) nearest = c;
-
-    for (int i = 0; i < kNumParams; ++i)
-    {
-        const auto& info = paramInfos()[(size_t) i];
-        auto* prm = params[(size_t) i];
-        const float current = prm->convertTo0to1 (raw[(size_t) i]->load (std::memory_order_relaxed));
-        if (i == orb_on || i == orb_x || i == orb_y || i == polyphony || i == voice_mode)
-        {
-            cache[(size_t) i] = raw[(size_t) i]->load();
-            continue;
-        }
-        auto cornerVal = [&] (int c) { return orbFilled[(size_t) c].load() ? orbCorners[(size_t) c][(size_t) i].load (std::memory_order_relaxed) : current; };
-        float norm;
-        if (info.type == PType::Float)
-        {
-            norm = 0.0f;
-            for (int c = 0; c < 4; ++c) norm += w[c] * cornerVal (c);
-        }
-        else
-            norm = cornerVal (nearest);   // menus and switches follow the closest corner
-        cache[(size_t) i] = prm->convertFrom0to1 (clamp01 (norm));
-    }
+    for (int i = 0; i < kNumParams; ++i) cache[(size_t) i] = raw[(size_t) i]->load (std::memory_order_relaxed);
 }
 
 void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -85,12 +51,15 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     refreshCache();
 
     auto smp = std::atomic_load (&sample);
-    auto ta = getActiveTable (0), tb = getActiveTable (1);
+    WavetablePtr tabs[3] = { getActiveTable (0), getActiveTable (1), getActiveTable (2) };
+    const Wavetable* tptr[3] = { tabs[0].get(), tabs[1].get(), tabs[2].get() };
+    auto spec = getActiveSpectral();
+    auto shot = getActiveShot();
 
     juce::Optional<juce::AudioPlayHead::PositionInfo> pos;
     if (auto* ph = getPlayHead()) pos = ph->getPosition();
 
-    synth.render (buffer, midi, cache.data(), smp.get(), ta.get(), tb.get(), pos ? &*pos : nullptr);
+    synth.render (buffer, midi, cache.data(), smp.get(), tptr, spec.get(), shot.get(), pos ? &*pos : nullptr);
 
     const int strums = synth.noteOnCounter.load();
     const bool strum = strums != lastStrumCount;
@@ -111,6 +80,7 @@ void SynthgularityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             d[i] = v;
         }
     }
+    meter.process (buffer.getReadPointer (0), buffer.getReadPointer (1), n);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,26 +96,82 @@ bool SynthgularityProcessor::loadSample (const juce::File& file, juce::String& e
     return true;
 }
 
+void SynthgularityProcessor::retire (std::shared_ptr<const void> p)
+{
+    std::lock_guard<std::mutex> lk (graveyardLock);
+    graveyard.push_back (std::move (p));
+}
+
+static const char* const kTableIds[3] = { "wtA_table", "wtB_table", "wtC_table" };
+
 bool SynthgularityProcessor::loadUserWavetable (int osc, const juce::File& file, juce::String& error)
 {
+    osc = juce::jlimit (0, 2, osc);
     auto t = loadWavetableFile (file, error);
     if (t == nullptr) return false;
-    auto old = std::atomic_exchange (&userTable[osc & 1], t);
-    std::lock_guard<std::mutex> lk (graveyardLock);
-    graveyard.push_back (old);
+    retire (std::atomic_exchange (&userTable[osc], t));
+    userTablePath[osc] = file.getFullPathName();
     // switch the oscillator to the User table
-    if (auto* prm = apvts.getParameter (osc == 0 ? "wtA_table" : "wtB_table"))
+    if (auto* prm = apvts.getParameter (kTableIds[osc]))
         prm->setValueNotifyingHost (prm->convertTo0to1 ((float) (choices::wavetables().size() - 1)));
     return true;
 }
 
 WavetablePtr SynthgularityProcessor::getActiveTable (int osc) const
 {
-    const int idx = (int) cache[osc == 0 ? wtA_table : wtB_table];
+    static const int ids[3] = { wtA_table, wtB_table, wtC_table };
+    osc = juce::jlimit (0, 2, osc);
+    const int idx = (int) cache[(size_t) ids[osc]];
     const auto& b = builtInWavetables();
     if (idx >= (int) b.size())
     {
-        auto u = std::atomic_load (&userTable[osc & 1]);
+        auto u = std::atomic_load (&userTable[osc]);
+        return u != nullptr ? u : b[0];
+    }
+    return b[(size_t) juce::jmax (0, idx)];
+}
+
+bool SynthgularityProcessor::loadSpectralFile (const juce::File& file, juce::String& error)
+{
+    auto t = analyseSpectralFile (file, error);
+    if (t == nullptr) return false;
+    retire (std::atomic_exchange (&userSpectral, t));
+    spectralPath = file.getFullPathName();
+    if (auto* prm = apvts.getParameter ("sp_sound"))
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) (choices::spectralSounds().size() - 1)));
+    return true;
+}
+
+SpectralPtr SynthgularityProcessor::getActiveSpectral() const
+{
+    const int idx = (int) cache[sp_sound];
+    const auto& b = builtInSpectra();
+    if (idx >= (int) b.size())
+    {
+        auto u = std::atomic_load (&userSpectral);
+        return u != nullptr ? u : b[0];
+    }
+    return b[(size_t) juce::jmax (0, idx)];
+}
+
+bool SynthgularityProcessor::loadShot (const juce::File& file, juce::String& error)
+{
+    auto t = loadShotFile (file, error);
+    if (t == nullptr) return false;
+    retire (std::atomic_exchange (&userShot, t));
+    shotPath = file.getFullPathName();
+    if (auto* prm = apvts.getParameter ("smp_sound"))
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) (choices::samplerSounds().size() - 1)));
+    return true;
+}
+
+ShotPtr SynthgularityProcessor::getActiveShot() const
+{
+    const int idx = (int) cache[smp_sound];
+    const auto& b = builtInShots();
+    if (idx >= (int) b.size())
+    {
+        auto u = std::atomic_load (&userShot);
         return u != nullptr ? u : b[0];
     }
     return b[(size_t) juce::jmax (0, idx)];
@@ -155,38 +181,6 @@ void SynthgularityProcessor::timerCallback()
 {
     std::lock_guard<std::mutex> lk (graveyardLock);
     graveyard.erase (std::remove_if (graveyard.begin(), graveyard.end(), [] (const auto& p) { return p.use_count() <= 1; }), graveyard.end());
-}
-
-// ---------------------------------------------------------------------------
-// ORB
-// ---------------------------------------------------------------------------
-void SynthgularityProcessor::captureCorner (int c)
-{
-    for (int i = 0; i < kNumParams; ++i)
-        orbCorners[(size_t) c][(size_t) i].store (params[(size_t) i]->getValue());
-    orbFilled[(size_t) c].store (true);
-}
-
-void SynthgularityProcessor::clearCorner (int c) { orbFilled[(size_t) c].store (false); }
-
-bool SynthgularityProcessor::loadPresetIntoCorner (int c, const juce::File& file)
-{
-    auto xml = juce::XmlDocument::parse (file);
-    if (xml == nullptr) return false;
-    auto tree = juce::ValueTree::fromXml (*xml);
-    auto prm = tree.getChildWithName (apvts.state.getType());
-    if (! prm.isValid()) return false;
-    // start from the current sound, overwrite with the preset's parameters
-    for (int i = 0; i < kNumParams; ++i)
-        orbCorners[(size_t) c][(size_t) i].store (params[(size_t) i]->getValue());
-    for (auto child : prm)
-    {
-        const int idx = indexOf (child.getProperty ("id").toString());
-        if (idx >= 0)
-            orbCorners[(size_t) c][(size_t) idx].store (params[(size_t) idx]->convertTo0to1 ((float) child.getProperty ("value")));
-    }
-    orbFilled[(size_t) c].store (true);
-    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,52 +194,23 @@ juce::ValueTree SynthgularityProcessor::buildState()
     root.appendChild (apvts.copyState(), nullptr);
     root.appendChild (synth.steps.toTree(), nullptr);
 
-    juce::ValueTree orb ("Orb");
-    for (int c = 0; c < 4; ++c)
-    {
-        juce::ValueTree corner ("Corner");
-        corner.setProperty ("index", c, nullptr);
-        corner.setProperty ("filled", orbFilled[(size_t) c].load(), nullptr);
-        if (orbFilled[(size_t) c].load())
-        {
-            juce::StringArray v;
-            for (int i = 0; i < kNumParams; ++i) v.add (idOf (i) + "=" + juce::String (orbCorners[(size_t) c][(size_t) i].load(), 5));
-            corner.setProperty ("values", v.joinIntoString (";"), nullptr);
-        }
-        orb.appendChild (corner, nullptr);
-    }
-    root.appendChild (orb, nullptr);
-
     juce::ValueTree src ("Sources");
     if (auto s = getSample()) src.setProperty ("sample", s->path, nullptr);
-    for (int o = 0; o < 2; ++o)
-        if (auto t = std::atomic_load (&userTable[o])) src.setProperty (o == 0 ? "userTableA" : "userTableB", t->name, nullptr);
+    static const char* const tk[3] = { "userTableA", "userTableB", "userTableC" };
+    for (int o = 0; o < 3; ++o)
+        if (userTablePath[o].isNotEmpty()) src.setProperty (tk[o], userTablePath[o], nullptr);
+    if (spectralPath.isNotEmpty()) src.setProperty ("spectral", spectralPath, nullptr);
+    if (shotPath.isNotEmpty()) src.setProperty ("shot", shotPath, nullptr);
     root.appendChild (src, nullptr);
     return root;
 }
 
-void SynthgularityProcessor::applyState (const juce::ValueTree& root, bool includeOrb)
+void SynthgularityProcessor::applyState (const juce::ValueTree& root)
 {
     auto prm = root.getChildWithName (apvts.state.getType());
     if (prm.isValid()) apvts.replaceState (prm);
     synth.steps.fromTree (root.getChildWithName ("Steps"));
     currentPresetName = root.getProperty ("presetName", "Init").toString();
-
-    if (includeOrb)
-    {
-        for (auto& f : orbFilled) f.store (false);
-        for (auto corner : root.getChildWithName ("Orb"))
-        {
-            const int c = juce::jlimit (0, 3, (int) corner.getProperty ("index"));
-            if (! (bool) corner.getProperty ("filled")) continue;
-            for (auto& kv : juce::StringArray::fromTokens (corner.getProperty ("values").toString(), ";", ""))
-            {
-                const int idx = indexOf (kv.upToFirstOccurrenceOf ("=", false, false));
-                if (idx >= 0) orbCorners[(size_t) c][(size_t) idx].store (kv.fromFirstOccurrenceOf ("=", false, false).getFloatValue());
-            }
-            orbFilled[(size_t) c].store (true);
-        }
-    }
 
     auto src = root.getChildWithName ("Sources");
     const juce::String path = src.getProperty ("sample").toString();
@@ -256,11 +221,30 @@ void SynthgularityProcessor::applyState (const juce::ValueTree& root, bool inclu
         if (f.existsAsFile()) loadSample (f, err);
     }
     else
+        retire (std::atomic_exchange (&sample, makeDefaultSample()));
+
+    // user files of the other oscillators (kept by path; the menu choice is restored by the parameters)
+    auto reload = [&] (const char* key, auto&& loader)
     {
-        auto old = std::atomic_exchange (&sample, makeDefaultSample());
-        std::lock_guard<std::mutex> lk (graveyardLock);
-        graveyard.push_back (old);
-    }
+        const juce::String pth = src.getProperty (key).toString();
+        juce::File f (pth);
+        juce::String err;
+        if (pth.isNotEmpty() && f.existsAsFile()) loader (f, err);
+    };
+    static const char* const tk[3] = { "userTableA", "userTableB", "userTableC" };
+    for (int o = 0; o < 3; ++o)
+        reload (tk[o], [this, o] (const juce::File& f, juce::String& e)
+        {
+            if (auto t = loadWavetableFile (f, e)) { retire (std::atomic_exchange (&userTable[o], t)); userTablePath[o] = f.getFullPathName(); }
+        });
+    reload ("spectral", [this] (const juce::File& f, juce::String& e)
+    {
+        if (auto t = analyseSpectralFile (f, e)) { retire (std::atomic_exchange (&userSpectral, t)); spectralPath = f.getFullPathName(); }
+    });
+    reload ("shot", [this] (const juce::File& f, juce::String& e)
+    {
+        if (auto t = loadShotFile (f, e)) { retire (std::atomic_exchange (&userShot, t)); shotPath = f.getFullPathName(); }
+    });
 }
 
 void SynthgularityProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -271,7 +255,7 @@ void SynthgularityProcessor::getStateInformation (juce::MemoryBlock& dest)
 void SynthgularityProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
-        applyState (juce::ValueTree::fromXml (*xml), true);
+        applyState (juce::ValueTree::fromXml (*xml));
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +291,7 @@ bool SynthgularityProcessor::loadPreset (const juce::File& file)
 {
     auto xml = juce::XmlDocument::parse (file);
     if (xml == nullptr) return false;
-    applyState (juce::ValueTree::fromXml (*xml), true);
+    applyState (juce::ValueTree::fromXml (*xml));
     currentPresetName = file.getFileNameWithoutExtension();
     return true;
 }
@@ -317,14 +301,14 @@ void SynthgularityProcessor::initPreset()
     for (int i = 0; i < kNumParams; ++i)
         params[(size_t) i]->setValueNotifyingHost (params[(size_t) i]->getDefaultValue());
     synth.steps.reset();
-    for (auto& f : orbFilled) f.store (false);
     currentPresetName = "Init";
 }
 
 juce::StringArray SynthgularityProcessor::factoryPresetNames()
 {
     return { "Init", "GRAIN - Cloud Pad", "GRAIN - Pitched Choir", "GRAIN - Frozen Scan", "GRAIN - Glitch Rain",
-             "BASS - Psy Bite", "LEAD - Hyper Reese", "ARP - Plaits Chiptune", "ATMOS - Ringing Cave", "ATMOS - Clouds Drift" };
+             "BASS - Psy Bite", "LEAD - Hyper Reese", "ARP - Plaits Chiptune", "ATMOS - Ringing Cave", "ATMOS - Clouds Drift",
+             "SPECTRAL - Choir Bloom", "SPECTRAL - Singularity", "BASS - Click Growl", "ARP - Dorian Lorenz" };
 }
 
 void SynthgularityProcessor::loadFactoryPreset (int index)
@@ -392,6 +376,32 @@ void SynthgularityProcessor::loadFactoryPreset (int index)
             set ("pl_on", 1); set ("pl_engine", 14); set ("pl_level", 0.35f);
             set ("fx_gr_on", 1); set ("fx_gr_mode", 2); set ("fx_gr_mix", 0.6f); set ("fx_gr_texture", 0.7f);
             route (1, MS_Lfo1, MD_GrfxPos, 0.4f); set ("lfo1_rate", 0.05f); set ("lfo1_retrig", 0);
+            break;
+        case 10:   // Spectral choir
+            set ("gr_on", 0); set ("sp_on", 1); set ("sp_sound", 3); set ("sp_scan", 0.15f); set ("sp_blur", 0.5f); set ("sp_width", 0.8f);
+            set ("amp_a", 0.8f); set ("amp_r", 2.5f); set ("ff1_on", 1); set ("ff1_type", 5); set ("ff1_mix", 0.4f);
+            set ("fx_rv_on", 1); set ("fx_rv_mix", 0.35f); set ("lfo1_rate", 0.2f); route (1, MS_Lfo1, MD_SpShift, 0.2f);
+            break;
+        case 11:   // Singularity
+            set ("gr_on", 0); set ("sp_on", 1); set ("sp_sound", 19); set ("sp_shimmer", 0.4f); set ("sp_stretch", 0.15f);
+            set ("amp_a", 1.5f); set ("amp_r", 4.0f); route (1, MS_Chaos2, MD_SpPos, 0.5f); set ("sp_pos", 0.5f); set ("chaos2_rate", 0.4f);
+            set ("ff1_on", 1); set ("ff1_type", 1); set ("ff1_res", 0.6f); set ("ff1_mix", 0.35f); set ("ff1_poles", 2);
+            set ("fx_rv_on", 1); set ("fx_rv_decay", 6.0f); set ("fx_rv_mix", 0.4f);
+            break;
+        case 12:   // Click growl bass
+            set ("gr_on", 0); set ("wtA_on", 1); set ("wtA_table", 0); set ("wtA_pos", 0.6f); set ("wtA_oct", -1);
+            set ("wtA_warp", 1); set ("wtA_wamt", 0.4f); set ("wtA_warp2", 6); set ("wtA_wamt2", 0.3f);
+            set ("wtC_on", 1); set ("wtC_table", 0); set ("wtC_oct", -2); set ("wtC_level", 0.5f);
+            set ("smp_on", 1); set ("smp_sound", 2); set ("smp_level", 0.6f); set ("smp_decay", 0.08f);
+            set ("voice_mode", 1); set ("amp_a", 0.001f); set ("amp_d", 0.3f); set ("amp_s", 0.6f); set ("amp_r", 0.08f);
+            set ("flt_cutoff", 900); set ("flt_env", 0.5f); set ("fenv_d", 0.15f); set ("fenv_s", 0.1f); set ("flt_model", 1);
+            route (1, MS_ModEnv, MD_WtAWarp, 0.4f); set ("menv_d", 0.25f);
+            break;
+        case 13:   // Dorian arp, Lorenz modulated
+            set ("gr_on", 0); set ("wtB_on", 1); set ("wtB_table", 2); set ("wtB_pos", 0.4f); set ("amp_d", 0.25f); set ("amp_s", 0.2f);
+            set ("arp_on", 1); set ("arp_mode", 5); set ("arp_oct", 3); set ("arp_div", 4); set ("arp_scale", 2); set ("arp_root", 9);
+            set ("chaos2_rate", 2.0f); route (1, MS_Chaos2, MD_Cutoff, 0.3f); route (2, MS_Chaos2Z, MD_WtBPos, 0.4f);
+            set ("flt_cutoff", 3000); set ("flt_res", 0.3f); set ("fx_dl_on", 1); set ("fx_dl_div", 6); set ("fx_rv_on", 1);
             break;
         default: break;
     }

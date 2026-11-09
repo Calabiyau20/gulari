@@ -33,6 +33,40 @@ struct DelayLine
     }
 };
 
+// Filter FX: filterbank, positive / negative multi-stage combs, morphing SVF, vowel formants, allpass chain
+class FilterFx
+{
+public:
+    void prepare (double sampleRate);
+    void process (float* L, float* R, int n, int type, float freq, float res, float morph, int poles, float spread, float drive, float mix);
+private:
+    double sr = 48000.0;
+    Svf svf[2][8];
+    DelayLine comb[2][8];
+    float combLp[2][8] {};
+    struct Ap1 { float z = 0.0f; float tick (float x, float a) { const float y = -a * x + z; z = x + a * y; return y; } };
+    Ap1 ap[2][16];
+    float apFb[2] {};
+    Smooth fSmooth;
+    int lastType = -1;
+};
+
+// Feedback-delay-network reverb (8 lines, Hadamard mix, damped, modulated)
+class Reverb
+{
+public:
+    void prepare (double sampleRate);
+    void process (float* L, float* R, int n, float size, float decay, float damp, float preMs, float modAmt, float width, float mix);
+private:
+    double sr = 48000.0;
+    DelayLine pre;
+    DelayLine line[8];
+    float lp[8] {};
+    struct Ap { DelayLine d; float g = 0.6f; float tick (float x, float len) { const float v = d.read (len); const float y = -g * x + v; d.push (x + g * y); return y; } };
+    Ap diff[4];
+    float lfo = 0.0f;
+};
+
 class FxChain
 {
 public:
@@ -42,6 +76,14 @@ public:
 
 private:
     void computeMods (const float* p, const GlobalMod& g);
+    void runStereo (float* L, float* R, int n, const float* p);
+    void runFlanger (float* L, float* R, int n, const float* p);
+    void runPhaser (float* L, float* R, int n, const float* p);
+    void runDelay (float* L, float* R, int n, const float* p, const GlobalMod& g);
+    void runRings (float* L, float* R, int n, const float* p, int lastNote, bool strum);
+    void runClouds (float* L, float* R, int n, const float* p);
+    void runFilter (int which, float* L, float* R, int n, const float* p);
+    void runReverb (float* L, float* R, int n, const float* p);
     double sr = 48000.0;
     float fxMod[MD_Count] {};
 
@@ -62,6 +104,8 @@ private:
     // Mutable
     RingsFx rings;
     CloudsFx clouds;
+    FilterFx filt[2];
+    Reverb reverb;
     std::vector<float> tmpL, tmpR;
 };
 } // namespace pg
