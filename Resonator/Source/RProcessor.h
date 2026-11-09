@@ -83,6 +83,7 @@ private:
         .getChildFile ("Calabi Yau").getChildFile ("Calabi-Yau Resonator").getChildFile ("Presets") };
     pg::FxChain fx;
     juce::SmoothedValue<float> masterGain { 0.5f };
+    float dcZ[2] {}, dcK = 0.0f;   // 5 Hz DC blocker on the output (slow orbit spin + reverb can leave sub-sonic drift)
     std::vector<float> gainRamp;
     bool fxSmoothReady = false;
     float fxSmoothK = 0.2f;

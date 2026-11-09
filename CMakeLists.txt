@@ -197,7 +197,7 @@ endif()
 # look and feel and fonts with Synthgularity (compiled into it, no plugin entry).
 # =============================================================================
 set(CYR_PRODUCT_NAME "Calabi-Yau Resonator")
-set(CYR_VERSION      "1.1.1")
+set(CYR_VERSION      "1.2.0")
 juce_add_plugin(CalabiYauResonator
     PRODUCT_NAME "${CYR_PRODUCT_NAME}"
     COMPANY_NAME "${PG_COMPANY_NAME}"

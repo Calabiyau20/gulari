@@ -696,8 +696,18 @@ void ResonatorEditor::refreshPresetMenu()
 {
     presetBox.clear (dontSendNotification);
     auto factory = ResonatorProcessor::factoryPresetNames();
-    presetBox.addSectionHeading ("Factory");
-    for (int i = 0; i < factory.size(); ++i) presetBox.addItem (factory[i], 1 + i);
+    // factory presets grouped by category ("Bass - Name" -> Bass submenu); the list is sorted, so prev / next walk it in order
+    auto* root = presetBox.getRootMenu();
+    root->addSectionHeader ("Factory (" + String (factory.size()) + ")");
+    for (int i = 0; i < factory.size();)
+    {
+        const auto cat = factory[i].upToFirstOccurrenceOf (" - ", false, false);
+        PopupMenu sub;
+        int count = 0;
+        for (; i < factory.size() && factory[i].upToFirstOccurrenceOf (" - ", false, false) == cat; ++i, ++count)
+            sub.addItem (1 + i, factory[i].fromFirstOccurrenceOf (" - ", false, false));
+        root->addSubMenu (cat + "  (" + String (count) + ")", sub);
+    }
     userPresets = proc.listPresets();
     if (! userPresets.isEmpty())
     {

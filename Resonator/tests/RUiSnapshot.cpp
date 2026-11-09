@@ -31,6 +31,16 @@ int main (int argc, char** argv)
     }
     std::unique_ptr<ResonatorEditor> ed (dynamic_cast<ResonatorEditor*> (proc.createEditor()));
     ed->setSize (1320, 900);
+    // preset menu check: factory presets live in category submenus; picking one by index loads it
+    for (auto* c : ed->getChildren())
+        if (auto* cb = dynamic_cast<juce::ComboBox*> (c); cb != nullptr && cb->getNumItems() > 100)
+        {
+            cb->setSelectedItemIndex (120, juce::sendNotificationSync);
+            std::printf ("preset menu: %d items, item 120 -> %s (%s)\n", cb->getNumItems(), proc.currentPresetName.toRawUTF8(), cb->getText().toRawUTF8());
+            cb->setSelectedItemIndex (121, juce::sendNotificationSync);
+            std::printf ("next -> %s\n", proc.currentPresetName.toRawUTF8());
+            proc.loadFactoryPreset (preset);
+        }
     for (int tab = 0; tab < 7; ++tab)
     {
         ed->showTab (tab);

@@ -22,6 +22,8 @@ int main (int argc, char** argv)
         juce::AudioBuffer<float> all (2, total);
         const bool mono = proc.value (cyr::poly) < 1.5f;
         const int notes[] = { 48, 55, 60, 63 };
+        // mono basses play C2, other mono patches (leads, zaps) C3
+        const int low = names[i].startsWith ("Bass") || names[i].containsIgnoreCase ("Bass") ? 12 : 0;
         double peak = 0, sum = 0, winSum = 0, maxWin = 0;
         int winCount = 0;
         const int win = (int) (sr * 0.4);
@@ -30,9 +32,9 @@ int main (int argc, char** argv)
         {
             juce::AudioBuffer<float> buf (2, block);
             juce::MidiBuffer midi;
-            if (pos == 0) for (int k = 0; k < (mono ? 1 : 4); ++k) midi.addEvent (juce::MidiMessage::noteOn (1, notes[k] - (mono ? 12 : 0), (juce::uint8) 100), 0);
+            if (pos == 0) for (int k = 0; k < (mono ? 1 : 4); ++k) midi.addEvent (juce::MidiMessage::noteOn (1, notes[k] - (mono ? low : 0), (juce::uint8) 100), 0);
             if (pos <= (int) (sr * 2.5) && pos + block > (int) (sr * 2.5))
-                for (int k = 0; k < 4; ++k) midi.addEvent (juce::MidiMessage::noteOff (1, notes[k] - (mono ? 12 : 0)), 0);
+                for (int k = 0; k < 4; ++k) midi.addEvent (juce::MidiMessage::noteOff (1, notes[k] - (mono ? low : 0)), 0);
             proc.processBlock (buf, midi);
             for (int c = 0; c < 2; ++c)
             {

@@ -468,7 +468,9 @@ void RSynth::updateGlobal (const float* p, int n, const juce::AudioPlayHead::Pos
             global.lfo[l] = globalLfo[l].advance (shape, p[lfo1_rate + b] * dt);
         global.lfoPhase[l] = globalLfo[l].phase;
     }
-    if (global.playing) global.beat += global.bpm / 60.0 * dt;
+    // free-running clock when the host is stopped (standalone, stopped DAW): the trance gate and synced
+    // effects keep moving instead of freezing on one step; while playing the host position resets it each block
+    global.beat += global.bpm / 60.0 * dt;
 }
 
 // Peak of one mean-removed orbit cycle, so every surface shape plays at a similar level

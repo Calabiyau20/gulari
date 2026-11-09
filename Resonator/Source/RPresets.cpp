@@ -254,6 +254,9 @@ std::vector<FactoryPreset> make()
        .amp (0.002f, 0.4f, 0.7f, 0.12f).env (1, 0.001f, 0.25f, 0.0f, 0.2f).mod (MS_Env1, "osca_pos", 0.25f).mod (MS_Env1, "flt_cut", 0.35f);
       add (b); }
 
+    // ---- the generated bank (tools/gen_presets.py): 300 presets in 12 categories, loudness already matched ----
+   #include "RPresetsBank.inc"
+
     // loudness match: master trims measured with ResonatorRenderTest (loudest 400 ms at -15 dB RMS)
     static const std::map<juce::String, float> trims {
         { "Arp - Spin Network", 3.3f },

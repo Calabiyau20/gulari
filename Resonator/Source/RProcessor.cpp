@@ -37,6 +37,8 @@ void ResonatorProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     baseRate = sampleRate;
     maxBlock = juce::jmax (1, samplesPerBlock);
+    dcK = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 5.0f / (float) sampleRate);
+    dcZ[0] = dcZ[1] = 0.0f;
     for (int k = 0; k < 2; ++k)
     {
         os[k] = std::make_unique<juce::dsp::Oversampling<float>> (2, k + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
@@ -123,10 +125,13 @@ void ResonatorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     for (int ch = 0; ch < 2; ++ch)
     {
         auto* d = buffer.getWritePointer (ch);
+        auto& z = dcZ[ch];
         for (int i = 0; i < n; ++i)
         {
             float v = d[i] * gainRamp[(size_t) i];
             if (! std::isfinite (v)) v = 0.0f;
+            z += (v - z) * dcK;
+            v -= z;
             const float a = std::abs (v);
             if (a > 0.7f) v = std::copysign (0.7f + 0.3f * std::tanh ((a - 0.7f) / 0.3f), v);
             d[i] = v;
