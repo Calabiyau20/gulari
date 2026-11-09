@@ -597,6 +597,7 @@ void ResonatorEditor::paint (Graphics& g)
         g.setColour (cosmos::starlight.withAlpha (0.8f * (1.0f - ph)));
         g.fillEllipse (Rectangle<float> (3.0f, 3.0f).withCentre ({ iso.getCentreX() + std::cos (a) * rad, iso.getCentreY() + std::sin (a) * rad * 0.65f }));
     }
+    g.setOpacity (1.0f);   // drawImage uses the current colour's alpha
     g.drawImage (isologo, iso, RectanglePlacement::centred);
     g.setColour (cosmos::starlight);
     g.setFont (fonts::display (16.0f));
