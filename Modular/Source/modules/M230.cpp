@@ -44,7 +44,7 @@ void M230::tick (const float* in, float* out) noexcept
         else if (above[c] && e < 0.9f * t) above[c] = false;
         const bool p = sustained[c] ? above[c] : pulseLeft[c] > 0;
         if (pulseLeft[c] > 0) --pulseLeft[c];
-        out[Out_Env1 + c] = e;
+        out[Out_Env1 + c] = out[Out_EnvB1 + c] = e;
         out[Out_Pulse1 + c] = p ? 10.0f : 0.0f;
         leds[(size_t) (Led_Env1 + c)].store (e / 10.0f, std::memory_order_relaxed);
         leds[(size_t) (Led_Pulse1 + c)].store (p ? 1.0f : 0.0f, std::memory_order_relaxed);

@@ -10,7 +10,7 @@ int main (int argc, char** argv)
     const juce::File out (juce::String (argc > 1 ? argv[1] : "/tmp/wc_ui"));
     out.createDirectory();
     const auto names = WcProcessor::builtinPatchNames();
-    for (int k : { 14, 15, 99 })
+    for (int k : { 16, 17, 99 })
     {
         WcProcessor proc;
         proc.prepareToPlay (48000.0, 512);
@@ -25,7 +25,7 @@ int main (int argc, char** argv)
             proc.processBlock (buf, midi);
         }
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-        ed->setSize (1400, k == 99 ? 3000 : 1300);
+        ed->setSize (1400, k == 99 ? 3600 : 1300);
         for (int i = 0; i < 5; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, k == 99 ? 1.0f : 2.0f);
         if (k == 99)   // every panel on its own, at 2x (for the manual)

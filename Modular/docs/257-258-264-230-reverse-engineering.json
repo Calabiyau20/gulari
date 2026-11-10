@@ -47,5 +47,5 @@
       "cpp": "Modular/Source/modules/M230.cpp"
     }
   ],
-  "panel_note": "Paneles provisorios en el lenguaje visual de la serie 200t; se calcan de las fotos del 257t, 258t, 264t y 230t en cuanto esten disponibles."
+  "panel_note": "Paneles calcados de las fotos del 257t, 258t, 264t y 230t (0.7.0). 264: las salidas ART son la c.v. cuantizada a key / scale; common = entrada c.v. 1; entradas polyphonic propias (c.v. + pulso). 230: dos salidas c.v. por canal, decay hasta 5 s. 258: fine tune y dos salidas por oscilador."
 }

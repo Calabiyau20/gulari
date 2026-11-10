@@ -11,6 +11,7 @@ M258::M258 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
         procP[o] = apvts.getRawParameterValue (p + "proc" + n);
         fmP[o] = apvts.getRawParameterValue (p + "fm" + n);
         shapeP[o] = apvts.getRawParameterValue (p + "shape" + n);
+        fineP[o] = apvts.getRawParameterValue (p + "fine" + n);
         jassert (freqP[o] && procP[o] && fmP[o] && shapeP[o]);
     }
     voltP = apvts.getRawParameterValue (p + "volt1");
@@ -27,7 +28,7 @@ void M258::beginBlock (int)
 {
     for (int o = 0; o < 2; ++o)
     {
-        logHz[o] = std::log2 (knobHz (freqP[o]->load()));
+        logHz[o] = std::log2 (knobHz (freqP[o]->load())) + (fineP[o] != nullptr ? fineP[o]->load() / 12.0f : 0.0f);
         proc[o] = procP[o]->load(); fm[o] = fmP[o]->load(); shape[o] = shapeP[o]->load();
     }
     pitchDiv = voltP != nullptr && voltP->load() > 0.5f ? 1.0f : 1.2f;
@@ -57,7 +58,7 @@ void M258::tick (const float* in, float* out) noexcept
             other = 0.8f * sq;                                                                  // square, level matched
         }
         // equal-loudness-ish morph: the sine fades as the harmonics come in
-        out[o] = dc[o].process ((1.0f - s) * sine + s * other);
+        out[o] = out[o + 2] = dc[o].process ((1.0f - s) * sine + s * other);
     }
 }
 } // namespace wc

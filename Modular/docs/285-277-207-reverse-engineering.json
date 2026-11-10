@@ -1,0 +1,44 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 285 Frequency Shifter / Balanced Modulator, 277 Signal Delay Unit, 207 Mixer / Preamplifier",
+    "clone_name": "FS-285 / SD-277 / MX-207",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla y los numeros de modelo se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [ { "id": "S1", "title": "Fotos de los frentes 285t, 277t y 207t (enviadas por Martin)", "used_for": "disposicion, controles, rangos impresos" } ],
+  "stages": [
+    {
+      "stage_id": "285_01_shifter",
+      "name": "Frequency shifter (single sideband)",
+      "fidelity": "behavioral",
+      "description": "Red de fase de 90 grados (dos cadenas de 4 allpass, Niemitalo) sobre la senal; referencia en cuadratura (oscilador interno 0-1 kHz + control c.v. por atenuversor a 100 Hz/V, pasa por cero; F.M. desde mod.) o externa (ref. con INT apagado, por la misma red). SUM = banda lateral superior, DIFFERENCE = inferior. Medido: imagen -46 / -52 dB a 1 kHz.",
+      "equations": [ "sum = I cos(wt) + Q sin(wt)", "difference = I cos(wt) - Q sin(wt)", "f = 1000 k^2 + 100 * ctl * Vc + 1000 * fm * Vmod" ],
+      "cpp": "Modular/Source/modules/M285.cpp"
+    },
+    {
+      "stage_id": "285_02_balanced",
+      "name": "Balanced modulator",
+      "fidelity": "behavioral",
+      "equations": [ "ring = x * r", "variable = (1 - k) * x (1 + r) / 2 + k * x r,  k = amplitude + control * Vc / 10" ],
+      "cpp": "Modular/Source/modules/M285.cpp"
+    },
+    {
+      "stage_id": "277_01_delay",
+      "name": "Signal delay unit",
+      "fidelity": "behavioral",
+      "description": "Mezclador de entrada A/B/C (zero-max) con LED de overload y saturacion tanh; linea con tomas a 1/4, 1/2, 3/4 y t. t = .05-.20 s (original) o x4 (long). Control c.v. por atenuversor (+-2 octavas en 10 V) y modulation (audio). Cambios de tiempo suavizados (30 ms) y lectura cubica: barrer t dobla la altura como el original; pasabajos de linea 9 kHz / 4.5 kHz (long).",
+      "cpp": "Modular/Source/modules/M277.cpp"
+    },
+    {
+      "stage_id": "207_01_mixer",
+      "name": "Mixer / preamplifier",
+      "fidelity": "interpretation",
+      "description": "Seis entradas A-F con faders 0-10 (curva de audio), PROG: el nivel del canal sigue la c.v. de programa (jack izquierdo), MON: el canal va al bus monitor (jack derecho = nivel de monitor). Channel assignment: A izquierda, F derecha, B-E paneados por las cuatro perillas. Expansion in L / R, salidas L - R y monitor. Preamp: ganancia hasta 55 / 75 dB (switch) con limitador suave. La funcion exacta de los jacks banana del 207t es una interpretacion; se ajusta con el schematic.",
+      "cpp": "Modular/Source/modules/M207.cpp"
+    }
+  ],
+  "panel_note": "Paneles calcados de las fotos del 285t, 277t y 207t. En esta version tambien se calcaron 257t, 258t, 264t y 230t."
+}

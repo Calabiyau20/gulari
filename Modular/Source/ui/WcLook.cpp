@@ -99,6 +99,21 @@ void WcLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, fl
     }
 }
 
+// 207t fader: black slot, blue cap
+void WcLook::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle, juce::Slider&)
+{
+    const float cx = (float) x + (float) w * 0.5f;
+    g.setColour (juce::Colour (0xff111114));
+    g.fillRoundedRectangle (cx - 3.0f, (float) y, 6.0f, (float) h, 2.0f);
+    const juce::Rectangle<float> cap (cx - 11.0f, pos - 7.0f, 22.0f, 14.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.3f));
+    g.fillRoundedRectangle (cap.translated (1.0f, 2.0f), 4.0f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4f7be0), cap.getX(), cap.getY(), juce::Colour (0xff1f44a8), cap.getX(), cap.getBottom(), false));
+    g.fillRoundedRectangle (cap, 4.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
+    g.drawLine (cap.getX() + 3.0f, cap.getCentreY(), cap.getRight() - 3.0f, cap.getCentreY(), 1.0f);
+}
+
 void WcLook::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
 {
     g.fillAll (findColour (juce::PopupMenu::backgroundColourId));

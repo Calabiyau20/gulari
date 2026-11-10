@@ -254,6 +254,8 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                     b = std::make_unique<PushButton> (id == "start" ? &m->btnStart : (id == "stop" ? &m->btnStop : &m->btnSingle),
                                                       id == "start" ? "Start" : (id == "stop" ? "Stop" : "Single pulse"));
             }
+            else if (type == MT_264)
+                b = std::make_unique<PushButton> (nullptr, "press to auto tune / hold to initial tune (the plugin's oscillators never drift)");
             if (b == nullptr) continue;
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
@@ -281,6 +283,18 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             sw->setBounds ((int) c.x - 12, (int) c.y - h / 2, single ? 56 : 74, h);
             addAndMakeVisible (*sw);
             switches.push_back (std::move (sw));
+            continue;
+        }
+        if (c.style == CtrlStyle::Fader)
+        {
+            auto f = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::NoTextBox);
+            f->setBounds ((int) c.x - 13, (int) c.y - 60, 26, 120);
+            f->setPopupDisplayEnabled (true, true, nullptr);
+            f->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
+            f->setTooltip (param->getName (64));
+            addAndMakeVisible (*f);
+            attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, prefix + c.suffix, *f));
+            sliders.push_back (std::move (f));
             continue;
         }
         auto s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);

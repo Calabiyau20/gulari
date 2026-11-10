@@ -17,6 +17,9 @@
 #include "modules/M258.h"
 #include "modules/M264.h"
 #include "modules/M230.h"
+#include "modules/M285.h"
+#include "modules/M277.h"
+#include "modules/M207.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -504,7 +507,7 @@ int main (int argc, char** argv)
         float vals[4] {};
         for (int k = 0; k < 4; ++k)
         {
-            in[M264::In_Cv4] = (float) (k + 1);
+            in[M264::In_PolyCv] = (float) (k + 1);
             in[M264::In_Poly] = 10.0f; m.tick (in, out); in[M264::In_Poly] = 0.0f; m.tick (in, out);
         }
         for (int c = 0; c < 4; ++c) vals[c] = out[M264::Out_Cv1 + c];
@@ -529,6 +532,55 @@ int main (int argc, char** argv)
         }
         std::printf ("  0.5 amplitude bursts at 0 dB: envelope peak %.2f V (expected ~5), %d pulses in 2 s (expected 8)\n", peak, pulses);
         if (std::fabs (peak - 5.0f) > 0.3f || pulses != 8) ok = false;
+    }
+
+    {
+        std::printf ("264 ART QUANTIZER\n");
+        const float a = M264::quantize (0.33f, 2, 0), b = M264::quantize (0.33f, 0, 0), c = M264::quantize (0.61f, 2, 2);
+        std::printf ("  0.33 V -> major C %.1f V, minor C %.1f V; 0.61 V -> major D %.1f V\n", a, b, c);
+        if (std::fabs (a - 0.2f) > 1e-4f || std::fabs (b - 0.3f) > 1e-4f || std::fabs (c - 0.6f) > 1e-4f) ok = false;   // d# -> d (ties down) / d# / f#
+    }
+    {
+        std::printf ("285 FREQUENCY SHIFTER\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m285();
+        float in[24] {}, out[24] {};
+        setP (p, "fs_ref", std::sqrt (0.1f)); m.reset(); m.beginBlock (256);   // 100 Hz shift
+        const int N = (int) SR;
+        auto mag = [] (const std::vector<float>& x, double f) { double re = 0, im = 0; for (size_t i = 0; i < x.size(); ++i) { const double t = 6.283185307 * f * (double) i / SR; re += x[i] * std::cos (t); im += x[i] * std::sin (t); } return std::sqrt (re * re + im * im) / (double) x.size(); };
+        std::vector<float> su, di;
+        for (int i = 0; i < N; ++i) { in[M285::In_FsSignal] = 0.5f * std::sin (6.283185f * 1000.0f * i / (float) SR); m.tick (in, out); if (i > 2000) { su.push_back (out[M285::Out_Sum]); di.push_back (out[M285::Out_Diff]); } }
+        const double up = mag (su, 1100), upImg = mag (su, 900), dn = mag (di, 900), dnImg = mag (di, 1100);
+        const double rej1 = 20 * std::log10 (upImg / up), rej2 = 20 * std::log10 (dnImg / dn);
+        std::printf ("  1 kHz shifted by 100 Hz: sum at 1100 Hz (image %.1f dB), difference at 900 Hz (image %.1f dB)\n", rej1, rej2);
+        if (rej1 > -35.0 || rej2 > -35.0 || up < 0.2) ok = false;
+    }
+    {
+        std::printf ("277 SIGNAL DELAY\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m277();
+        float in[24] {}, out[24] {};
+        setP (p, "dl_time", 1.0f / 3.0f); setP (p, "dl_lvla", 1.0f); m.reset(); m.beginBlock (256);   // t = .10 s
+        int at[4] = { -1, -1, -1, -1 };
+        for (int i = 0; i < (int) SR / 2; ++i)
+        {
+            in[M277::In_A] = i == 100 ? 0.5f : 0.0f;
+            m.tick (in, out);
+            for (int k = 0; k < 4; ++k) if (at[k] < 0 && std::fabs (out[k]) > 0.02f) at[k] = i - 100;
+        }
+        std::printf ("  impulse taps at %.1f / %.1f / %.1f / %.1f ms (25 / 50 / 75 / 100)\n", at[0] * 1000.0 / SR, at[1] * 1000.0 / SR, at[2] * 1000.0 / SR, at[3] * 1000.0 / SR);
+        for (int k = 0; k < 4; ++k) if (std::fabs (at[k] * 1000.0 / SR - 25.0 * (k + 1)) > 1.0) ok = false;
+    }
+    {
+        std::printf ("207 MIXER\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m207();
+        float in[24] {}, out[24] {};
+        setP (p, "mx_lvl_a", 1.0f); setP (p, "mx_lvl_f", 1.0f); setP (p, "mx_lvl_c", 1.0f); setP (p, "mx_pan2", 0.5f); m.beginBlock (256);
+        in[M207::In_A] = 0.5f; in[M207::In_F] = 0.25f; in[M207::In_C] = 0.4f;
+        m.tick (in, out);
+        std::printf ("  A 0.5 -> L, F 0.25 -> R, C 0.4 centred: L %.3f, R %.3f\n", out[M207::Out_L], out[M207::Out_R]);
+        if (std::fabs (out[M207::Out_L] - (0.5f + 0.4f * 0.7071f)) > 1e-3f || std::fabs (out[M207::Out_R] - (0.25f + 0.4f * 0.7071f)) > 1e-3f) ok = false;
     }
 
     // ---- 3d. a 0.1.0 patch still loads (slot remap) ----

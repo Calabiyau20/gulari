@@ -141,10 +141,13 @@ void WcEditor::addModuleMenu()
     addType (kInst281, kMax281, "QF-281 Quad Function Generator");
     addType (kInst258, kMax258, "DO-258 Dual Oscillator");
     addType (kInst259, kMax259, "CW-259 Complex Waveform Generator");
+    addType (kInst285, kMax285, "FS-285 Frequency Shifter / Balanced Modulator");
+    addType (kInst277, kMax277, "SD-277 Signal Delay Unit");
     addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
+    addType (kInst207, kMax207, "MX-207 Mixer / Preamplifier");
     m.addSeparator();
     m.addSectionHeader ("Coming next");
-    for (auto* s : { "285 Frequency Shifter / Balanced Modulator", "277 Signal Delay", "207 Mixer / Preamp" })
+    for (auto* s : { "296 Spectral Processor", "248 MARF", "218 Keyboard" })
         m.addItem (998, s, false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {

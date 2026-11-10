@@ -11,6 +11,9 @@
 #include "modules/M258.h"
 #include "modules/M264.h"
 #include "modules/M230.h"
+#include "modules/M285.h"
+#include "modules/M277.h"
+#include "modules/M207.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -131,7 +134,8 @@ juce::StringArray WcProcessor::builtinPatchNames()
     return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison",
              "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)",
              "245 Sequence (LPG)", "242 Programmed Rhythm",
-             "258 Morphing Duo", "264 Poly Round Robin" };
+             "258 Morphing Duo", "264 Poly Round Robin",
+             "285 Shifted Bells", "277 Delay Taps (207 mix)" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -359,9 +363,9 @@ void WcProcessor::loadBuiltinPatch (int index)
             const juce::String o (prefix258 (0)), l (prefix292 (0));
             setParam ("pp_len", 8.0f); setParam ("pp_period", 0.47f);
             cables.push_back ({ kInst242, M242::Out_All, kInst266, M266::In_QPulse, nextColour (true) });
-            cables.push_back ({ kInst266, M266::Out_Qn1, kInst264, M264::In_Cv4, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Qn1, kInst264, M264::In_PolyCv, nextColour (true) });
             cables.push_back ({ kInst242, M242::Out_All, kInst264, M264::In_Poly, nextColour (true) });
-            setParam ("sh_common", 1.0f); setParam ("sh_voices", 3.0f); setParam ("ua_steps", 5.0f);
+            setParam ("sh_voices", 3.0f); setParam ("ua_steps", 5.0f);
             cables.push_back ({ kInst264, M264::Out_Cv1, O, M258::inOf (0, 0), nextColour (true) });
             cables.push_back ({ kInst264, M264::Out_Cv2, O, M258::inOf (1, 0), nextColour (true) });
             cables.push_back ({ kInst264, M264::Out_Cv3, A, M259::In_PoPitch, nextColour (true) });
@@ -382,6 +386,49 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam ("ef_sens1", 0.7f); setParam ("ef_decay1", 0.45f);
             for (int k = 1; k <= 3; ++k) setParam (l + "mode" + juce::String (k), 1.0f);
             setParam ("out_level", 0.6f);
+            break;
+        }
+        case 16:  // 285 Shifted Bells: a 259 bell through the frequency shifter; a slow 281 cycle sweeps the shift through zero,
+                  // sum and difference to left and right
+        {
+            voice (A); gateToOut();
+            present[(size_t) kInst285] = present[(size_t) kInst281] = true;
+            const juce::String f (prefix281 (0));
+            setParam (a + "mo_freq", hz (65.406f * 3.5f)); setParam (a + "idx", 0.35f); setParam (a + "mod_pitch", 1.0f); setParam (a + "timbre", 0.1f);
+            cables.push_back ({ A, M259::Out_Final1, kInst285, M285::In_FsSignal, nextColour (false) });
+            cables.push_back ({ kInst285, M285::Out_Sum, kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst285, M285::Out_Diff, kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.8f); setParam (f + "dec1", 0.8f);
+            cables.push_back ({ kInst281, M281::outFunc (0), kInst285, M285::In_FsControl, nextColour (true) });
+            setParam ("fs_ref", 0.08f); setParam ("fs_ctl", -0.25f);
+            setParam ("out_lag", 220.0f); setParam ("midi_trans", 1.0f); setParam ("out_level", 0.55f);
+            break;
+        }
+        case 17:  // 277 Delay Taps: the 245 sequence pings a 292; the 277 taps (1/4, 1/2, 3/4, t) come back through the 207,
+                  // panned across the stereo field, with the dry voice in the middle
+        {
+            present[(size_t) A] = present[(size_t) kInst245] = present[(size_t) kInst292] = present[(size_t) kInst277] = present[(size_t) kInst207] = true;
+            const juce::String l (prefix292 (0));
+            const float notes[5] = { 0, 7, 10, 12, 3 };
+            for (int k = 0; k < 5; ++k) setParam ("sv_a" + juce::String (k + 1), notes[k] * 0.01f);
+            setParam ("sv_time", 0.6f); setParam ("sv_len", 0.1f);
+            cables.push_back ({ kInst245, M245::Out_A, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_Pulse, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInst277, M277::In_A, nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInst207, M207::In_A + 2, nextColour (false) });
+            cables.push_back ({ kInst277, M277::Out_Q1, kInst207, M207::In_A + 0, nextColour (false) });
+            cables.push_back ({ kInst277, M277::Out_Q2, kInst207, M207::In_A + 1, nextColour (false) });
+            cables.push_back ({ kInst277, M277::Out_Q3, kInst207, M207::In_A + 4, nextColour (false) });
+            cables.push_back ({ kInst277, M277::Out_T, kInst207, M207::In_A + 5, nextColour (false) });
+            cables.push_back ({ kInst207, M207::Out_L, kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst207, M207::Out_R, kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam ("dl_time", 0.6f); setParam ("dl_long", 1.0f); setParam ("dl_lvla", 0.9f);
+            for (auto c : { "a", "b", "e", "f" }) setParam (juce::String ("mx_lvl_") + c, 0.62f);
+            setParam ("mx_lvl_c", 0.9f); setParam ("mx_lvl_d", 0.0f);
+            setParam ("mx_pan1", 0.25f); setParam ("mx_pan2", 0.5f); setParam ("mx_pan4", 0.75f);
+            setParam (a + "po_freq", hz (196.0f)); setParam (a + "timbre", 0.25f); setParam (a + "mo_freq", hz (392.0f)); setParam (a + "idx", 0.15f); setParam (a + "mod_pitch", 1.0f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
             break;
         }
     }

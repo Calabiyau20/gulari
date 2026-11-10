@@ -10,6 +10,8 @@
 #include "../modules/M257.h"
 #include "../modules/M264.h"
 #include "../modules/M230.h"
+#include "../modules/M277.h"
+#include "../modules/M207.h"
 
 namespace wc
 {
@@ -542,179 +544,345 @@ static ModuleSpec make242()
 
 
 // ---------------------------------------------------------------------------------------------
-// VP-257 Dual Voltage Processor (after the 257t): two sections, attenuverter K on Va, crossfader M between Vb and Vc
-// (+.5 adds 5 V to Vb), offset, Vout. Layout in panel units (height 430).
+// VP-257 Dual Voltage Processor - layout of the 257t front (photo, 760 x 1362 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make257()
 {
     using K = JackKind;
     ModuleSpec s;
     s.type = MT_257; s.name = "DUAL VOLTAGE PROCESSOR"; s.model = "VP-257"; s.after = "after Buchla 257t";
-    s.width = 300.0f; s.height = 430.0f;
-    const float y0[2] = { 28, 220 };
+    s.width = 760.0f; s.height = 1362.0f;
+    const float yo[2] = { 0, 600 };
+    const float jx[4] = { 100, 240, 380, 520 };
+    for (int n = 0; n < 2; ++n) for (int k = 0; k < 4; ++k) s.jacks.push_back (J ("", K::Banana, false, jx[k], yo[n] + 597));
+    for (int n = 0; n < 2; ++n) s.jacks.push_back (J ("", K::Banana, true, 655, yo[n] + 597));
     static const char* kk[2] = { "k1", "k2" }; static const char* mm[2] = { "m1", "m2" }; static const char* pp[2] = { "p51", "p52" }; static const char* oo[2] = { "off1", "off2" };
     for (int n = 0; n < 2; ++n)
     {
-        const float y = y0[n];
-        s.jacks.push_back (J ("Va", K::Banana, false, 32, y + 158));
-        s.jacks.push_back (J ("Vb", K::Banana, false, 88, y + 158));
-        s.jacks.push_back (J ("c.v.", K::Banana, false, 150, y + 158));
-        s.jacks.push_back (J ("Vc", K::Banana, false, 210, y + 158));
+        const float y = yo[n];
+        s.controls.push_back (C (kk[n], "", CtrlStyle::Knob, 120, y + 227, kSkirt, "*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (mm[n], "", CtrlStyle::Knob, 380, y + 227, kSkirt, "*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (oo[n], "", CtrlStyle::Knob, 635, y + 227, kSkirt, "*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (pp[n], "", CtrlStyle::Button, 170, y + 467));
+        s.texts.push_back (T ("-", 40, y + 125, 10.0f, 3)); s.texts.push_back (T ("+", 200, y + 125, 10.0f, 3));
+        s.lines.push_back (L (95, y + 118, 70, y + 118, 1.2f, false, true)); s.lines.push_back (L (145, y + 118, 170, y + 118, 1.2f, false, true));
+        s.texts.push_back (T ("-1", 55, y + 344, 10.0f, 1)); s.texts.push_back (T ("+1", 185, y + 344, 10.0f, 1));
+        s.texts.push_back (T (".5", 380, y + 82, 10.0f, 1)); s.texts.push_back (T ("0", 318, y + 344, 10.0f, 1)); s.texts.push_back (T ("1", 445, y + 344, 10.0f, 1));
+        s.texts.push_back (T (".5", 635, y + 82, 10.0f, 1)); s.texts.push_back (T ("0", 575, y + 344, 10.0f, 1)); s.texts.push_back (T ("1", 700, y + 344, 10.0f, 1));
+        s.lines.push_back (L (120, y + 290, 120, y + 378, 1.6f, false, true));
+        s.lines.push_back (L (380, y + 290, 330, y + 378, 1.6f, false, true)); s.lines.push_back (L (380, y + 290, 430, y + 378, 1.6f, false, true));
+        s.lines.push_back (L (635, y + 290, 635, y + 378, 1.6f, false, true));
+        s.texts.push_back (T ("Va K", 120, y + 412, 12.0f, 1)); s.texts.push_back (T ("+", 215, y + 412, 11.0f, 1));
+        s.texts.push_back (T ("Vb M", 325, y + 412, 12.0f, 1)); s.lines.push_back (L (343, y + 390, 368, y + 390, 1.4f));
+        s.texts.push_back (T ("+", 410, y + 412, 11.0f, 1)); s.texts.push_back (T ("M Vc", 480, y + 412, 12.0f, 1));
+        s.texts.push_back (T ("+", 560, y + 412, 11.0f, 1)); s.texts.push_back (T ("Voffset", 650, y + 412, 12.0f, 1));
+        s.texts.push_back (T ("= Vout", 660, y + 467, 12.0f, 1));
+        s.texts.push_back (T ("< +.5", 270, y + 467, 10.0f, 1));
+        s.lines.push_back (L (170, y + 500, 210, y + 575, 1.4f));
+        for (int k = 0; k < 4; ++k)
+            if (k == 2) { s.lines.push_back (L (380, y + 545, 345, y + 508, 1.4f, false, true)); s.lines.push_back (L (380, y + 545, 415, y + 508, 1.4f, false, true)); }
+            else s.lines.push_back (L (jx[k], y + 550, jx[k], y + 505, 1.4f, false, true));
+        s.leds.push_back (D (592, y + 512, M257::Led_1 + n));
     }
-    s.jacks.push_back (J ("Vout", K::Banana, true, 268, y0[0] + 158));
-    s.jacks.push_back (J ("Vout", K::Banana, true, 268, y0[1] + 158));
-    for (int n = 0; n < 2; ++n)
-    {
-        const float y = y0[n];
-        s.controls.push_back (C (kk[n], "", CtrlStyle::Knob, 52, y + 62, kSkirt, "-|*|*|*|0|*|*|*|+"));
-        s.controls.push_back (C (mm[n], "", CtrlStyle::Knob, 150, y + 62, kSkirt, "b|*|*|*|*|*|*|*|c"));
-        s.controls.push_back (C (oo[n], "", CtrlStyle::Knob, 248, y + 62, kSkirt, "0|*|*|*|5|*|*|*|10"));
-        s.controls.push_back (C (pp[n], "", CtrlStyle::Toggle, 88, y + 116, kSkirt));
-        s.texts.push_back (T ("K", 52, y + 108, 11.0f, 3));
-        s.texts.push_back (T ("M", 150, y + 108, 11.0f, 3));
-        s.texts.push_back (T ("offset", 248, y + 104, 9.5f));
-        s.texts.push_back (T ("+.5", 72, y + 120, 9.5f, 1, 2));
-        s.lines.push_back (L (32, y + 140, 52, y + 92, 1.2f));                    // Va -> K
-        s.lines.push_back (L (100, y + 150, 128, y + 92, 1.2f, true));             // Vb -> M
-        s.lines.push_back (L (198, y + 150, 172, y + 92, 1.2f, true));             // Vc -> M
-        s.lines.push_back (L (232, y + 158, 250, y + 158, 1.2f, false, true));     // -> out
-        s.leds.push_back (D (268, y + 128, M257::Led_1 + n, 0xff3a7ae8));
-        s.texts.push_back (T (n == 0 ? "1" : "2", 14, y + 16, 11.0f, 1, 1));
-    }
-    s.lines.push_back (L (4, 22, 296, 22)); s.lines.push_back (L (4, 214, 296, 214)); s.lines.push_back (L (4, 408, 296, 408));
-    s.texts.push_back (T ("DUAL VOLTAGE PROCESSOR  VP-257", 150, 12, 10.5f, 4));
-    s.texts.push_back (T ("Va K + Vb (1 - M) + Vc M + offset", 150, 38, 8.5f));
-    s.texts.push_back (T ("Va K + Vb (1 - M) + Vc M + offset", 150, 230, 8.5f));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 257t", 150, 420, 9.0f, 1));
+    s.lines.push_back (L (8, 79, 752, 79)); s.lines.push_back (L (8, 677, 752, 677)); s.lines.push_back (L (8, 1287, 752, 1287));
+    s.texts.push_back (T ("DUAL VOLTAGE PROCESSOR  VP-257", 380, 38, 10.5f, 4));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 257t", 380, 1325, 9.0f, 1));
+    scaleSpec (s, 430.0f / 1362.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// DO-258 Dual Oscillator (after the 258t): two columns, frequency 5 Hz - 20 kHz, waveshape (1: sine-saw, 2: sine-square),
-// processing attenuverter, f.m. depth; kbd / processing / f.m. / waveshape inputs, audio output.
+// DO-258 Dual Oscillator - layout of the 258t front (photo, flattened to 675 x 1090 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make258()
 {
     using K = JackKind;
     ModuleSpec s;
     s.type = MT_258; s.name = "DUAL OSCILLATOR"; s.model = "DO-258"; s.after = "after Buchla 258t";
-    s.width = 360.0f; s.height = 430.0f;
-    const float cx[2] = { 92, 268 };
+    s.width = 675.0f; s.height = 1090.0f;
+    const float yb[2] = { 60, 560 };
     for (int o = 0; o < 2; ++o)
     {
-        const float x = cx[o];
-        s.jacks.push_back (JT ("kbd", K::Banana, false, x - 63, 362, kTintGrey));
-        s.jacks.push_back (J ("proc.", K::Banana, false, x - 21, 362));
-        s.jacks.push_back (J ("f.m.", K::Mini, false, x + 21, 362));
-        s.jacks.push_back (J ("shape", K::Banana, false, x + 63, 362));
+        const float y = yb[o] + 70;
+        s.jacks.push_back (JT ("", K::Banana, false, 375, y, kTintGrey));   // kbd (1V/OCT)
+        s.jacks.push_back (J ("", K::Banana, false, 85, y));                // processing
+        s.jacks.push_back (J ("", K::Mini, false, 185, y));                 // f.m.
+        s.jacks.push_back (J ("", K::Banana, false, 280, y));               // waveshape c.v.
     }
-    s.jacks.push_back (J ("", K::Mini, true, cx[0], 50));
-    s.jacks.push_back (J ("", K::Mini, true, cx[1], 50));
+    s.jacks.push_back (J ("", K::Mini, true, 490, yb[0] + 70));
+    s.jacks.push_back (J ("", K::Mini, true, 490, yb[1] + 70));
+    s.jacks.push_back (J ("", K::Mini, true, 590, yb[0] + 70));
+    s.jacks.push_back (J ("", K::Mini, true, 590, yb[1] + 70));
     static const char* fr[2] = { "freq1", "freq2" }; static const char* sh[2] = { "shape1", "shape2" };
-    static const char* pr[2] = { "proc1", "proc2" }; static const char* fm[2] = { "fm1", "fm2" };
+    static const char* pr[2] = { "proc1", "proc2" }; static const char* fm[2] = { "fm1", "fm2" }; static const char* fi[2] = { "fine1", "fine2" };
     for (int o = 0; o < 2; ++o)
     {
-        const float x = cx[o];
-        s.controls.push_back (C (fr[o], "", CtrlStyle::BigKnob, x, 128, kSkirt, "5|20|80|320|1.3k|5k|20k"));
-        s.controls.push_back (C (sh[o], "", CtrlStyle::Knob, x, 226, kSkirt, "*|*|*|*|*|*|*|*|*"));
-        s.controls.push_back (C (pr[o], "", CtrlStyle::SmallKnob, x - 42, 298, kSkirt, "-|*|0|*|+"));
-        s.controls.push_back (C (fm[o], "", CtrlStyle::SmallKnob, x + 42, 298, kSkirt, "*|*|*|*|*"));
-        s.texts.push_back (T ("frequency (Hz)", x, 180, 9.0f));
-        s.texts.push_back (T ("processing", x - 42, 326, 8.5f)); s.texts.push_back (T ("f.m.", x + 42, 326, 8.5f));
-        s.texts.push_back (T ("waveshape", x, 266, 9.0f));
-        s.texts.push_back (T ("output", x + 36, 54, 9.0f, 0, 1));
-        s.texts.push_back (T (o == 0 ? "1" : "2", x - 50, 54, 12.0f, 3));
+        const float y = yb[o];
+        s.controls.push_back (C (fm[o], "", CtrlStyle::Knob, 185, y + 205, kSkirt));
+        s.controls.push_back (C (fi[o], "", CtrlStyle::Knob, 375, y + 215, kSkirt));
+        s.controls.push_back (C (pr[o], "", CtrlStyle::Knob, 85, y + 345, kSkirt));
+        s.controls.push_back (C (sh[o], "", CtrlStyle::Knob, 280, y + 365, kSkirt));
+        s.controls.push_back (C (fr[o], "", CtrlStyle::BigKnob, 552, y + 345, kSkirt, "5cps|*|*|*|*|*|20kc"));
+        s.texts.push_back (T ("INPUTS", 185, y + 25, 10.0f, 1)); s.texts.push_back (T ("1V/OCT", 375, y + 25, 10.0f, 1)); s.texts.push_back (T ("OUTPUTS", 540, y + 25, 10.0f, 1));
+        s.lines.push_back (L (512, y + 70, 568, y + 70, 1.4f));
+        s.lines.push_back (L (8, y + 120, 667, y + 120));
+        s.lines.push_back (L (85, y + 95, 85, y + 280, 1.4f)); s.lines.push_back (L (185, y + 95, 185, y + 140, 1.4f)); s.lines.push_back (L (280, y + 95, 280, y + 300, 1.4f));
+        s.texts.push_back (T ("FM", 245, y + 250, 10.0f, 1)); s.texts.push_back (T ("FINE", 440, y + 262, 10.0f, 1)); s.texts.push_back (T ("FREQ", 552, y + 205, 11.0f, 1));
+        s.texts.push_back (T ("+", 150, y + 410, 10.0f, 3));
+        s.lines.push_back (L (390, y + 285, 345, y + 395, 1.4f, false, true));
+        if (o == 0) iconSaw (s, 360, y + 420); else iconSqr (s, 360, y + 420);
+        s.lines.push_back (L (8, y + 470, 667, y + 470));
     }
-    iconSine (s, cx[0] - 36, 226); iconSaw (s, cx[0] + 38, 226);
-    iconSine (s, cx[1] - 36, 226); iconSqr (s, cx[1] + 38, 226);
-    s.controls.push_back (C ("volt1", "", CtrlStyle::Button, 180, 226));
-    s.texts.push_back (T ("1V/oct", 180, 250, 8.5f));
-    s.lines = { L (4, 22, 356, 22), L (180, 22, 180, 200), L (180, 262, 180, 408), L (4, 80, 356, 80), L (4, 338, 356, 338), L (4, 408, 356, 408) };
-    s.texts.push_back (T ("DUAL OSCILLATOR  DO-258", 180, 12, 10.5f, 4));
-    s.texts.push_back (T ("INPUTS", 180, 392, 9.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 258t", 180, 420, 9.0f, 1));
+    s.texts.push_back (T ("DUAL OSCILLATOR  DO-258", 337, 24, 10.5f, 4));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 258t", 337, 1062, 9.0f, 1));
+    scaleSpec (s, 430.0f / 1090.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// QS-264 Quad Sample & Hold / Polyphonic Adaptor (after the 264t): four channels with sample / track switches,
-// the polyphonic adaptor (poly input, number of voices, common c.v.), offset and modulation.
+// QS-264 Quad Sample & Hold / Polyphonic Adaptor - layout of the 264t front (photo, 835 x 1172 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make264()
 {
     using K = JackKind;
     ModuleSpec s;
-    s.type = MT_264; s.name = "QUAD SAMPLE & HOLD"; s.model = "QS-264"; s.after = "after Buchla 264t";
-    s.width = 420.0f; s.height = 430.0f;
-    const float cx[4] = { 48, 118, 188, 258 };
-    for (int c = 0; c < 4; ++c) s.jacks.push_back (JT ("", K::Banana, false, cx[c], 150, kTintOrange, true));   // pulse in
-    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, false, cx[c], 206));                       // c.v. in
-    s.jacks.push_back (JT ("poly in", K::Banana, false, 48, 360, kTintOrange, true));
-    s.jacks.push_back (J ("mod. in", K::Mini, false, 140, 360));
-    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c], 262, true));                  // pulse out
-    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c], 318));                        // c.v. out
+    s.type = MT_264; s.name = "QUAD SAMPLE AND HOLD"; s.model = "QS-264"; s.after = "after Buchla 264t";
+    s.width = 835.0f; s.height = 1172.0f;
+    const float cx[4] = { 100, 234, 372, 507 };
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (JT ("", K::Banana, false, cx[c], 709, kTintRed, true));   // pulse inputs (red on the 264t)
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, false, cx[c], 422));                    // c.v. inputs
+    s.jacks.push_back (J ("", K::Banana, false, 232, 1020));                                                 // polyphonic c.v.
+    s.jacks.push_back (JT ("", K::Banana, false, 505, 1020, kTintRed, true));                                // polyphonic pulse
+    s.jacks.push_back (J ("", K::Mini, false, 717, 1025));                                                   // modulation
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c], 846, true));              // pulse outputs
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (JT ("", K::Banana, true, cx[c], 287, kBlack));            // c.v. outputs (black)
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (JT ("", K::Banana, true, cx[c], 148, kBlack));            // ART outputs
     static const char* tr[4] = { "track1", "track2", "track3", "track4" };
-    const char* nums[4] = { "1", "2", "3", "4" };
     for (int c = 0; c < 4; ++c)
     {
-        s.controls.push_back (C (tr[c], "", CtrlStyle::Toggle, cx[c], 70, kSkirt));
-        s.texts.push_back (T (nums[c], cx[c], 40, 11.0f, 1));
-        s.leds.push_back (D (cx[c], 110, M264::Led_1 + c));
+        s.controls.push_back (C (tr[c], "", CtrlStyle::Toggle, cx[c], 556, kSkirt));
+        s.leds.push_back (D (cx[c] + 66, 900, M264::Led_1 + c));
+        if (c < 3) s.lines.push_back (L (cx[c] + 34, 422, cx[c + 1] - 34, 422, 1.4f));
     }
-    s.controls.push_back (C ("common", "", CtrlStyle::Toggle, 362, 70, kSkirt));
-    s.controls.push_back (C ("voices", "", CtrlStyle::Knob, 362, 160, kSkirt, "1|2|3|4"));
-    s.controls.push_back (C ("offset", "", CtrlStyle::Knob, 362, 252, kSkirt, "-2|*|0|*|+2"));
-    s.controls.push_back (C ("mod", "", CtrlStyle::Knob, 260, 362, kSkirt, "*|*|*|*|*"));
-    s.lines = { L (4, 22, 416, 22), L (296, 22, 296, 340), L (4, 340, 416, 340), L (4, 408, 416, 408), L (4, 236, 296, 236), L (4, 124, 296, 124) };
-    s.lines.push_back (L (162, 360, 228, 362, 1.2f, false, true));
-    s.texts.push_back (T ("track", 296 - 4, 60, 8.5f, 0, 2)); s.texts.push_back (T ("sample", 296 - 4, 82, 8.5f, 0, 2));
-    s.texts.push_back (T ("PULSE IN", 150, 176, 8.5f, 1)); s.texts.push_back (T ("C.V. IN", 150, 230, 8.5f, 1));
-    s.texts.push_back (T ("PULSE OUT", 150, 288, 8.5f, 1)); s.texts.push_back (T ("C.V. OUT", 150, 336, 8.5f, 1));
-    s.texts.push_back (T ("common", 362, 40, 9.0f)); s.texts.push_back (T ("on / off", 362, 100, 8.0f));
-    s.texts.push_back (T ("voices", 362, 200, 9.0f)); s.texts.push_back (T ("offset", 362, 292, 9.0f));
-    s.texts.push_back (T ("modulation", 260, 398, 8.5f)); s.texts.push_back (T ("POLYPHONIC ADAPTOR", 362, 330, 8.0f, 1));
-    s.texts.push_back (T ("QUAD SAMPLE & HOLD  QS-264", 210, 12, 10.5f, 4));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 264t", 210, 420, 9.0f, 1));
+    s.controls.push_back (C ("common", "", CtrlStyle::Toggle, 122, 1018, kWhite));
+    s.controls.push_back (C ("voices", "", CtrlStyle::SmallKnob, 370, 1030, kSkirt, "1|2|3|4"));
+    s.controls.push_back (C ("tune", "", CtrlStyle::Push, 717, 137));
+    s.controls.push_back (C ("scale", "", CtrlStyle::Knob, 717, 300, kSkirt, "m|ch|M"));
+    s.controls.push_back (C ("key", "", CtrlStyle::Knob, 717, 485, kSkirt, "c|c#|d|d#|e|f|f#|g|g#|a|a#|b"));
+    s.controls.push_back (C ("offset", "", CtrlStyle::Knob, 717, 668, kSkirt));
+    s.controls.push_back (C ("mod", "", CtrlStyle::Knob, 717, 855, kSkirt));
+    s.lines = { L (8, 70, 827, 70), L (8, 1110, 827, 1110), L (600, 70, 600, 1110), L (600, 207, 827, 207) };
+    for (float y : { 207.0f, 345.0f, 482.0f, 627.0f, 768.0f, 925.0f }) s.lines.push_back (L (8, y, 600, y));
+    s.lines.push_back (L (25, 440, 25, 1018, 1.4f)); s.lines.push_back (L (25, 440, 64, 422, 1.4f)); s.lines.push_back (L (25, 1018, 85, 1018, 1.4f));
+    s.lines.push_back (L (268, 1020, 330, 1020, 1.4f)); s.lines.push_back (L (410, 1020, 470, 1020, 1.4f));
+    s.lines.push_back (L (717, 910, 717, 995, 1.4f));
+    s.texts = {
+        T ("QUAD SAMPLE AND HOLD  QS-264", 417, 36, 10.5f, 4),
+        T ("ART OUTPUTS", 304, 92, 10.0f, 1), T ("CONTROL VOLTAGE OUTPUTS", 304, 230, 10.0f, 1), T ("CONTROL VOLTAGE INPUTS", 304, 366, 10.0f, 1),
+        T ("track and hold (tracks while pulse is high)", 304, 503, 8.5f), T ("sample and hold (samples on rising edge of pulse)", 304, 612, 8.5f),
+        T ("PULSE  INPUTS", 304, 652, 10.0f, 1), T ("PULSE  OUTPUTS", 304, 790, 10.0f, 1), T ("POLYPHONIC  INPUTS", 304, 950, 10.0f, 1),
+        T ("separate  common", 120, 1078, 8.5f), T ("NUMBER OF VOICES", 400, 1080, 8.5f, 1),
+        T ("press to auto tune", 717, 88, 8.5f), T ("hold to initial tune", 717, 190, 8.5f),
+        T ("OFFSET", 717, 600, 10.0f, 1), T ("-", 662, 740, 10.0f, 3), T ("+", 772, 740, 10.0f, 3),
+        T ("MODULATION", 717, 785, 9.5f, 1), T ("zero", 662, 935, 9.0f), T ("max", 772, 935, 9.0f),
+        T ("CALABI YAU  -  after Buchla 264t   POLYPHONIC ADAPTOR", 417, 1142, 9.0f, 1),
+    };
+    scaleSpec (s, 430.0f / 1172.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// EF-230 Triple Envelope Follower (after the 230t): three channels, audio in, sensitivity, decay, pulse threshold,
-// transient / sustained pulse mode, envelope (c.v.) and pulse outputs.
+// EF-230 Triple Envelope Follower - layout of the 230t front (photo, flattened to 600 x 1140 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make230()
 {
     using K = JackKind;
     ModuleSpec s;
     s.type = MT_230; s.name = "TRIPLE ENVELOPE FOLLOWER"; s.model = "EF-230"; s.after = "after Buchla 230t";
-    s.width = 330.0f; s.height = 430.0f;
-    const float cx[3] = { 58, 165, 272 };
-    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 60));
-    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] - 24, 368));
-    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] + 24, 368, true));
+    s.width = 600.0f; s.height = 1140.0f;
+    const float cx[3] = { 105, 300, 495 };
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 440));                   // signal inputs
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] - 45, 135));              // c.v. out (first of the pair)
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] - 30, 295, true));        // pulse out
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] + 45, 135));              // c.v. out (second)
     static const char* se[3] = { "sens1", "sens2", "sens3" }; static const char* de[3] = { "decay1", "decay2", "decay3" };
-    static const char* th[3] = { "thr1", "thr2", "thr3" }; static const char* mo[3] = { "mode1", "mode2", "mode3" };
-    const char* nums[3] = { "1", "2", "3" };
+    static const char* mo[3] = { "mode1", "mode2", "mode3" };
+    const char* abc[3] = { "A", "B", "C" };
     for (int c = 0; c < 3; ++c)
     {
         const float x = cx[c];
-        s.controls.push_back (C (se[c], "", CtrlStyle::Knob, x, 132, kSkirt, "*|*|*|*|*|*|*|*|*"));
-        s.controls.push_back (C (de[c], "", CtrlStyle::Knob, x, 214, kSkirt, ".01|.1|1|3"));
-        s.controls.push_back (C (th[c], "", CtrlStyle::SmallKnob, x - 22, 290, kSkirt));
-        s.controls.push_back (C (mo[c], "", CtrlStyle::Toggle, x + 26, 290, 0xffd8261f));
-        s.texts.push_back (T (nums[c], x - 34, 64, 11.0f, 3));
-        s.texts.push_back (T ("sensitivity", x, 172, 8.5f)); s.texts.push_back (T ("decay", x, 254, 8.5f));
-        s.texts.push_back (T ("thresh.", x - 22, 318, 7.5f));
-        s.texts.push_back (T ("sust.", x + 26, 266, 7.5f)); s.texts.push_back (T ("trans.", x + 26, 316, 7.5f));
-        s.texts.push_back (T ("c.v.", x - 24, 392, 8.5f)); s.texts.push_back (T ("pulse", x + 24, 392, 8.5f));
-        s.leds.push_back (D (x - 24, 340, M230::Led_Env1 + c, 0xff3a7ae8));
-        s.leds.push_back (D (x + 24, 340, M230::Led_Pulse1 + c));
-        s.lines.push_back (L (x, 78, x, 100, 1.2f, false, true));
+        s.controls.push_back (C (mo[c], "", CtrlStyle::Toggle, x, 590, 0xffd8261f));
+        s.controls.push_back (C (de[c], "", CtrlStyle::Knob, x, 778, kSkirt, "*|*|*|*|*|5"));
+        s.controls.push_back (C (se[c], "", CtrlStyle::Knob, x, 985, kSkirt, "*|*|*|*|*|max"));
+        s.lines.push_back (L (x - 20, 135, x + 20, 135, 1.4f));
+        s.texts.push_back (T (abc[c], x, 190, 10.0f, 1));
+        s.lines.push_back (L (x, 295, x + 30, 295, 1.4f));
+        s.leds.push_back (D (x + 45, 295, M230::Led_Pulse1 + c));
     }
-    s.lines.push_back (L (4, 22, 326, 22)); s.lines.push_back (L (4, 408, 326, 408));
-    s.lines.push_back (L (111, 22, 111, 408)); s.lines.push_back (L (219, 22, 219, 408));
-    s.texts.push_back (T ("TRIPLE ENVELOPE FOLLOWER  EF-230", 165, 12, 10.5f, 4));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 230t", 165, 420, 9.0f, 1));
+    for (float y : { 52.0f, 215.0f, 355.0f, 500.0f, 660.0f, 870.0f, 1080.0f }) s.lines.push_back (L (8, y, 592, y));
+    s.lines.push_back (L (120, 548, 60, 548, 1.2f, false, true)); s.lines.push_back (L (480, 548, 540, 548, 1.2f, false, true));
+    s.texts.push_back (T ("TRIPLE ENVELOPE FOLLOWER  EF-230", 300, 26, 10.5f, 4));
+    s.texts.push_back (T ("CONTROL VOLTAGE OUTPUTS", 300, 80, 10.0f, 1));
+    s.texts.push_back (T ("PULSE OUTPUTS", 300, 240, 10.0f, 1));
+    s.texts.push_back (T ("SIGNAL INPUTS", 300, 382, 10.0f, 1));
+    s.texts.push_back (T ("PULSE RESPONSE", 300, 528, 10.0f, 1));
+    s.texts.push_back (T ("sustained", 100, 530, 9.0f)); s.texts.push_back (T ("transient", 500, 528, 9.0f));
+    s.texts.push_back (T ("DECAY TIME", 300, 686, 10.0f, 1));
+    s.texts.push_back (T ("SENSITIVITY", 300, 892, 10.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 230t", 300, 1108, 9.0f, 1));
+    scaleSpec (s, 430.0f / 1140.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// FS-285 Frequency Shifter / Balanced Modulator - layout of the 285t front (photo, flattened to 740 x 1030 px)
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make285()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_285; s.name = "FREQUENCY SHIFTER"; s.model = "FS-285"; s.after = "after Buchla 285t";
+    s.width = 740.0f; s.height = 1030.0f;
+    s.jacks = {
+        J ("", K::Banana, false, 110, 272), J ("", K::Mini, false, 240, 272), J ("", K::Mini, false, 505, 272), J ("", K::Mini, false, 640, 272),
+        J ("", K::Banana, false, 110, 742), J ("", K::Mini, false, 505, 742), J ("", K::Mini, false, 640, 742),
+        J ("", K::Mini, true, 75, 140), J ("", K::Mini, true, 165, 140), J ("", K::Mini, true, 575, 140), J ("", K::Mini, true, 665, 140),
+        J ("", K::Mini, true, 75, 610), J ("", K::Mini, true, 165, 610), J ("", K::Mini, true, 575, 610), J ("", K::Mini, true, 665, 610),
+    };
+    s.controls = {
+        C ("ctl", "", CtrlStyle::Knob, 110, 425, kSkirt),
+        C ("int", "", CtrlStyle::Toggle, 240, 385, kSkirt),
+        C ("ref", "", CtrlStyle::Knob, 385, 425, kSkirt, "0|*|*|*|*|1kc"),
+        C ("fm", "", CtrlStyle::Knob, 640, 425, kSkirt, "0|*|*|*|*|max"),
+        C ("bmctl", "", CtrlStyle::Knob, 110, 895, kSkirt),
+        C ("amp", "", CtrlStyle::Knob, 640, 895, kSkirt, "*|*|*|*|*|ring"),
+    };
+    for (float y : { 62.0f, 190.0f, 322.0f, 492.0f, 532.0f, 662.0f, 792.0f, 985.0f }) s.lines.push_back (L (8, y, 732, y));
+    s.lines.push_back (L (100, 140, 140, 140, 1.4f)); s.lines.push_back (L (600, 140, 640, 140, 1.4f));
+    s.lines.push_back (L (100, 610, 140, 610, 1.4f)); s.lines.push_back (L (600, 610, 640, 610, 1.4f));
+    s.lines.push_back (L (110, 296, 110, 370, 1.4f)); s.lines.push_back (L (240, 296, 240, 355, 1.4f)); s.lines.push_back (L (640, 296, 640, 370, 1.4f));
+    s.lines.push_back (L (110, 766, 110, 840, 1.4f));
+    s.texts = {
+        T ("FREQUENCY SHIFTER  FS-285", 370, 30, 10.5f, 4),
+        T ("difference", 120, 92, 10.0f), T ("OUT", 370, 145, 10.0f, 1), T ("sum", 620, 92, 10.0f),
+        T ("control", 110, 222, 9.5f), T ("ref.", 240, 222, 9.5f), T ("IN", 370, 278, 10.0f, 1), T ("signal", 505, 222, 9.5f), T ("mod.", 640, 222, 9.5f),
+        T ("INT.", 285, 348, 10.0f, 1), T ("REFERENCE", 420, 348, 10.0f, 1), T ("F.M.", 640, 348, 10.0f, 1),
+        T ("-", 50, 478, 9.0f, 3), T ("+", 170, 478, 9.0f, 3),
+        T ("BALANCED MODULATOR", 370, 514, 9.5f, 1),
+        T ("ring", 120, 562, 10.0f), T ("OUT", 370, 615, 10.0f, 1), T ("variable", 620, 562, 10.0f),
+        T ("control", 110, 692, 9.5f), T ("IN", 370, 748, 10.0f, 1), T ("signal", 505, 692, 9.5f), T ("ref.", 640, 692, 9.5f),
+        T ("MODULATION", 370, 818, 10.0f, 1), T ("amplitude", 640, 818, 9.5f), T ("+", 170, 948, 9.0f, 3),
+        T ("CALABI YAU  -  after Buchla 285t", 370, 1008, 9.0f, 1),
+    };
+    scaleSpec (s, 430.0f / 1030.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// SD-277 Signal Delay Unit - layout of the 277t front (photo, 787 x 1247 px)
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make277()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_277; s.name = "SIGNAL DELAY UNIT"; s.model = "SD-277"; s.after = "after Buchla 277t";
+    s.width = 787.0f; s.height = 1247.0f;
+    s.jacks = {
+        J ("", K::Mini, false, 100, 320), J ("", K::Mini, false, 294, 320), J ("", K::Mini, false, 490, 320),
+        J ("", K::Banana, false, 92, 742), J ("", K::Mini, false, 92, 1067),
+        J ("", K::Mini, true, 100, 160), J ("", K::Mini, true, 294, 160), J ("", K::Mini, true, 490, 160), J ("", K::Mini, true, 682, 160),
+    };
+    s.controls = {
+        C ("lvla", "", CtrlStyle::Knob, 132, 504, kSkirt, "*|*|*|*|*|*|*"),
+        C ("lvlb", "", CtrlStyle::Knob, 387, 504, kSkirt, "*|*|*|*|*|*|*"),
+        C ("lvlc", "", CtrlStyle::Knob, 637, 504, kSkirt, "*|*|*|*|*|*|*"),
+        C ("long", "", CtrlStyle::Button, 717, 737),
+        C ("ctl", "", CtrlStyle::Knob, 277, 777, kSkirt),
+        C ("mod", "", CtrlStyle::Knob, 272, 992, kSkirt, "*|*|*|*|*|*|*"),
+        C ("time", "", CtrlStyle::BigKnob, 572, 962, kSkirt, ".05|*|*|.10|*|*|.15|*|*|.20"),
+    };
+    s.leds = { D (684, 320, M277::Led_Overload) };
+    for (float y : { 77.0f, 227.0f, 380.0f, 622.0f, 1167.0f }) s.lines.push_back (L (8, y, 779, y));
+    s.lines.push_back (L (100, 344, 132, 450, 1.4f)); s.lines.push_back (L (318, 320, 387, 450, 1.4f)); s.lines.push_back (L (514, 320, 637, 450, 1.4f));
+    s.lines.push_back (L (92, 712, 92, 662, 1.4f)); s.lines.push_back (L (92, 662, 277, 662, 1.4f)); s.lines.push_back (L (277, 662, 277, 720, 1.4f));
+    s.lines.push_back (L (240, 690, 315, 690, 1.2f, false, true)); s.lines.push_back (L (315, 690, 240, 690, 1.2f, false, true));
+    s.lines.push_back (L (92, 1092, 150, 1125, 1.4f)); s.lines.push_back (L (150, 1125, 250, 1045, 1.4f));
+    s.texts = {
+        T ("SIGNAL DELAY UNIT  SD-277", 393, 38, 10.5f, 4),
+        T ("DELAYED  SIGNALS  OUT", 393, 100, 10.0f, 1),
+        T ("1/4 t", 187, 165, 10.5f, 1), T ("1/2 t", 390, 165, 10.5f, 1), T ("3/4 t", 582, 165, 10.5f, 1), T ("t", 760, 165, 11.0f, 1),
+        T ("SIGNAL  INPUTS", 294, 252, 10.0f, 1), T ("overload", 690, 252, 9.5f),
+        T ("A", 32, 325, 11.0f, 1), T ("B", 222, 325, 11.0f, 1), T ("C", 418, 325, 11.0f, 1),
+        T ("INPUT   MIXER", 392, 402, 10.0f, 1), T ("zero", 67, 600, 9.0f), T ("max", 217, 600, 9.0f),
+        T ("DELAY TIME", 575, 650, 11.0f, 1), T ("(t in seconds)", 575, 682, 9.0f),
+        T ("long", 722, 685, 9.5f), T ("original", 722, 795, 9.5f),
+        T ("control", 92, 808, 9.0f), T ("input", 92, 838, 9.0f), T ("-", 215, 840, 9.0f, 3), T ("+", 342, 840, 9.0f, 3),
+        T ("modu-", 92, 965, 9.0f), T ("lation", 92, 995, 9.0f),
+        T ("CALABI YAU  -  after Buchla 277t", 393, 1205, 9.0f, 1),
+    };
+    scaleSpec (s, 430.0f / 1247.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// MX-207 Mixer / Preamplifier - layout of the 207t front (photo, flattened to 825 x 905 px)
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make207()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_207; s.name = "MIXER / PREAMPLIFIER"; s.model = "MX-207"; s.after = "after Buchla 207t";
+    s.width = 825.0f; s.height = 905.0f;
+    const float cx[6] = { 40, 135, 230, 350, 455, 560 };
+    s.jacks.push_back (J ("", K::Banana, false, 34, 165));      // program c.v.
+    s.jacks.push_back (J ("", K::Banana, false, 552, 140));     // monitor c.v.
+    for (int c = 0; c < 6; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 768));
+    s.jacks.push_back (J ("", K::Mini, false, 655, 428)); s.jacks.push_back (J ("", K::Mini, false, 775, 428));   // expansion in
+    s.jacks.push_back (J ("", K::Mini, false, 778, 765));                                                          // preamp input
+    s.jacks.push_back (J ("", K::Mini, true, 655, 125)); s.jacks.push_back (J ("", K::Mini, true, 775, 125));     // L - R
+    s.jacks.push_back (J ("", K::Mini, true, 655, 300)); s.jacks.push_back (J ("", K::Mini, true, 775, 300));     // monitor
+    s.jacks.push_back (J ("", K::Mini, true, 655, 775));                                                           // preamp output
+    static const char* lv[6] = { "lvl_a", "lvl_b", "lvl_c", "lvl_d", "lvl_e", "lvl_f" };
+    static const char* pg[6] = { "prog_a", "prog_b", "prog_c", "prog_d", "prog_e", "prog_f" };
+    static const char* mn[6] = { "mon_a", "mon_b", "mon_c", "mon_d", "mon_e", "mon_f" };
+    static const char* pn[4] = { "pan1", "pan2", "pan3", "pan4" };
+    const float px[4] = { 112, 222, 332, 442 };
+    for (int k = 0; k < 4; ++k) s.controls.push_back (C (pn[k], "", CtrlStyle::SmallKnob, px[k], 160, kSkirt));
+    const char* abc[6] = { "A", "B", "C", "D", "E", "F" };
+    for (int c = 0; c < 6; ++c)
+    {
+        s.controls.push_back (C (lv[c], "", CtrlStyle::Fader, cx[c], 382));
+        s.controls.push_back (C (pg[c], "", CtrlStyle::Toggle, cx[c], 568, kSkirt));
+        s.controls.push_back (C (mn[c], "", CtrlStyle::Toggle, cx[c], 672, 0xffe8c22a));
+        s.texts.push_back (T (abc[c], cx[c] - 30, 742, 9.5f, 1));
+    }
+    s.controls.push_back (C ("gain", "", CtrlStyle::Knob, 752, 588, kSkirt, "*|*|*|*|*|*"));
+    s.controls.push_back (C ("range", "", CtrlStyle::Toggle, 645, 640, kSkirt));
+    s.leds = { D (20, 222, M207::Led_ProgA), D (62, 222, M207::Led_ProgB), D (540, 190, M207::Led_MonA), D (595, 190, M207::Led_MonB) };
+    const char* marks[6] = { "10", "8", "6", "4", "2", "0" };
+    for (int i = 0; i < 6; ++i)
+    {
+        const float y = 270.0f + (float) i * 46.0f;
+        s.texts.push_back (T (marks[i], 290, y + 4, 9.0f, 1));
+        s.lines.push_back (L (52, y, 272, y, 0.8f)); s.lines.push_back (L (308, y, 548, y, 0.8f));
+    }
+    s.lines.push_back (L (10, 245, 50, 245, 1.2f, false, true)); s.lines.push_back (L (600, 212, 560, 212, 1.2f, false, true));
+    for (float y : { 40.0f, 240.0f, 530.0f, 625.0f, 728.0f, 830.0f }) s.lines.push_back (L (8, y, 615, y));
+    s.lines.push_back (L (615, 20, 615, 885)); s.lines.push_back (L (615, 40, 817, 40));
+    for (float y : { 225.0f, 355.0f, 485.0f, 830.0f }) s.lines.push_back (L (615, y, 817, y));
+    s.lines.push_back (L (680, 125, 750, 125, 1.4f)); s.lines.push_back (L (680, 300, 750, 300, 1.4f));
+    s.texts.push_back (T ("MIXER / PREAMPLIFIER  MX-207", 412, 20, 10.5f, 4));
+    s.texts.push_back (T ("CHANNEL  ASSIGNMENT", 290, 225, 9.5f, 1));
+    s.texts.push_back (T ("LEVEL  ADJUSTMENTS", 290, 518, 9.5f, 1));
+    s.texts.push_back (T ("PROG", 292, 550, 9.0f, 1)); s.texts.push_back (T ("MON", 292, 655, 9.0f, 1));
+    s.texts.push_back (T ("INPUTS", 292, 815, 9.5f, 1));
+    s.texts.push_back (T ("L - R", 715, 128, 10.0f, 1)); s.texts.push_back (T ("SIGNAL OUTPUTS", 715, 205, 9.5f, 1));
+    s.texts.push_back (T ("monitor", 715, 255, 9.5f)); s.texts.push_back (T ("EXPANSION IN", 715, 378, 9.5f, 1));
+    s.texts.push_back (T ("PREAMP", 715, 508, 10.0f, 1)); s.texts.push_back (T ("GAIN", 655, 575, 9.0f, 1));
+    s.texts.push_back (T ("75", 690, 628, 8.5f, 1, 1)); s.texts.push_back (T ("55", 690, 655, 8.5f, 1, 1));
+    s.texts.push_back (T ("INPUT", 760, 700, 9.5f, 1)); s.texts.push_back (T ("OUTPUT", 657, 728, 9.5f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 207t", 412, 862, 9.0f, 1));
+    scaleSpec (s, 430.0f / 905.0f);
     return s;
 }
 
@@ -777,7 +945,7 @@ static ModuleSpec makeOutput()
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230(), make285(), make207(), make277() };
     return specs[t];
 }
 } // namespace wc

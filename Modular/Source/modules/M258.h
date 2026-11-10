@@ -11,7 +11,7 @@ class M258 : public Module
 {
 public:
     enum In { In_Kbd1, In_Proc1, In_Fm1, In_Shape1, In_Kbd2, In_Proc2, In_Fm2, In_Shape2, In_Count };
-    enum Out { Out_1, Out_2, Out_Count };
+    enum Out { Out_1, Out_2, Out_1b, Out_2b, Out_Count };   // two (multiple) outputs per oscillator
     static int inOf (int osc, int k) { return osc * 4 + k; }    // k: 0 kbd, 1 processing, 2 f.m., 3 waveshape c.v.
 
     M258 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
@@ -23,7 +23,7 @@ public:
     static float knobHz (float k) { return 5.0f * std::pow (4000.0f, k); }   // 5 Hz .. 20 kHz
 
 private:
-    std::atomic<float>* freqP[2] {}; std::atomic<float>* procP[2] {}; std::atomic<float>* fmP[2] {}; std::atomic<float>* shapeP[2] {};
+    std::atomic<float>* freqP[2] {}; std::atomic<float>* procP[2] {}; std::atomic<float>* fmP[2] {}; std::atomic<float>* shapeP[2] {}; std::atomic<float>* fineP[2] {};
     std::atomic<float>* voltP = nullptr;
     float fs = 48000.0f;
     float logHz[2] {}, proc[2] {}, fm[2] {}, shape[2] {};
