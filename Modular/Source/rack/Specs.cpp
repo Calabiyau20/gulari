@@ -12,6 +12,8 @@
 #include "../modules/M230.h"
 #include "../modules/M277.h"
 #include "../modules/M207.h"
+#include "../modules/M296.h"
+#include "../modules/M248.h"
 
 namespace wc
 {
@@ -825,64 +827,315 @@ static ModuleSpec make277()
 }
 
 // ---------------------------------------------------------------------------------------------
-// MX-207 Mixer / Preamplifier - layout of the 207t front (photo, flattened to 825 x 905 px)
+// MX-207 Mixer / Preamplifier - layout of the 207t front (photo, 888 x 793 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make207()
 {
     using K = JackKind;
     ModuleSpec s;
     s.type = MT_207; s.name = "MIXER / PREAMPLIFIER"; s.model = "MX-207"; s.after = "after Buchla 207t";
-    s.width = 825.0f; s.height = 905.0f;
-    const float cx[6] = { 40, 135, 230, 350, 455, 560 };
-    s.jacks.push_back (J ("", K::Banana, false, 34, 165));      // program c.v.
-    s.jacks.push_back (J ("", K::Banana, false, 552, 140));     // monitor c.v.
-    for (int c = 0; c < 6; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 768));
-    s.jacks.push_back (J ("", K::Mini, false, 655, 428)); s.jacks.push_back (J ("", K::Mini, false, 775, 428));   // expansion in
-    s.jacks.push_back (J ("", K::Mini, false, 778, 765));                                                          // preamp input
-    s.jacks.push_back (J ("", K::Mini, true, 655, 125)); s.jacks.push_back (J ("", K::Mini, true, 775, 125));     // L - R
-    s.jacks.push_back (J ("", K::Mini, true, 655, 300)); s.jacks.push_back (J ("", K::Mini, true, 775, 300));     // monitor
-    s.jacks.push_back (J ("", K::Mini, true, 655, 775));                                                           // preamp output
+    s.width = 888.0f; s.height = 793.0f;
+    const float cx[6] = { 56, 168, 278, 410, 519, 632 };
+    s.jacks.push_back (J ("", K::Banana, false, 58, 101));      // A assignment c.v.
+    s.jacks.push_back (J ("", K::Banana, false, 633, 101));     // F assignment c.v.
+    for (int c = 0; c < 6; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 695));
+    s.jacks.push_back (J ("", K::Mini, false, 726, 378)); s.jacks.push_back (J ("", K::Mini, false, 846, 378));   // expansion in
+    s.jacks.push_back (J ("", K::Mini, false, 831, 671));                                                          // preamp input
+    s.jacks.push_back (J ("", K::Mini, true, 726, 101)); s.jacks.push_back (J ("", K::Mini, true, 846, 101));     // L - R
+    s.jacks.push_back (J ("", K::Mini, true, 726, 257)); s.jacks.push_back (J ("", K::Mini, true, 846, 257));     // monitor
+    s.jacks.push_back (J ("", K::Mini, true, 725, 695));                                                           // preamp output
     static const char* lv[6] = { "lvl_a", "lvl_b", "lvl_c", "lvl_d", "lvl_e", "lvl_f" };
     static const char* pg[6] = { "prog_a", "prog_b", "prog_c", "prog_d", "prog_e", "prog_f" };
     static const char* mn[6] = { "mon_a", "mon_b", "mon_c", "mon_d", "mon_e", "mon_f" };
     static const char* pn[4] = { "pan1", "pan2", "pan3", "pan4" };
-    const float px[4] = { 112, 222, 332, 442 };
-    for (int k = 0; k < 4; ++k) s.controls.push_back (C (pn[k], "", CtrlStyle::SmallKnob, px[k], 160, kSkirt));
+    const float px[4] = { 156, 281, 406, 531 };
+    for (int k = 0; k < 4; ++k) s.controls.push_back (C (pn[k], "", CtrlStyle::Knob, px[k], 101, kSkirt));
     const char* abc[6] = { "A", "B", "C", "D", "E", "F" };
+    const float lx[6] = { 20, 132, 245, 369, 481, 593 };
     for (int c = 0; c < 6; ++c)
     {
-        s.controls.push_back (C (lv[c], "", CtrlStyle::Fader, cx[c], 382));
-        s.controls.push_back (C (pg[c], "", CtrlStyle::Toggle, cx[c], 568, kSkirt));
-        s.controls.push_back (C (mn[c], "", CtrlStyle::Toggle, cx[c], 672, 0xffe8c22a));
-        s.texts.push_back (T (abc[c], cx[c] - 30, 742, 9.5f, 1));
+        s.controls.push_back (C (lv[c], "", CtrlStyle::Fader, cx[c], 315));
+        s.controls.push_back (C (pg[c], "", CtrlStyle::Toggle, cx[c], 496, kSkirt));
+        s.controls.push_back (C (mn[c], "", CtrlStyle::Toggle, cx[c], 595, 0xffe8c22a));
+        s.texts.push_back (T (abc[c], lx[c], 668, 10.0f, 1));
     }
-    s.controls.push_back (C ("gain", "", CtrlStyle::Knob, 752, 588, kSkirt, "*|*|*|*|*|*"));
-    s.controls.push_back (C ("range", "", CtrlStyle::Toggle, 645, 640, kSkirt));
-    s.leds = { D (20, 222, M207::Led_ProgA), D (62, 222, M207::Led_ProgB), D (540, 190, M207::Led_MonA), D (595, 190, M207::Led_MonB) };
+    s.controls.push_back (C ("gain", "", CtrlStyle::Knob, 831, 518, kSkirt, "*|*|*|*|*|*"));
+    s.controls.push_back (C ("range", "", CtrlStyle::Toggle, 726, 553, kSkirt));
+    s.leds = { D (33, 151, M207::Led_AL), D (83, 151, M207::Led_AR), D (608, 151, M207::Led_FL), D (658, 151, M207::Led_FR) };
     const char* marks[6] = { "10", "8", "6", "4", "2", "0" };
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 11; ++i)
     {
-        const float y = 270.0f + (float) i * 46.0f;
-        s.texts.push_back (T (marks[i], 290, y + 4, 9.0f, 1));
-        s.lines.push_back (L (52, y, 272, y, 0.8f)); s.lines.push_back (L (308, y, 548, y, 0.8f));
+        const float y = 218.0f + (float) i * 19.5f;
+        s.lines.push_back (L (66, y, 318, y, 0.8f)); s.lines.push_back (L (372, y, 642, y, 0.8f));
     }
-    s.lines.push_back (L (10, 245, 50, 245, 1.2f, false, true)); s.lines.push_back (L (600, 212, 560, 212, 1.2f, false, true));
-    for (float y : { 40.0f, 240.0f, 530.0f, 625.0f, 728.0f, 830.0f }) s.lines.push_back (L (8, y, 615, y));
-    s.lines.push_back (L (615, 20, 615, 885)); s.lines.push_back (L (615, 40, 817, 40));
-    for (float y : { 225.0f, 355.0f, 485.0f, 830.0f }) s.lines.push_back (L (615, y, 817, y));
-    s.lines.push_back (L (680, 125, 750, 125, 1.4f)); s.lines.push_back (L (680, 300, 750, 300, 1.4f));
-    s.texts.push_back (T ("MIXER / PREAMPLIFIER  MX-207", 412, 20, 10.5f, 4));
-    s.texts.push_back (T ("CHANNEL  ASSIGNMENT", 290, 225, 9.5f, 1));
-    s.texts.push_back (T ("LEVEL  ADJUSTMENTS", 290, 518, 9.5f, 1));
-    s.texts.push_back (T ("PROG", 292, 550, 9.0f, 1)); s.texts.push_back (T ("MON", 292, 655, 9.0f, 1));
-    s.texts.push_back (T ("INPUTS", 292, 815, 9.5f, 1));
-    s.texts.push_back (T ("L - R", 715, 128, 10.0f, 1)); s.texts.push_back (T ("SIGNAL OUTPUTS", 715, 205, 9.5f, 1));
-    s.texts.push_back (T ("monitor", 715, 255, 9.5f)); s.texts.push_back (T ("EXPANSION IN", 715, 378, 9.5f, 1));
-    s.texts.push_back (T ("PREAMP", 715, 508, 10.0f, 1)); s.texts.push_back (T ("GAIN", 655, 575, 9.0f, 1));
-    s.texts.push_back (T ("75", 690, 628, 8.5f, 1, 1)); s.texts.push_back (T ("55", 690, 655, 8.5f, 1, 1));
-    s.texts.push_back (T ("INPUT", 760, 700, 9.5f, 1)); s.texts.push_back (T ("OUTPUT", 657, 728, 9.5f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 207t", 412, 862, 9.0f, 1));
-    scaleSpec (s, 430.0f / 905.0f);
+    for (int i = 0; i < 6; ++i) s.texts.push_back (T (marks[i], 344, 223.0f + (float) i * 39.0f, 9.5f, 1));
+    s.lines.push_back (L (18, 171, 93, 171, 1.2f, false, true)); s.lines.push_back (L (668, 171, 596, 171, 1.2f, false, true));
+    for (float y : { 45.0f, 186.0f, 461.0f, 555.0f, 646.0f, 748.0f }) s.lines.push_back (L (4, y, 683, y));
+    s.lines.push_back (L (683, 4, 683, 789));
+    for (float y : { 45.0f, 186.0f, 305.0f, 425.0f, 748.0f }) s.lines.push_back (L (683, y, 884, y));
+    s.lines.push_back (L (750, 257, 822, 257, 1.4f));
+    s.lines.push_back (L (750, 518, 800, 518, 1.2f));
+    s.texts.push_back (T ("MIXER/PREAMPLIFIER  MX-207", 343, 22, 10.5f, 4));
+    s.texts.push_back (T ("CHANNEL   ASSIGNMENT", 343, 171, 9.5f, 1));
+    s.texts.push_back (T ("LEVEL   ADJUSTMENTS", 343, 449, 9.5f, 1));
+    s.texts.push_back (T ("PROG", 344, 500, 9.0f, 1)); s.texts.push_back (T ("MON", 344, 599, 9.0f, 1));
+    s.texts.push_back (T ("INPUTS", 344, 737, 9.0f, 1));
+    s.texts.push_back (T ("L - R", 786, 105, 10.0f, 1)); s.texts.push_back (T ("SIGNAL OUTPUTS", 784, 172, 9.0f, 1));
+    s.texts.push_back (T ("monitor", 784, 216, 9.5f)); s.texts.push_back (T ("EXPANSION IN", 784, 328, 9.0f, 1));
+    s.texts.push_back (T ("PREAMP", 784, 448, 9.5f, 1)); s.texts.push_back (T ("GAIN", 725, 510, 9.0f, 1));
+    s.texts.push_back (T ("70", 752, 540, 9.0f, 1, 1)); s.texts.push_back (T ("55", 752, 570, 9.0f, 1, 1));
+    s.texts.push_back (T ("INPUT", 831, 610, 9.0f, 1)); s.texts.push_back (T ("OUTPUT", 725, 649, 9.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 207t", 343, 772, 9.0f, 1));
+    scaleSpec (s, 430.0f / 793.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// PS-296 Programmable Spectral Processor - layout of the 296 front (buchla.com photo, 853 x 707 px)
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make296()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_296; s.name = "PROGRAMMABLE SPECTRAL PROCESSOR"; s.model = "PS-296"; s.after = "after Buchla 296";
+    s.width = 853.0f; s.height = 707.0f;
+    auto bx = [] (int b) { return 30.0f + 53.0f * (float) b; };
+    static const char* hex[16] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F" };
+    static const char* hz[16] = { "<100", "150", "250", "350", "500", "630", "800", "1k", "1.3k", "1.6k", "2k", "2.6k", "3.5k", "5k", "8k", ">10k" };
+    static const char* att[16] = { "att0", "att1", "att2", "att3", "att4", "att5", "att6", "att7", "att8", "att9", "att10", "att11", "att12", "att13", "att14", "att15" };
+    // inputs: 16 local program inputs, even / all / odd signal, frequency and width c.v.
+    for (int b = 0; b < 16; ++b) s.jacks.push_back (J ("", K::Banana, false, bx (b), 652));
+    s.jacks.push_back (J ("", K::Mini, false, 422, 550)); s.jacks.push_back (J ("", K::Mini, false, 477, 550)); s.jacks.push_back (J ("", K::Mini, false, 532, 550));
+    s.jacks.push_back (J ("", K::Banana, false, 222, 567)); s.jacks.push_back (J ("", K::Banana, false, 276, 567));
+    // outputs: 16 envelope followers (blue / violet), 16 attenuated channels, comb even / odd, attenuator e / a / o, programmed e / a / o
+    for (int b = 0; b < 16; ++b) s.jacks.push_back (JT ("", K::Banana, true, bx (b), 147, (b & 1) ? kTintPurple : 0xff3fb6e0));
+    for (int b = 0; b < 16; ++b) s.jacks.push_back (J ("", K::Mini, true, bx (b), 209));
+    s.jacks.push_back (J ("", K::Mini, true, 265, 57)); s.jacks.push_back (J ("", K::Mini, true, 320, 57));
+    s.jacks.push_back (J ("", K::Mini, true, 447, 57)); s.jacks.push_back (J ("", K::Mini, true, 503, 57)); s.jacks.push_back (J ("", K::Mini, true, 559, 57));
+    s.jacks.push_back (J ("", K::Mini, true, 705, 57)); s.jacks.push_back (J ("", K::Mini, true, 762, 57)); s.jacks.push_back (J ("", K::Mini, true, 817, 57));
+    for (int b = 0; b < 16; ++b)
+    {
+        auto c = C (att[b], "", CtrlStyle::Fader, bx (b), 377);
+        c.scale2 = "128";
+        s.controls.push_back (c);
+        if (b >= 5) s.texts.push_back (T (hex[b], bx (b), 116, 9.0f, 1));
+        s.texts.push_back (T (hz[b], bx (b), 254, 9.0f, 1));
+        if (b < 6 || b > 9) s.texts.push_back (T (hex[b], bx (b), 614, 9.0f, 1));
+        s.leds.push_back (D (bx (b) + 16, 488, M296::Led_Band0 + b, 0xff3ad05a));
+        if (b < 15) for (int k = 0; k < 11; ++k) s.lines.push_back (L (bx (b) + 6, 284.0f + 18.5f * (float) k, bx (b + 1) - 6, 284.0f + 18.5f * (float) k, 0.7f));
+    }
+    s.controls.push_back (C ("decay", "", CtrlStyle::Switch3, 100, 64, kSkirt));
+    s.controls.push_back (C ("freq", "", CtrlStyle::SmallKnob, 50, 552, kSkirt, "*|*|*|*|*|*|*"));
+    s.controls.push_back (C ("fcv", "", CtrlStyle::SmallKnob, 145, 552, kSkirt));
+    s.controls.push_back (C ("width", "", CtrlStyle::SmallKnob, 348, 552, kSkirt));
+    s.controls.push_back (C ("pre_even", "", CtrlStyle::SmallKnob, 613, 552, kSkirt));
+    s.controls.push_back (C ("pre_odd", "", CtrlStyle::SmallKnob, 817, 552, kSkirt));
+    s.controls.push_back (C ("tr_even", "", CtrlStyle::Toggle, 683, 562, kSkirt));
+    s.controls.push_back (C ("tr_odd", "", CtrlStyle::Toggle, 740, 562, kSkirt));
+    s.leds.push_back (D (449, 572, M296::Led_Even)); s.leds.push_back (D (506, 572, M296::Led_Odd));
+    const char* db[6] = { "+6", "0db", "-6", "-12", "-18", "-oo" };
+    const float dy[6] = { 294, 329, 361, 392, 422, 455 };
+    for (int i = 0; i < 6; ++i) s.texts.push_back (T (db[i], 427, dy[i], 9.0f, 1));
+    for (float y : { 22.0f, 100.0f, 238.0f, 492.0f, 602.0f, 677.0f }) s.lines.push_back (L (4, y, 849, y));
+    for (float x : { 170.0f, 350.0f, 587.0f }) s.lines.push_back (L (x, 22, x, 100));
+    for (float x : { 390.0f, 565.0f }) s.lines.push_back (L (x, 492, x, 602));
+    s.lines.push_back (L (222, 590, 276, 590, 1.2f)); s.lines.push_back (L (160, 535, 330, 535, 1.2f));
+    s.lines.push_back (L (680, 528, 655, 528, 1.2f, false, true)); s.lines.push_back (L (740, 538, 765, 538, 1.2f, false, true));
+    s.texts.push_back (T ("PROGRAMMABLE  SPECTRAL  PROCESSOR  MODEL PS-296", 425, 12, 9.5f, 4));
+    s.texts.push_back (T ("ENVELOPE", 38, 46, 9.0f, 1, 1)); s.texts.push_back (T ("DECAY", 38, 64, 9.0f, 1, 1)); s.texts.push_back (T ("TIME", 38, 82, 9.0f, 1, 1));
+    s.texts.push_back (T ("short", 120, 48, 8.5f, 0, 1)); s.texts.push_back (T ("combo", 120, 64, 8.5f, 0, 1)); s.texts.push_back (T ("long", 120, 80, 8.5f, 0, 1));
+    s.texts.push_back (T ("COMB", 180, 46, 9.0f, 1, 1)); s.texts.push_back (T ("FILTER", 180, 64, 9.0f, 1, 1)); s.texts.push_back (T ("OUTPUTS", 180, 82, 9.0f, 1, 1));
+    s.texts.push_back (T ("even", 265, 90, 8.5f)); s.texts.push_back (T ("odd", 320, 90, 8.5f));
+    s.texts.push_back (T ("ATTEN-", 360, 46, 9.0f, 1, 1)); s.texts.push_back (T ("UATOR", 360, 64, 9.0f, 1, 1)); s.texts.push_back (T ("OUTPUTS", 360, 82, 9.0f, 1, 1));
+    s.texts.push_back (T ("even", 447, 90, 8.5f)); s.texts.push_back (T ("all", 503, 90, 8.5f)); s.texts.push_back (T ("odd", 559, 90, 8.5f));
+    s.texts.push_back (T ("PRO-", 598, 46, 9.0f, 1, 1)); s.texts.push_back (T ("GRAMMED", 598, 64, 9.0f, 1, 1)); s.texts.push_back (T ("OUTPUTS", 598, 82, 9.0f, 1, 1));
+    s.texts.push_back (T ("even", 705, 90, 8.5f)); s.texts.push_back (T ("all", 762, 90, 8.5f)); s.texts.push_back (T ("odd", 817, 90, 8.5f));
+    s.texts.push_back (T ("ENVELOPE  FOLLOWER  OUTPUTS", 130, 116, 9.0f, 1));
+    s.texts.push_back (T ("630", 18, 512, 8.0f)); s.texts.push_back (T ("2k", 85, 512, 8.0f)); s.texts.push_back (T ("100", 18, 590, 8.0f)); s.texts.push_back (T ("10k", 85, 590, 8.0f));
+    s.texts.push_back (T ("-", 118, 512, 8.0f, 3)); s.texts.push_back (T ("+", 172, 512, 8.0f, 3));
+    s.texts.push_back (T ("PROGRAM CONTROL", 268, 510, 9.0f, 1)); s.texts.push_back (T ("frequency", 210, 532, 8.5f)); s.texts.push_back (T ("width", 290, 532, 8.5f));
+    s.texts.push_back (T ("max", 365, 590, 8.0f));
+    s.texts.push_back (T ("SIGNAL   INPUTS", 477, 510, 9.0f, 1));
+    s.texts.push_back (T ("even", 422, 590, 8.5f)); s.texts.push_back (T ("all", 477, 590, 8.5f)); s.texts.push_back (T ("odd", 532, 590, 8.5f));
+    s.texts.push_back (T ("PROGRAMMED SPECTRUM TRANSFER", 708, 510, 9.0f, 1));
+    s.texts.push_back (T ("even", 712, 528, 8.0f)); s.texts.push_back (T ("odd", 712, 540, 8.0f));
+    s.texts.push_back (T ("even pre-emph.", 625, 590, 8.0f)); s.texts.push_back (T ("odd pre-emph.", 800, 590, 8.0f));
+    s.texts.push_back (T ("LOCAL  PROGRAM  INPUTS", 450, 614, 9.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 296", 425, 692, 9.0f, 1));
+    scaleSpec (s, 430.0f / 707.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// MF-248 Multiple Arbitrary Function Generator (MARF) - layout of the 248t front, joined from two photos
+// (left part 0..905 px as photographed; the slider part scaled x1.113 and placed from x 873), 1830 x 648 px
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make248()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_248; s.name = "MULTIPLE ARBITRARY FUNCTION GENERATOR"; s.model = "MF-248"; s.after = "after Buchla 248t";
+    s.width = 1830.0f; s.height = 648.0f;
+    auto X = [] (float x) { return 873.0f + (x - 45.0f) * 1.113f; };      // slider photo -> panel
+    auto Y = [] (float y) { return (y - 803.0f) * 1.113f; };
+    constexpr juce::uint32 kRedLed = 0xffe8241c, kYel = 0xffffd23a, kGrn = 0xff3ad05a;
+    // ---- inputs: external A..D, then per FG: mult c.v., stop, start, strobe, address c.v. ----
+    s.jacks.push_back (J ("", K::Banana, false, 873, 443)); s.jacks.push_back (J ("", K::Banana, false, 873, 338));
+    s.jacks.push_back (J ("", K::Banana, false, 873, 243)); s.jacks.push_back (J ("", K::Banana, false, 873, 146));
+    for (int f = 0; f < 2; ++f)
+    {
+        const float dx = 264.0f * (float) f;
+        s.jacks.push_back (J ("", K::Banana, false, 90 + dx, 206));
+        s.jacks.push_back (JT ("", K::Banana, false, 88 + dx, 443, kTintRed, true));
+        s.jacks.push_back (JT ("", K::Banana, false, 88 + dx, 571, kTintRed, true));
+        s.jacks.push_back (JT ("", K::Banana, false, 175 + dx, 571, kTintRed, true));
+        s.jacks.push_back (J ("", K::Banana, false, 250 + dx, 571));
+    }
+    // ---- outputs per FG: ART, ref, time, voltage, all, pulse 1, pulse 2 ----
+    for (int f = 0; f < 2; ++f)
+    {
+        const float dx = 264.0f * (float) f;
+        s.jacks.push_back (JT ("", K::Banana, true, 45 + dx, 146, kBlack));
+        s.jacks.push_back (JT ("", K::Banana, true, 102 + dx, 83, kTintPurple));
+        s.jacks.push_back (J ("", K::Banana, true, 170 + dx, 83));
+        s.jacks.push_back (J ("", K::Banana, true, 235 + dx, 83));
+        s.jacks.push_back (J ("", K::Banana, true, 130 + dx, 146, true));
+        s.jacks.push_back (J ("", K::Banana, true, 188 + dx, 146, true));
+        s.jacks.push_back (J ("", K::Banana, true, 255 + dx, 146, true));
+    }
+    // ---- function generator controls ----
+    static const char* art[2] = { "art1", "art2" }; static const char* mcv[2] = { "mcv1", "mcv2" }; static const char* mult[2] = { "mult1", "mult2" };
+    static const char* adv[2] = { "adv1", "adv2" }; static const char* sta[2] = { "start1", "start2" }; static const char* rst[2] = { "reset1", "reset2" };
+    static const char* dsp[2] = { "disp1", "disp2" }; static const char* adr[2] = { "addr1", "addr2" }; static const char* cnt[2] = { "cont1", "cont2" }; static const char* ext[2] = { "ext1", "ext2" };
+    for (int f = 0; f < 2; ++f)
+    {
+        const float dx = 264.0f * (float) f;
+        s.controls.push_back (C (art[f], "1|2|all", CtrlStyle::Switch3, 30 + dx, 83, kWhite));
+        s.controls.push_back (C (mcv[f], "", CtrlStyle::SmallKnob, 90 + dx, 288, kSkirt));
+        s.controls.push_back (C (mult[f], "", CtrlStyle::BigKnob, 213 + dx, 258, kSkirt, ".5|*|1|*|2|*|4"));
+        s.controls.push_back (C (adv[f], "", CtrlStyle::Push, 55 + dx, 378));
+        s.controls.push_back (C (sta[f], "", CtrlStyle::Push, 88 + dx, 508));
+        s.controls.push_back (C (rst[f], "", CtrlStyle::Push, 175 + dx, 363));
+        s.controls.push_back (C (dsp[f], "", CtrlStyle::Push, 255 + dx, 363));
+        s.controls.push_back (C (adr[f], "", CtrlStyle::Knob, 213 + dx, 435, kSkirt, "*|*|*|*|*|*|*|*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (cnt[f], "", CtrlStyle::Toggle, 175 + dx, 508, kSkirt));
+        s.controls.push_back (C (ext[f], "", CtrlStyle::Toggle, 250 + dx, 508, kSkirt));
+        s.leds.push_back (D (278 + dx, 71, 100 + f * 10 + 3, kRedLed));
+        s.leds.push_back (D (278 + dx, 96, 100 + f * 10 + 4, kRedLed));
+        s.leds.push_back (D (123 + dx, 356, 100 + f * 10 + 2, kRedLed));
+        s.leds.push_back (D (123 + dx, 383, 100 + f * 10 + 1, kYel));
+        s.leds.push_back (D (123 + dx, 408, 100 + f * 10 + 0, kGrn));
+        s.leds.push_back (D (213 + dx, 356, 100 + f * 10 + 5, kRedLed));
+        s.texts.push_back (T ("PROGRAMMED  OUTPUTS", 165 + dx, 50, 9.0f, 1));
+        s.texts.push_back (T ("ART", 38 + dx, 116, 8.0f, 1)); s.texts.push_back (T ("ref.", 102 + dx, 112, 8.0f)); s.texts.push_back (T ("time", 170 + dx, 112, 8.0f));
+        s.texts.push_back (T ("voltage", 235 + dx, 112, 8.0f)); s.texts.push_back (T ("all", 130 + dx, 175, 8.0f)); s.texts.push_back (T ("1", 188 + dx, 175, 8.0f)); s.texts.push_back (T ("2", 255 + dx, 175, 8.0f));
+        s.texts.push_back (T ("TIME MULTIPLIER", 215 + dx, 190, 8.5f, 1));
+        s.texts.push_back (T ("-", 55 + dx, 250, 8.0f, 3)); s.texts.push_back (T ("+", 125 + dx, 250, 8.0f, 3));
+        s.texts.push_back (T ("MODE", 88 + dx, 338, 8.5f, 1)); s.texts.push_back (T ("advance", 57 + dx, 405, 8.0f));
+        s.texts.push_back (T ("stop", 88 + dx, 478, 8.0f)); s.texts.push_back (T ("start", 88 + dx, 535, 8.0f));
+        s.texts.push_back (T ("STAGE ADDRESS", 213 + dx, 338, 8.5f, 1)); s.texts.push_back (T ("reset", 175 + dx, 388, 8.0f)); s.texts.push_back (T ("display", 255 + dx, 388, 8.0f));
+        s.texts.push_back (T ("cont.", 175 + dx, 478, 8.0f)); s.texts.push_back (T ("strobe", 175 + dx, 538, 8.0f));
+        s.texts.push_back (T ("int.", 250 + dx, 478, 8.0f)); s.texts.push_back (T ("ext.", 250 + dx, 538, 8.0f));
+        s.lines.push_back (L (10 + dx, 175, 285 + dx, 175)); s.lines.push_back (L (10 + dx, 328, 285 + dx, 328));
+        s.lines.push_back (L (143 + dx, 328, 143 + dx, 640));
+    }
+    for (float x : { 287.0f, 552.0f, 835.0f }) s.lines.push_back (L (x, 30, x, 640));
+    // ---- programming section: LEDs (edit stage) and levers ----
+    auto prog = [&] (const char* fn, const char* lab, float x, float y, juce::uint32 tip = 0) { auto c = C (fn, lab, CtrlStyle::Prog, x, y); c.colour = tip; s.controls.push_back (c); };
+    auto pled = [&] (int fnI, int v, float x, float y) { s.leds.push_back (D (x, y, 200 + fnI * 8 + v, kRedLed)); };
+    pled (M248::F_P1, 0, 575, 83); pled (M248::F_P2, 0, 633, 83);
+    prog ("p1", "", 575, 118); prog ("p2", "", 633, 118);
+    prog ("clear", "", 715, 88, 0xfff2f2ee);
+    prog ("stage", "", 800, 88, 0xff2a2b30);
+    const float px[5] = { 577, 633, 688, 743, 797 };
+    pled (M248::F_Quant, 0, px[0], 163); pled (M248::F_Slope, 0, px[1], 163); pled (M248::F_Range, 0, px[2], 163); pled (M248::F_Range, 1, px[3], 163); pled (M248::F_VExt, 0, px[4], 163);
+    prog ("quant", "", px[0], 215); prog ("slope", "", px[1], 215); prog ("range", "=0", px[2], 215); prog ("range", "=1", px[3], 215); prog ("vext", "", px[4], 215);
+    static const char* lim[5] = { "=2", "=3", "=4", "=5", "=6" };
+    for (int i = 0; i < 5; ++i) { pled (M248::F_Range, 2 + i, px[i], 275); prog ("range", lim[i], px[i], 335); }
+    pled (M248::F_Stop, 0, px[0], 398); pled (M248::F_Sust, 0, px[1], 398); pled (M248::F_Enable, 0, px[2], 398); pled (M248::F_First, 0, px[3], 398); pled (M248::F_Last, 0, px[4], 398);
+    prog ("stop", "", px[0], 448); prog ("sust", "", px[1], 448, 0xffe8c22a); prog ("enable", "", px[2], 448, 0xffe8c22a); prog ("first", "", px[3], 448); prog ("last", "", px[4], 448);
+    static const char* tr[4] = { "=0", "=1", "=2", "=3" };
+    for (int i = 0; i < 4; ++i) { pled (M248::F_TRange, i, px[i], 518); prog ("trange", tr[i], px[i], 570); }
+    pled (M248::F_TExt, 0, px[4], 518); prog ("text", "", px[4], 570);
+    s.texts.push_back (T ("OUTPUT  PULSES", 605, 50, 8.5f, 1)); s.texts.push_back (T ("1", 590, 120, 8.0f)); s.texts.push_back (T ("2", 648, 120, 8.0f));
+    s.texts.push_back (T ("CLEAR", 715, 50, 8.5f, 1)); s.texts.push_back (T ("STAGE  NO", 800, 50, 8.5f, 1));
+    s.texts.push_back (T ("<", 776, 90, 9.0f, 1)); s.texts.push_back (T (">", 824, 90, 9.0f, 1));
+    s.texts.push_back (T ("OUTPUT VOLTAGE", 612, 143, 8.5f, 1)); s.texts.push_back (T ("- Range -", 715, 143, 8.0f)); s.texts.push_back (T ("- Source -", 797, 143, 8.0f));
+    const char* l1[5] = { "quantize", "sloped", "full", "half", "external" };
+    const char* l2[5] = { "cont.", "stepped", "", "", "internal" };
+    const char* l3[5] = { "+0", "+2", "+4", "+6", "+8" };
+    const char* l4[5] = { "stop", "sust.", "enable", "first", "last" };
+    const char* l5[5] = { ".03", ".3", "3", "30", "external" };
+    const char* l6[5] = { ".002", ".02", ".2", "2", "internal" };
+    for (int i = 0; i < 5; ++i)
+    {
+        s.texts.push_back (T (l1[i], px[i], 184, 7.5f)); s.texts.push_back (T (l2[i], px[i], 246, 7.5f));
+        s.texts.push_back (T (l3[i], px[i], 296, 7.5f)); s.texts.push_back (T (l4[i], px[i], 419, 7.5f));
+        s.texts.push_back (T (l5[i], px[i], 540, 7.5f)); s.texts.push_back (T (l6[i], px[i], 600, 7.5f));
+    }
+    s.texts.push_back (T ("limited", 715, 246, 7.5f));
+    s.texts.push_back (T ("OPERATING MODE", 618, 372, 8.5f, 1)); s.texts.push_back (T ("- Cycle -", 770, 372, 8.0f));
+    s.texts.push_back (T ("(if start pulse high)", 660, 476, 7.5f)); s.texts.push_back (T ("stage", px[3], 476, 7.5f)); s.texts.push_back (T ("stage", px[4], 476, 7.5f));
+    s.texts.push_back (T ("TIME RANGE (seconds)", 625, 498, 8.5f, 1)); s.texts.push_back (T ("- Source -", 797, 498, 8.0f));
+    for (float y : { 133.0f, 357.0f, 488.0f }) s.lines.push_back (L (552, y, 835, y));
+    s.lines.push_back (L (668, 30, 668, 133)); s.lines.push_back (L (760, 30, 760, 133));
+    // ---- external inputs, load / save ----
+    s.texts.push_back (T ("EXTERNAL", 873, 46, 8.5f, 1)); s.texts.push_back (T ("INPUTS", 873, 60, 8.5f, 1));
+    s.texts.push_back (T ("D", 873, 105, 8.5f)); s.texts.push_back (T ("C", 873, 202, 8.5f)); s.texts.push_back (T ("B", 873, 300, 8.5f)); s.texts.push_back (T ("A", 873, 402, 8.5f));
+    s.controls.push_back (C ("load", "", CtrlStyle::Push, 888, 518)); s.controls.push_back (C ("save", "", CtrlStyle::Push, 888, 572));
+    s.leds.push_back (D (852, 518, 320, kRedLed)); s.leds.push_back (D (852, 572, 321, kRedLed));
+    s.texts.push_back (T ("load", 852, 545, 7.5f)); s.texts.push_back (T ("save", 852, 600, 7.5f));
+    s.lines.push_back (L (835, 488, 912, 488)); s.lines.push_back (L (912, 30, 912, 640));
+    // ---- sliders ----
+    static const char* lv[16] = { "lvl1", "lvl2", "lvl3", "lvl4", "lvl5", "lvl6", "lvl7", "lvl8", "lvl9", "lvl10", "lvl11", "lvl12", "lvl13", "lvl14", "lvl15", "lvl16" };
+    static const char* tm[16] = { "tim1", "tim2", "tim3", "tim4", "tim5", "tim6", "tim7", "tim8", "tim9", "tim10", "tim11", "tim12", "tim13", "tim14", "tim15", "tim16" };
+    static const char* num[16] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" };
+    const float sx[16] = { 112, 162, 212, 262, 311, 361, 410, 460, 510, 560, 610, 660, 709, 759, 809, 858 };
+    for (int i = 0; i < 16; ++i)
+    {
+        auto a = C (lv[i], "", CtrlStyle::Fader, X (sx[i]), Y (950)); a.scale2 = "118"; s.controls.push_back (a);
+        auto b = C (tm[i], "", CtrlStyle::Fader, X (sx[i]), Y (1180)); b.scale2 = "118"; s.controls.push_back (b);
+        s.texts.push_back (T (num[i], X (sx[i]), Y (1048), 8.0f));
+        s.leds.push_back (D (X (sx[i]), Y (1066), i, kRedLed));
+        if (i < 15)
+            for (int k = 0; k < 9; ++k)
+            {
+                s.lines.push_back (L (X (sx[i]) + 7, Y (875 + 18.5f * (float) k), X (sx[i + 1]) - 7, Y (875 + 18.5f * (float) k), 0.7f));
+                s.lines.push_back (L (X (sx[i]) + 7, Y (1105 + 18.5f * (float) k), X (sx[i + 1]) - 7, Y (1105 + 18.5f * (float) k), 0.7f));
+            }
+    }
+    const char* vs[5] = { "2.0", "1.5", "1.0", ".5", "0" };
+    const char* ts[6] = { "30", "20", "10", "5", "3", "2" };
+    for (float x : { 335.0f, 634.0f })
+    {
+        for (int i = 0; i < 5; ++i) s.texts.push_back (T (vs[i], X (x), Y (880 + 35.0f * (float) i), 7.5f, 1));
+        for (int i = 0; i < 6; ++i) s.texts.push_back (T (ts[i], X (x), Y (1110 + 28.0f * (float) i), 7.5f, 1));
+    }
+    const char* dcba[4] = { "D", "C", "B", "A" };
+    for (float x : { 88.0f, 884.0f })
+        for (int i = 0; i < 4; ++i) { s.texts.push_back (T (dcba[i], X (x), Y (878 + 47.0f * (float) i), 7.5f)); s.texts.push_back (T (dcba[i], X (x), Y (1108 + 47.0f * (float) i), 7.5f)); }
+    s.texts.push_back (T ("OUTPUT VOLTAGE LEVEL", X (485), Y (848), 8.5f, 1));
+    s.texts.push_back (T ("INTERVAL TIME", X (485), Y (1083), 8.5f, 1));
+    // ---- number / key / scale buttons ----
+    static const char* nb[12] = { "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11", "n12" };
+    const char* nl[12] = { "1/C", "2/C#", "3/D", "4/D#", "5/E", "6/F", "7/F#", "8/G", "9/G#", "10/A", "11/A#", "12/B" };
+    for (int i = 0; i < 12; ++i)
+    {
+        s.controls.push_back (C (nb[i], "", CtrlStyle::Push, X (sx[i]), Y (1312)));
+        s.leds.push_back (D (X (sx[i]) - 25, Y (1290), 300 + i, kRedLed));
+        s.texts.push_back (T (nl[i], X (sx[i]), Y (1340), 7.0f));
+    }
+    s.texts.push_back (T ("M", X (560), Y (1284), 7.5f, 1)); s.texts.push_back (T ("m", X (610), Y (1284), 7.5f, 1)); s.texts.push_back (T ("ch", X (660), Y (1284), 7.5f, 1));
+    s.controls.push_back (C ("scale", "", CtrlStyle::Push, X (759), Y (1312))); s.leds.push_back (D (X (735), Y (1290), 322, kRedLed));
+    s.controls.push_back (C ("key", "", CtrlStyle::Push, X (809), Y (1312))); s.leds.push_back (D (X (785), Y (1290), 323, kRedLed));
+    s.controls.push_back (C ("tune", "", CtrlStyle::Push, X (858), Y (1312)));
+    s.texts.push_back (T ("Scale", X (759), Y (1340), 7.5f)); s.texts.push_back (T ("Key", X (809), Y (1340), 7.5f));
+    s.texts.push_back (T ("press autotune", X (868), Y (1284), 7.0f)); s.texts.push_back (T ("hold initialtune", X (868), Y (1340), 7.0f));
+    s.lines.push_back (L (912, Y (1275), 1826, Y (1275))); s.lines.push_back (L (X (710), Y (1275), X (710), 640)); s.lines.push_back (L (X (833), Y (1275), X (833), 640));
+    s.lines.push_back (L (4, 30, 1826, 30)); s.lines.push_back (L (4, 640, 1826, 640)); s.lines.push_back (L (912, Y (838), 1826, Y (838)));
+    s.texts.push_back (T ("MULTIPLE ARBITRARY FUNCTION GENERATOR  MODEL MF-248", 915, 15, 10.0f, 4));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 248t", 1300, Y (1372), 8.5f, 1));
+    scaleSpec (s, 430.0f / 648.0f);
     return s;
 }
 
@@ -945,7 +1198,7 @@ static ModuleSpec makeOutput()
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230(), make285(), make207(), make277() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230(), make285(), make207(), make277(), make296(), make248() };
     return specs[t];
 }
 } // namespace wc

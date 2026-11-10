@@ -266,13 +266,70 @@ static void add207 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
         const juce::String ch = juce::String::charToString ((juce::juce_wchar) ('a' + c)), CH = ch.toUpperCase();
         g->addChild (std::make_unique<APF> (juce::ParameterID (p + "lvl_" + ch, 1), n + CH + " Level", NR (0.0f, 1.0f), 0.8f,
             juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (v * 10.0f, 1); })));
-        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "prog_" + ch, 1), n + CH + " Prog", false));
-        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "mon_" + ch, 1), n + CH + " Mon", false));
+        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "prog_" + ch, 1), n + CH + " To Signal Outputs", true));
+        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "mon_" + ch, 1), n + CH + " To Monitor", false));
     }
     for (int k = 1; k <= 4; ++k)
         g->addChild (std::make_unique<APF> (juce::ParameterID (p + "pan" + juce::String (k), 1), n + juce::String::charToString ((juce::juce_wchar) ('A' + k)) + " Assignment (L-R)", NR (0.0f, 1.0f), 0.5f));
     g->addChild (std::make_unique<APF> (juce::ParameterID (p + "gain", 1), n + "Preamp Gain", NR (0.0f, 1.0f), 0.3f));
-    g->addChild (std::make_unique<APB> (juce::ParameterID (p + "range", 1), n + "Preamp Range 75 dB", false));
+    g->addChild (std::make_unique<APB> (juce::ParameterID (p + "range", 1), n + "Preamp Range 70 dB", false));
+    l.add (std::move (g));
+}
+
+static void add296 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
+{
+    const juce::String p ("sp_"), n ("296 ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("sp_grp", "296", "|");
+    static const char* names[16] = { "<100", "150", "250", "350", "500", "630", "800", "1k", "1.3k", "1.6k", "2k", "2.6k", "3.5k", "5k", "8k", ">10k" };
+    for (int b = 0; b < 16; ++b)
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "att" + juce::String (b), 1), n + names[b] + " Attenuator", NR (0.0f, 1.0f), 36.0f / 42.0f,
+            juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.02f ? juce::String ("off") : juce::String (-36.0f + 42.0f * v, 1) + " dB"; })));
+    g->addChild (std::make_unique<APC> (juce::ParameterID (p + "decay", 1), n + "Env. Decay Time", juce::StringArray { "short", "combo", "long" }, 1));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "freq", 1), n + "Program Frequency", NR (0.0f, 1.0f), 0.5f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const float hz = 100.0f * std::pow (100.0f, v); return hz < 1000.0f ? juce::String (hz, 0) + " Hz" : juce::String (hz / 1000.0f, 1) + " kHz"; })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "fcv", 1), n + "Program Frequency CV", NR (-1.0f, 1.0f), 0.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "width", 1), n + "Program Width", NR (0.0f, 1.0f), 1.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "pre_even", 1), n + "Even Pre-emphasis", NR (0.0f, 1.0f), 0.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "pre_odd", 1), n + "Odd Pre-emphasis", NR (0.0f, 1.0f), 0.0f));
+    g->addChild (std::make_unique<APB> (juce::ParameterID (p + "tr_even", 1), n + "Transfer to Even", false));
+    g->addChild (std::make_unique<APB> (juce::ParameterID (p + "tr_odd", 1), n + "Transfer to Odd", false));
+    l.add (std::move (g));
+}
+
+static void add248 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
+{
+    const juce::String p ("mf_"), n ("248 ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("mf_grp", "248", "|");
+    static const char* fnNames[13] = { "p1", "p2", "quant", "slope", "range", "vext", "stop", "sust", "enable", "first", "last", "trange", "text" };
+    static const char* fnLabels[13] = { "Pulse 1", "Pulse 2", "Quantize", "Sloped", "Range", "Voltage External", "Stop", "Sustain", "Enable", "Cycle First", "Cycle Last", "Time Range", "Time External" };
+    for (int s = 1; s <= 16; ++s)
+    {
+        const juce::String k (s);
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "lvl" + k, 1), n + "Stage " + k + " Level", NR (0.0f, 1.0f), 0.5f));
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "tim" + k, 1), n + "Stage " + k + " Interval Time", NR (0.0f, 1.0f), 0.5f));
+        for (int f = 0; f < 13; ++f)
+        {
+            const juce::ParameterID id (p + fnNames[f] + "_" + k, 1);
+            const juce::String nm = n + "Stage " + k + " " + fnLabels[f];
+            if (f == 4) g->addChild (std::make_unique<APC> (id, nm, juce::StringArray { "full", "half", "+0", "+2", "+4", "+6", "+8" }, 0));
+            else if (f == 11) g->addChild (std::make_unique<APC> (id, nm, juce::StringArray { ".002-.03 s", ".02-.3 s", ".2-3 s", "2-30 s" }, 2));
+            else g->addChild (std::make_unique<APB> (id, nm, false));
+        }
+    }
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "edit", 1), n + "Stage No. (edit)", NR (1.0f, 16.0f, 1.0f), 1.0f));
+    g->addChild (std::make_unique<APC> (juce::ParameterID (p + "key", 1), n + "Key", juce::StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
+    g->addChild (std::make_unique<APC> (juce::ParameterID (p + "scale", 1), n + "Scale", juce::StringArray { "m (minor)", "ch (chromatic)", "M (major)" }, 1));
+    for (int f = 1; f <= 2; ++f)
+    {
+        const juce::String k (f), fg = n + "FG" + k + " ";
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "mult" + k, 1), fg + "Time Multiplier", NR (0.0f, 1.0f), 1.0f / 3.0f,
+            juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return "x" + juce::String (0.5f * std::pow (8.0f, v), 2); })));
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "mcv" + k, 1), fg + "Time Multiplier CV", NR (-1.0f, 1.0f), 0.0f));
+        g->addChild (std::make_unique<APF> (juce::ParameterID (p + "addr" + k, 1), fg + "Stage Address", NR (0.0f, 1.0f), 0.0f));
+        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "cont" + k, 1), fg + "Continuous", false));
+        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "ext" + k, 1), fg + "External Address", false));
+        g->addChild (std::make_unique<APC> (juce::ParameterID (p + "art" + k, 1), fg + "ART Gate Source", juce::StringArray { "1", "2", "all" }, 2));
+    }
     l.add (std::move (g));
 }
 
@@ -288,6 +345,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     }
     add242 (l);
     add245 (l);
+    add248 (l);
     add266 (l);
     add230 (l);
     add264 (l);
@@ -296,6 +354,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     for (int i = 0; i < kMax258; ++i) add258 (l, i);
     for (int i = 0; i < kMax259; ++i) add259 (l, i);
     add285 (l);
+    add296 (l);
     add277 (l);
     for (int i = 0; i < kMax292; ++i) add292 (l, i);
     add207 (l);

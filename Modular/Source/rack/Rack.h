@@ -1,7 +1,7 @@
 #pragma once
 // The rack: module instances, the cable graph and the per-sample engine.
 //
-// Instances are fixed slots processed in a fixed order: MIDI, 242, 245, 266, 230, 264, 257, 281 A-B, 258 A-B, 259 A-D, 285, 277, 292 A-B, 207, Output.
+// Instances are fixed slots processed in a fixed order: MIDI, 242, 245, 248, 266, 230, 264, 257, 281 A-B, 258 A-B, 259 A-D, 285, 296, 277, 292 A-B, 207, Output.
 // A cable from an earlier slot to a later one has no delay; a cable going backwards (feedback,
 // e.g. 259 B -> 259 A FM while A -> B) reads the previous sample, which is the 1-sample delay of
 // any digital model of a patch with loops.
@@ -26,12 +26,15 @@ class M230;
 class M285;
 class M277;
 class M207;
+class M296;
+class M248;
 
 // slots, in processing order: control sources first, then oscillators, then gates, then the output
 constexpr int kInstMidi = 0;
 constexpr int kInst242 = 1;
 constexpr int kInst245 = kInst242 + kMax242;
-constexpr int kInst266 = kInst245 + kMax245;
+constexpr int kInst248 = kInst245 + kMax245;
+constexpr int kInst266 = kInst248 + kMax248;
 constexpr int kInst230 = kInst266 + kMax266;
 constexpr int kInst264 = kInst230 + kMax230;
 constexpr int kInst257 = kInst264 + kMax264;
@@ -39,7 +42,8 @@ constexpr int kInst281 = kInst257 + kMax257;
 constexpr int kInst258 = kInst281 + kMax281;
 constexpr int kInst259 = kInst258 + kMax258;
 constexpr int kInst285 = kInst259 + kMax259;
-constexpr int kInst277 = kInst285 + kMax285;
+constexpr int kInst296 = kInst285 + kMax285;
+constexpr int kInst277 = kInst296 + kMax296;
 constexpr int kInst292 = kInst277 + kMax277;
 constexpr int kInst207 = kInst292 + kMax292;
 constexpr int kInstOutput = kInst207 + kMax207;
@@ -48,7 +52,8 @@ inline ModuleType typeOfInst (int inst)
 {
     if (inst == kInstMidi) return MT_Midi;
     if (inst < kInst245) return MT_242;
-    if (inst < kInst266) return MT_245;
+    if (inst < kInst248) return MT_245;
+    if (inst < kInst266) return MT_248;
     if (inst < kInst230) return MT_266;
     if (inst < kInst264) return MT_230;
     if (inst < kInst257) return MT_264;
@@ -56,7 +61,8 @@ inline ModuleType typeOfInst (int inst)
     if (inst < kInst258) return MT_281;
     if (inst < kInst259) return MT_258;
     if (inst < kInst285) return MT_259;
-    if (inst < kInst277) return MT_285;
+    if (inst < kInst296) return MT_285;
+    if (inst < kInst277) return MT_296;
     if (inst < kInst292) return MT_277;
     if (inst < kInst207) return MT_292;
     if (inst < kInstOutput) return MT_207;
@@ -66,9 +72,9 @@ inline int firstInstOf (ModuleType t)
 {
     switch (t)
     {
-        case MT_242: return kInst242; case MT_245: return kInst245; case MT_266: return kInst266; case MT_230: return kInst230;
+        case MT_242: return kInst242; case MT_245: return kInst245; case MT_248: return kInst248; case MT_266: return kInst266; case MT_230: return kInst230;
         case MT_264: return kInst264; case MT_257: return kInst257; case MT_281: return kInst281; case MT_258: return kInst258;
-        case MT_259: return kInst259; case MT_285: return kInst285; case MT_277: return kInst277; case MT_292: return kInst292; case MT_207: return kInst207; case MT_Output: return kInstOutput; default: return kInstMidi;
+        case MT_259: return kInst259; case MT_285: return kInst285; case MT_296: return kInst296; case MT_277: return kInst277; case MT_292: return kInst292; case MT_207: return kInst207; case MT_Output: return kInstOutput; default: return kInstMidi;
     }
 }
 inline int subIndex (int inst) { return inst - firstInstOf (typeOfInst (inst)); }
@@ -76,9 +82,9 @@ inline juce::String instPrefix (int inst)
 {
     switch (typeOfInst (inst))
     {
-        case MT_242: return "pp_"; case MT_245: return "sv_"; case MT_266: return "ua_"; case MT_230: return "ef_"; case MT_264: return "sh_";
+        case MT_242: return "pp_"; case MT_245: return "sv_"; case MT_248: return "mf_"; case MT_266: return "ua_"; case MT_230: return "ef_"; case MT_264: return "sh_";
         case MT_257: return "vp_"; case MT_281: return prefix281 (subIndex (inst)); case MT_258: return prefix258 (subIndex (inst));
-        case MT_285: return "fs_"; case MT_277: return "dl_"; case MT_207: return "mx_";
+        case MT_285: return "fs_"; case MT_296: return "sp_"; case MT_277: return "dl_"; case MT_207: return "mx_";
         case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {};
     }
 }
@@ -108,7 +114,7 @@ struct Cable
 class Rack
 {
 public:
-    static constexpr int kMaxJacks = 24;
+    static constexpr int kMaxJacks = 48;
 
     explicit Rack (juce::AudioProcessorValueTreeState& apvts);
     ~Rack();
@@ -137,6 +143,8 @@ public:
     M285* m285() const;
     M277* m277() const;
     M207* m207() const;
+    M296* m296() const;
+    M248* m248() const;
     MidiInterface& midi() const;
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)
@@ -151,6 +159,7 @@ private:
     std::array<std::unique_ptr<Module>, kNumInst> mods;
     std::array<std::array<float, kMaxJacks>, kNumInst> outVal {};
     std::array<std::array<bool, kMaxJacks>, kNumInst> patched {};
+    std::array<int, kNumInst> numIn {};
     Patch live, pending;
     juce::SpinLock patchLock;
     std::atomic<bool> patchDirty { false };

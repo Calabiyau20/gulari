@@ -48,6 +48,10 @@ public:
     bool savePatchFile (const juce::File& f);
     bool loadPatchFile (const juce::File& f);
     juce::File patchFolder() const;
+    // ---- 248 presets (12 memories, kept with the plugin state) ----
+    void marfSave (int slot);
+    void marfLoad (int slot);
+    juce::ValueTree marfPresets { "MARFPRESETS" };
     juce::String patchName { "Init Voice" };
     float uiZoom = 1.0f;
 

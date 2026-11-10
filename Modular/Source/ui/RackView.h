@@ -74,6 +74,24 @@ private:
     bool down = false;
 };
 
+// 248 programming lever: momentary up / down (or left / right), acting on the stage being edited
+class ProgSwitch : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    ProgSwitch (WcProcessor& p, const juce::String& prefix, const juce::String& fn, int selectValue, bool horizontal, juce::Colour tip);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override { dir = 0; repaint(); }
+private:
+    WcProcessor& proc;
+    juce::String prefix, fn;
+    int value, dir = 0;
+    bool horiz;
+    juce::Colour tip;
+    void set (const juce::String& id, float plain);
+    int editStage() const;
+};
+
 class ModulePanel : public juce::Component
 {
 public:
@@ -96,6 +114,7 @@ private:
     std::vector<std::unique_ptr<ParamSwitch>> switches;
     std::vector<std::unique_ptr<PushButton>> pushes;
     std::vector<std::unique_ptr<ParamButton>> buttons;
+    std::vector<std::unique_ptr<ProgSwitch>> progs;
     std::vector<float> ledCache;
     float leds4[4] {};
     juce::TextButton removeButton { "x" };

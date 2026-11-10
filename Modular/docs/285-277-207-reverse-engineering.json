@@ -35,8 +35,8 @@
     {
       "stage_id": "207_01_mixer",
       "name": "Mixer / preamplifier",
-      "fidelity": "interpretation",
-      "description": "Seis entradas A-F con faders 0-10 (curva de audio), PROG: el nivel del canal sigue la c.v. de programa (jack izquierdo), MON: el canal va al bus monitor (jack derecho = nivel de monitor). Channel assignment: A izquierda, F derecha, B-E paneados por las cuatro perillas. Expansion in L / R, salidas L - R y monitor. Preamp: ganancia hasta 55 / 75 dB (switch) con limitador suave. La funcion exacta de los jacks banana del 207t es una interpretacion; se ajusta con el schematic.",
+      "fidelity": "behavioral",
+      "description": "Segun el manual del 207t: seis entradas A-F con faders 0-10 (curva de audio). Switches azules: el canal va a las SIGNAL OUTPUTS; amarillos: al MONITOR (mono, pre-fader). Channel assignment: B-E paneados por las cuatro perillas; A y F con assign por c.v. (0 V = su lado, 10 V = el otro) y dos LEDs que muestran el destino. Expansion in L / R directo a las salidas. Preamp: ganancia en rango 55 / 70 dB (switch) con limitador suave.",
       "cpp": "Modular/Source/modules/M207.cpp"
     }
   ],

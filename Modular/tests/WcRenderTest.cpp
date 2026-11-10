@@ -20,6 +20,8 @@
 #include "modules/M285.h"
 #include "modules/M277.h"
 #include "modules/M207.h"
+#include "modules/M296.h"
+#include "modules/M248.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -579,8 +581,68 @@ int main (int argc, char** argv)
         setP (p, "mx_lvl_a", 1.0f); setP (p, "mx_lvl_f", 1.0f); setP (p, "mx_lvl_c", 1.0f); setP (p, "mx_pan2", 0.5f); m.beginBlock (256);
         in[M207::In_A] = 0.5f; in[M207::In_F] = 0.25f; in[M207::In_C] = 0.4f;
         m.tick (in, out);
+        for (int i = 0; i < 2000; ++i) m.tick (in, out);   // let the assignment c.v. lag settle
         std::printf ("  A 0.5 -> L, F 0.25 -> R, C 0.4 centred: L %.3f, R %.3f\n", out[M207::Out_L], out[M207::Out_R]);
         if (std::fabs (out[M207::Out_L] - (0.5f + 0.4f * 0.7071f)) > 1e-3f || std::fabs (out[M207::Out_R] - (0.25f + 0.4f * 0.7071f)) > 1e-3f) ok = false;
+    }
+
+    {
+        std::printf ("296 SPECTRAL PROCESSOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m296();
+        float in[48] {}, out[48] {};
+        m.reset(); m.beginBlock (256);
+        float e[16] {};
+        for (int i = 0; i < (int) SR / 2; ++i)
+        {
+            in[M296::In_SigAll] = 0.5f * std::sin (6.283185f * 1000.0f * i / (float) SR);
+            m.tick (in, out);
+            if (i > (int) SR / 4) for (int b = 0; b < 16; ++b) e[b] = juce::jmax (e[b], out[M296::Out_Env0 + b]);
+        }
+        std::printf ("  1 kHz at 0.5: envelope 800 Hz %.2f V, 1k %.2f V, 1.2k %.2f V, 250 Hz %.3f V, 5k %.3f V\n", e[6], e[7], e[8], e[2], e[13]);
+        if (std::fabs (e[7] - 5.0f) > 0.8f || e[2] > 0.3f || e[13] > 0.3f) ok = false;
+        // programmed window: a narrow window around channel 2 (250 Hz) closes the 1 kHz output
+        setP (p, "sp_freq", 2.0f / 15.0f); setP (p, "sp_width", 1.5f / 16.0f); m.beginBlock (256);
+        double pa = 0, pp = 0;
+        for (int i = 0; i < (int) SR / 2; ++i)
+        {
+            in[M296::In_SigAll] = 0.5f * std::sin (6.283185f * 1000.0f * i / (float) SR);
+            m.tick (in, out);
+            if (i > (int) SR / 4) { pa += out[M296::Out_AttAll] * out[M296::Out_AttAll]; pp += out[M296::Out_ProgAll] * out[M296::Out_ProgAll]; }
+        }
+        const double rej = 10.0 * std::log10 (pp / pa);
+        std::printf ("  window on 250 Hz: programmed output %.1f dB re attenuator output\n", rej);
+        if (rej > -30.0) ok = false;
+    }
+
+    {
+        std::printf ("248 MARF\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m248();
+        float in[48] {}, out[48] {};
+        for (int k = 1; k <= 4; ++k) { setP (p, "mf_lvl" + juce::String (k), 0.1f * (float) k); setP (p, "mf_tim" + juce::String (k), 0.0f); setP (p, "mf_trange_" + juce::String (k), 1.0f); }
+        setP (p, "mf_p1_1", 1.0f); setP (p, "mf_last_4", 1.0f);
+        m.reset(); m.beginBlock (256);
+        // stopped until a start pulse; then 1 2 3 4 1 2 .. at 20 ms per stage (range .02-.3, slider at the bottom)
+        std::vector<float> seq; float lastV = -1.0f; int p1 = 0; bool was = false;
+        for (int i = 0; i < (int) (SR * 0.25); ++i)
+        {
+            in[M248::inJ (0, 2)] = (i > 100 && i < 200) ? 10.0f : 0.0f;
+            m.tick (in, out);
+            const float v = out[M248::outJ (0, 3)];
+            if (std::fabs (v - lastV) > 0.01f) { seq.push_back (v); lastV = v; }
+            const bool hi = out[M248::outJ (0, 5)] > 5.0f; if (hi && ! was) ++p1; was = hi;
+        }
+        std::printf ("  voltages: "); for (size_t k = 0; k < juce::jmin<size_t> (seq.size(), 10); ++k) std::printf ("%.1f ", seq[k]); std::printf ("| pulse 1 x%d\n", p1);
+        // expected 0 (before start = stage 1 at 1 V? stage 1 level .1 -> 1 V), then 2 3 4 1 2 3 4 ...
+        bool good = seq.size() >= 8;
+        for (size_t k = 1; good && k < seq.size(); ++k) { const float w = (float) ((int) std::lround (seq[k - 1]) % 4 + 1); if (std::fabs (seq[k] - w) > 0.05f) good = false; }
+        if (! good || p1 < 2) ok = false;
+        // quantize D minor: 0.33 V -> 0.3 V (d#? no: c d d# f g g# a# around d: nearest of d e f g a a# c)
+        setP (p, "mf_quant_1", 1.0f); setP (p, "mf_key", 2.0f); setP (p, "mf_scale", 0.0f); setP (p, "mf_lvl1", 0.033f); setP (p, "mf_last_4", 0.0f);
+        m.beginBlock (256); m.btnReset[0].store (true); m.tick (in, out); m.btnReset[0].store (false); m.tick (in, out);
+        std::printf ("  stage 1 quantized to D minor: 0.33 V -> %.2f V\n", out[M248::outJ (0, 3)]);
+        if (std::fabs (out[M248::outJ (0, 3)] - 0.2f) > 0.01f) ok = false;   // 3 st = d# is not in D minor: down to d
     }
 
     // ---- 3d. a 0.1.0 patch still loads (slot remap) ----

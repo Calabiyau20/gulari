@@ -7,6 +7,7 @@
 #include "../modules/M266.h"
 #include "../modules/M245.h"
 #include "../modules/M242.h"
+#include "../modules/M248.h"
 
 namespace wc::ui
 {
@@ -219,6 +220,73 @@ void PushButton::paint (juce::Graphics& g)
 }
 
 // =================================================================================================
+// ProgSwitch (248)
+// =================================================================================================
+ProgSwitch::ProgSwitch (WcProcessor& p, const juce::String& pre, const juce::String& f, int v, bool h, juce::Colour t)
+    : proc (p), prefix (pre), fn (f), value (v), horiz (h), tip (t)
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTooltip (fn == "stage" ? "Stage No.: left / right picks the stage to program"
+                : fn == "clear" ? "Clear (up): clears the program of all 16 stages"
+                : value >= 0 ? "Up: select for the stage being programmed" : "Up: on / down: off, for the stage being programmed");
+}
+
+int ProgSwitch::editStage() const
+{
+    auto* e = proc.apvts.getRawParameterValue (prefix + "edit");
+    return e != nullptr ? (int) std::lround (e->load()) : 1;
+}
+
+void ProgSwitch::set (const juce::String& id, float plain)
+{
+    if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (plain));
+}
+
+void ProgSwitch::mouseDown (const juce::MouseEvent& e)
+{
+    const bool first = horiz ? e.position.x < (float) getWidth() * 0.5f : e.position.y < (float) getHeight() * 0.5f;   // up / left
+    dir = first ? 1 : -1;
+    repaint();
+    if (fn == "stage")
+    {
+        int s = editStage() + (first ? -1 : 1);
+        if (s < 1) s = 16;
+        if (s > 16) s = 1;
+        set (prefix + "edit", (float) s);
+        return;
+    }
+    if (fn == "clear")
+    {
+        if (! first) return;
+        for (int st = 1; st <= 16; ++st)
+            for (int f = 0; f < wc::M248::F_Count; ++f)
+                set (prefix + wc::M248::fnName (f) + "_" + juce::String (st), f == wc::M248::F_TRange ? 2.0f : 0.0f);
+        return;
+    }
+    const juce::String id = prefix + fn + "_" + juce::String (editStage());
+    if (value >= 0) { if (first) set (id, (float) value); }
+    else set (id, first ? 1.0f : 0.0f);
+}
+
+void ProgSwitch::paint (juce::Graphics& g)
+{
+    const auto c = getLocalBounds().toFloat().getCentre();
+    g.setColour (juce::Colour (0xff8d8e8a));
+    g.fillEllipse (c.x - 7.0f, c.y - 7.0f, 14.0f, 14.0f);
+    g.setColour (juce::Colour (0xffd9d9d4));
+    g.fillEllipse (c.x - 5.0f, c.y - 5.0f, 10.0f, 10.0f);
+    juce::Point<float> end = c;
+    if (horiz) end.x += dir == 0 ? 0.0f : (dir > 0 ? -12.0f : 12.0f);
+    else end.y += dir == 0 ? -3.0f : (dir > 0 ? -13.0f : 13.0f);
+    g.setColour (juce::Colour (0xffb8b9b5));
+    g.drawLine ({ c, end }, 3.5f);
+    g.setColour (tip);
+    g.fillEllipse (end.x - 4.5f, end.y - 4.5f, 9.0f, 9.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.45f));
+    g.fillEllipse (end.x - 2.5f, end.y - 3.0f, 3.0f, 3.0f);
+}
+
+// =================================================================================================
 // ModulePanel
 // =================================================================================================
 ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
@@ -228,6 +296,18 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     setSize ((int) spec.width, (int) spec.height);
     for (auto& c : spec.controls)
     {
+        if (c.style == CtrlStyle::Prog)
+        {
+            const juce::String lab (c.label);
+            const int v = lab.startsWithChar ('=') ? lab.substring (1).getIntValue() : -1;
+            const bool h = juce::String (c.suffix) == "stage";
+            auto ps = std::make_unique<ProgSwitch> (proc, prefix, c.suffix, v, h, juce::Colour (c.colour == 0 ? 0xff2f62d0 : c.colour));
+            if (h) ps->setBounds ((int) c.x - 18, (int) c.y - 10, 36, 20);
+            else ps->setBounds ((int) c.x - 10, (int) c.y - 17, 20, 34);
+            addAndMakeVisible (*ps);
+            progs.push_back (std::move (ps));
+            continue;
+        }
         if (c.style == CtrlStyle::Push)
         {
             const juce::String id (c.suffix);
@@ -253,6 +333,41 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                 else
                     b = std::make_unique<PushButton> (id == "start" ? &m->btnStart : (id == "stop" ? &m->btnStop : &m->btnSingle),
                                                       id == "start" ? "Start" : (id == "stop" ? "Stop" : "Single pulse"));
+            }
+            else if (type == MT_248)
+            {
+                auto* m = proc.rack.m248();
+                const int fgI = id.getTrailingIntValue() - 1;
+                if (id.startsWith ("adv")) b = std::make_unique<PushButton> (&m->btnAdvance[juce::jlimit (0, 1, fgI)], "Advance to the next stage");
+                else if (id.startsWith ("start")) b = std::make_unique<PushButton> (&m->btnStart[juce::jlimit (0, 1, fgI)], "Start (when stopped)");
+                else if (id.startsWith ("reset")) b = std::make_unique<PushButton> (&m->btnReset[juce::jlimit (0, 1, fgI)], "Reset to the first stage");
+                else
+                {
+                    b = std::make_unique<PushButton> (nullptr, id.startsWith ("disp") ? "Display: show this function generator's stage on the LEDs"
+                                                                : id == "load" ? "Load, then 1-12" : id == "save" ? "Save, then 1-12"
+                                                                : id == "scale" ? "Scale, then 10 (M) / 11 (m) / 12 (ch)" : id == "key" ? "Key, then C .. B"
+                                                                : id == "tune" ? "Autotune (the plugin never drifts)" : "1-12: preset / key / scale");
+                    b->onPress = [this, id, m]
+                    {
+                        if (id.startsWith ("disp")) { m->displayFg.store (id.getTrailingIntValue() - 1); return; }
+                        if (id == "load") { m->armed.store (m->armed.load() == 1 ? 0 : 1); return; }
+                        if (id == "save") { m->armed.store (m->armed.load() == 2 ? 0 : 2); return; }
+                        if (id == "scale") { m->armed.store (m->armed.load() == 3 ? 0 : 3); return; }
+                        if (id == "key") { m->armed.store (m->armed.load() == 4 ? 0 : 4); return; }
+                        if (! id.startsWith ("n")) return;
+                        const int n = id.substring (1).getIntValue();
+                        auto setP = [this] (const juce::String& pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                        switch (m->armed.load())
+                        {
+                            case 1: proc.marfLoad (n); break;
+                            case 2: proc.marfSave (n); break;
+                            case 3: if (n == 10) setP ("scale", 2.0f); else if (n == 11) setP ("scale", 0.0f); else if (n == 12) setP ("scale", 1.0f); break;
+                            case 4: setP ("key", (float) (n - 1)); break;
+                            default: break;
+                        }
+                        m->armed.store (0);
+                    };
+                }
             }
             else if (type == MT_264)
                 b = std::make_unique<PushButton> (nullptr, "press to auto tune / hold to initial tune (the plugin's oscillators never drift)");
@@ -288,7 +403,8 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         if (c.style == CtrlStyle::Fader)
         {
             auto f = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::NoTextBox);
-            f->setBounds ((int) c.x - 13, (int) c.y - 60, 26, 120);
+            const int len = c.scale2 != nullptr ? juce::String (c.scale2).getIntValue() : 120;
+            f->setBounds ((int) c.x - 13, (int) c.y - len / 2, 26, len);
             f->setPopupDisplayEnabled (true, true, nullptr);
             f->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
             f->setTooltip (param->getName (64));

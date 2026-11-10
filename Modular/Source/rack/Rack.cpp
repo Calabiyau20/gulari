@@ -14,6 +14,8 @@
 #include "../modules/M285.h"
 #include "../modules/M277.h"
 #include "../modules/M207.h"
+#include "../modules/M296.h"
+#include "../modules/M248.h"
 
 namespace wc
 {
@@ -22,7 +24,7 @@ juce::String instName (int inst)
     if (inst == kInstMidi) return "MIDI";
     if (inst == kInstOutput) return "OUTPUT";
     const auto letter = juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
-    switch (typeOfInst (inst)) { case MT_242: return "242"; case MT_245: return "245"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_277: return "277"; case MT_207: return "207"; case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; default: return "259 " + letter; }
+    switch (typeOfInst (inst)) { case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; default: return "259 " + letter; }
 }
 
 Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
@@ -30,6 +32,7 @@ Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
     mods[(size_t) kInstMidi] = std::make_unique<MidiInterface> (apvts);
     mods[(size_t) kInst242] = std::make_unique<M242> (apvts, "pp_");
     mods[(size_t) kInst245] = std::make_unique<M245> (apvts, "sv_");
+    mods[(size_t) kInst248] = std::make_unique<M248> (apvts, "mf_");
     mods[(size_t) kInst266] = std::make_unique<M266> (apvts, "ua_");
     mods[(size_t) kInst230] = std::make_unique<M230> (apvts, "ef_");
     mods[(size_t) kInst264] = std::make_unique<M264> (apvts, "sh_");
@@ -39,12 +42,14 @@ Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
     for (int i = 0; i < kMax259; ++i) mods[(size_t) (kInst259 + i)] = std::make_unique<M259> (apvts, prefix259 (i));
     for (int i = 0; i < kMax292; ++i) mods[(size_t) (kInst292 + i)] = std::make_unique<M292> (apvts, prefix292 (i));
     mods[(size_t) kInst285] = std::make_unique<M285> (apvts, "fs_");
+    mods[(size_t) kInst296] = std::make_unique<M296> (apvts, "sp_");
     mods[(size_t) kInst277] = std::make_unique<M277> (apvts, "dl_");
     mods[(size_t) kInst207] = std::make_unique<M207> (apvts, "mx_");
     mods[(size_t) kInstOutput] = std::make_unique<OutputModule> (apvts);
     for (int i = 0; i < kNumInst; ++i)
     {
         mods[(size_t) i]->patched = patched[(size_t) i].data();
+        numIn[(size_t) i] = juce::jmin (kMaxJacks, specFor (typeOfInst (i)).numIn());
         live.srcInst[(size_t) i].fill (-1);
         pending.srcInst[(size_t) i].fill (-1);
     }
@@ -63,6 +68,8 @@ M258* Rack::m258 (int i) const { return static_cast<M258*> (mods[(size_t) (kInst
 M264* Rack::m264() const { return static_cast<M264*> (mods[(size_t) kInst264].get()); }
 M285* Rack::m285() const { return static_cast<M285*> (mods[(size_t) kInst285].get()); }
 M277* Rack::m277() const { return static_cast<M277*> (mods[(size_t) kInst277].get()); }
+M248* Rack::m248() const { return static_cast<M248*> (mods[(size_t) kInst248].get()); }
+M296* Rack::m296() const { return static_cast<M296*> (mods[(size_t) kInst296].get()); }
 M207* Rack::m207() const { return static_cast<M207*> (mods[(size_t) kInst207].get()); }
 M230* Rack::m230() const { return static_cast<M230*> (mods[(size_t) kInst230].get()); }
 M242* Rack::m242() const { return static_cast<M242*> (mods[(size_t) kInst242].get()); }
@@ -132,7 +139,7 @@ void Rack::tick() noexcept
         if (! live.present[(size_t) i]) continue;
         const auto& si = live.srcInst[(size_t) i];
         const auto& sj = live.srcJack[(size_t) i];
-        for (int j = 0; j < kMaxJacks; ++j)
+        for (int j = 0, n = numIn[(size_t) i]; j < n; ++j)
             in[j] = si[(size_t) j] >= 0 ? outVal[(size_t) si[(size_t) j]][(size_t) sj[(size_t) j]] : 0.0f;
         mods[(size_t) i]->tick (in, outVal[(size_t) i].data());
     }

@@ -1,0 +1,47 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 296 Programmable Spectral Processor, Model 248 Multiple Arbitrary Function Generator (MARF)",
+    "clone_name": "PS-296 / MF-248",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla y los numeros de modelo se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [
+    { "id": "S1", "title": "296 Programmable Spectral Processor - builder notes (modularsynthesis.com)", "url": "https://www.modularsynthesis.com/roman/buchla296/296psp.htm", "used_for": "16 canales, 3 pasabandas MFB escalonados por canal, LP en 0 y HP en F, comb even/odd, VCAs con ventana frequency / width, transfer" },
+    { "id": "S2", "title": "Buchla & Tiptop Audio 248t manual", "url": "https://tiptopaudio.com/manuals/Buchla_&_Tiptop_Audio_248t.pdf", "used_for": "programacion por etapa, modos stop / sustain / enable / cycle, rangos de tiempo y voltaje, stage address, salidas" },
+    { "id": "S3", "title": "Fotos del 296 (buchla.com) y del 248t (dos partes), enviadas por Martin", "used_for": "disposicion del panel" }
+  ],
+  "stages": [
+    {
+      "stage_id": "296_01_filterbank",
+      "name": "Banco de 16 filtros",
+      "fidelity": "behavioral",
+      "description": "Centros <100, 150, 250, 350, 500, 630, 800, 1k, 1.3k, 1.6k, 2k, 2.6k, 3.5k, 5k, 8k, >10k Hz. Canales 1-E: tres SVF pasabanda (Q 4.5) a 0.89 / 1 / 1.12 fc, normalizados a 0 dB en fc. Canal 0: pasabajos de 6 polos; canal F: pasaaltos de 6 polos. ALL alimenta todos, EVEN los pares, ODD los impares. Medido: 1 kHz da 4.7 V en su canal, -14 dB en los vecinos, -45 dB a 250 Hz.",
+      "cpp": "Modular/Source/modules/M296.cpp"
+    },
+    {
+      "stage_id": "296_02_envelopes_vcas",
+      "name": "Seguidores, atenuadores, VCAs programados y transfer",
+      "fidelity": "behavioral",
+      "description": "Seguidor de pico por canal (ataque 2 ms; decay short 15 ms / long 250 ms / combo de 250 ms en graves a 15 ms en agudos). Slider -oo..+6 dB por canal, salidas por canal y sumas even / all / odd. Comb even / odd = sumas sin atenuar. VCAs: ventana de canales (frequency + c.v. por atenuversor, width + c.v.) con bordes de un canal, + local program input (10 V = abierto). Transfer: los VCA pares (o impares) siguen la envolvente del canal vecino, con pre-enfasis hacia agudos: vocoder. Medido: ventana en 250 Hz atenua 1 kHz -58 dB.",
+      "cpp": "Modular/Source/modules/M296.cpp"
+    },
+    {
+      "stage_id": "248_01_stages",
+      "name": "16 etapas programables",
+      "fidelity": "behavioral",
+      "description": "Por etapa: nivel (full 0-10 V, half 0-5 V, limited 2 V en +0..+8), quantize (key + scale, 1.2 V/oct), sloped (rampa lineal desde el voltaje anterior durante el intervalo) / stepped, fuente interna o externa A-D (el slider elige la entrada), pulse 1 / 2 (gate durante la etapa), stop, sustain (mantiene mientras start esta alto), enable (espera > 5 V en start), cycle first / last, rango de tiempo .002-.03 / .02-.3 / .2-3 / 2-30 s (exponencial en el slider) y fuente de tiempo interna o externa.",
+      "cpp": "Modular/Source/modules/M248.cpp"
+    },
+    {
+      "stage_id": "248_02_function_generators",
+      "name": "Dos generadores de funcion",
+      "fidelity": "behavioral",
+      "description": "Cada FG: voltage, time (10 V x slider de tiempo), ref (rampa 10 -> 0 V por etapa), ART (voltaje cuantizado, actualizado en etapas con pulso 1, 2 o todas), all (5 ms por etapa nueva), pulse 1 / 2. Time multiplier .5-4 + c.v. por atenuversor (+-2 octavas). Mode: advance, start (tambien boton), stop; LEDs run / hold / stop. Stage address: reset, display, continuous (el address recorre las etapas, reloj detenido), strobe (pulso: carga la etapa del address), int / ext (knob o c.v.). Presets 1-12 guardados con el estado del plugin; key y scale con los botones.",
+      "cpp": "Modular/Source/modules/M248.cpp"
+    }
+  ],
+  "panel_note": "296 calcado de la foto del 296 classic (buchla.com); 248t unido de las dos fotos de Martin (la parte de sliders escalada x1.113). 207t corregido segun el manual: A / F con assign por c.v. y LEDs de destino, switches azules = a SIGNAL OUTPUTS, amarillos = MONITOR (pre-fader), preamp 55 / 70 dB."
+}

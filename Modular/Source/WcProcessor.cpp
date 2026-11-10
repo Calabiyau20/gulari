@@ -14,6 +14,8 @@
 #include "modules/M285.h"
 #include "modules/M277.h"
 #include "modules/M207.h"
+#include "modules/M296.h"
+#include "modules/M248.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -135,7 +137,7 @@ juce::StringArray WcProcessor::builtinPatchNames()
              "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)",
              "245 Sequence (LPG)", "242 Programmed Rhythm",
              "258 Morphing Duo", "264 Poly Round Robin",
-             "285 Shifted Bells", "277 Delay Taps (207 mix)" };
+             "285 Shifted Bells", "277 Delay Taps (207 mix)", "296 Spectral Sweep", "248 MARF Melody" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -431,6 +433,50 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
             break;
         }
+        case 18:  // 296 Spectral Sweep: a bright 259 drone through the 296; a cycling 281 walks a narrow program window up and
+                  // down the sixteen channels; the even and odd programmed outputs go left and right. Plays by itself.
+        {
+            present[(size_t) A] = present[(size_t) kInst296] = present[(size_t) kInst281] = true;
+            const juce::String f (prefix281 (0));
+            setParam (a + "po_freq", hz (55.0f)); setParam (a + "timbre", 0.55f); setParam (a + "sym", 0.6f);
+            setParam (a + "mo_freq", hz (55.0f * 1.5f)); setParam (a + "idx", 0.25f); setParam (a + "mod_pitch", 1.0f);
+            cables.push_back ({ A, M259::Out_Final1, kInst296, M296::In_SigAll, nextColour (false) });
+            setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.82f); setParam (f + "dec1", 0.82f);
+            cables.push_back ({ kInst281, M281::outFunc (0), kInst296, M296::In_FreqCv, nextColour (true) });
+            setParam ("sp_freq", 0.05f); setParam ("sp_fcv", 0.7f); setParam ("sp_width", 0.15f);
+            cables.push_back ({ kInst296, M296::Out_ProgEven, kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst296, M296::Out_ProgOdd, kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam ("out_level", 1.0f); setParam ("out_master", 3.0f);
+            break;
+        }
+        case 19:  // 248 MARF Melody: a key starts function generator 1; eight quantized stages (D minor) loop, every stage fires
+                  // pulse 1 into the 292, stages 4 and 8 glide (sloped); FG 2 runs the same stages slower (x4) on the timbre
+        {
+            present[(size_t) A] = present[(size_t) kInst248] = present[(size_t) kInst292] = true;
+            const juce::String l (prefix292 (0));
+            const float lv[8] = { 0.0f, 0.03f, 0.05f, 0.07f, 0.12f, 0.10f, 0.08f, 0.05f };   // 10 V full scale: 0.01 = 1 semitone
+            const float tm[8] = { 0.5f, 0.5f, 0.3f, 0.7f, 0.5f, 0.5f, 0.3f, 0.8f };
+            for (int k = 0; k < 8; ++k)
+            {
+                const juce::String n (k + 1);
+                setParam ("mf_lvl" + n, lv[k]); setParam ("mf_tim" + n, tm[k]);
+                setParam ("mf_p1_" + n, 1.0f); setParam ("mf_quant_" + n, 1.0f); setParam ("mf_trange_" + n, 1.0f);
+            }
+            setParam ("mf_slope_4", 1.0f); setParam ("mf_slope_8", 1.0f); setParam ("mf_last_8", 1.0f);
+            setParam ("mf_key", 2.0f); setParam ("mf_scale", 0.0f);
+            setParam ("mf_mult2", 1.0f);
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst248, M248::inJ (0, 2), nextColour (true) });
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst248, M248::inJ (1, 2), nextColour (true) });
+            cables.push_back ({ kInst248, M248::outJ (0, 3), A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst248, M248::outJ (0, 5), kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst248, M248::outJ (1, 3), A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "po_freq", hz (146.83f)); setParam (a + "mo_freq", hz (293.66f)); setParam (a + "idx", 0.2f); setParam (a + "mod_pitch", 1.0f);
+            setParam (a + "timbre", 0.05f); setParam (a + "timbre_cv", 0.3f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
     }
     patchName = builtinPatchNames()[juce::jlimit (0, builtinPatchNames().size() - 1, index)];
     commit();
@@ -516,12 +562,41 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
     commit();
 }
 
+static bool isMarfStageParam (const juce::String& id)
+{
+    if (! id.startsWith ("mf_")) return false;
+    const auto rest = id.substring (3);
+    return rest.startsWith ("lvl") || rest.startsWith ("tim") || rest.containsChar ('_');
+}
+
+void WcProcessor::marfSave (int slot)
+{
+    juce::ValueTree pr ("P");
+    pr.setProperty ("slot", slot, nullptr);
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (isMarfStageParam (rp->getParameterID())) pr.setProperty (rp->getParameterID(), rp->getValue(), nullptr);
+    for (int i = marfPresets.getNumChildren(); --i >= 0;)
+        if ((int) marfPresets.getChild (i)["slot"] == slot) marfPresets.removeChild (i, nullptr);
+    marfPresets.addChild (pr, -1, nullptr);
+}
+
+void WcProcessor::marfLoad (int slot)
+{
+    for (auto pr : marfPresets)
+        if ((int) pr["slot"] == slot)
+            for (auto* p : getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+                    if (pr.hasProperty (rp->getParameterID())) rp->setValueNotifyingHost ((float) pr[rp->getParameterID()]);
+}
+
 void WcProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree root ("WCSTATE");
     root.setProperty ("zoom", uiZoom, nullptr);
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
+    root.addChild (marfPresets.createCopy(), -1, nullptr);
     if (auto xml = root.createXml()) copyXmlToBinary (*xml, destData);
 }
 
@@ -535,6 +610,8 @@ void WcProcessor::setStateInformation (const void* data, int sizeInBytes)
     auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid()) apvts.replaceState (params);
     patchFromTree (root.getChildWithName ("WCPATCH"));
+    auto mp = root.getChildWithName ("MARFPRESETS");
+    if (mp.isValid()) marfPresets = mp.createCopy();
 }
 
 juce::File WcProcessor::patchFolder() const
