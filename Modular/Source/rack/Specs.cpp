@@ -3,6 +3,8 @@
 // banana jacks colour-coded by signal (red = pulses, black = control in, blue = control out),
 // 3.5 mm jacks for audio.
 #include "Module.h"
+#include "../modules/M259.h"
+#include "../modules/M266.h"
 
 namespace wc
 {
@@ -17,79 +19,159 @@ static ControlSpec C (const char* id, const char* l, CtrlStyle st, float x, floa
     return c;
 }
 
+// silkscreen helpers -------------------------------------------------------------------------------
+static constexpr juce::uint32 kSkirt = 0xff2c55b4;           // blue knob skirt (200t knobs)
+static constexpr juce::uint32 kTintGrey = 0xffa6a8ac, kTintOrange = 0xffe8892b, kTintPurple = 0xffb79ade, kTintRed = 0xffc8202a;
+static TextSpec T (const char* t, float x, float y, float size = 9.5f, int style = 0, int just = 0) { return { t, x, y, size, style, just }; }
+static LineSpec L (float x1, float y1, float x2, float y2, float w = 2.0f, bool dashed = false, bool arrow = false) { return { x1, y1, x2, y2, w, dashed, arrow }; }
+static LedSpec D (float x, float y, int id, juce::uint32 col = 0xffe8241c) { return { x, y, id, col }; }
+static JackSpec JT (const char* l, JackKind k, bool out, float x, float y, juce::uint32 tint, bool pulse = false) { auto j = J (l, k, out, x, y, pulse); j.tint = tint; return j; }
+// small waveform icons drawn with silkscreen lines
+static void iconSaw (ModuleSpec& s, float x, float y) { s.lines.push_back (L (x - 8, y + 4, x, y - 4, 1.2f)); s.lines.push_back (L (x, y - 4, x, y + 4, 1.2f)); s.lines.push_back (L (x, y + 4, x + 8, y - 4, 1.2f)); s.lines.push_back (L (x + 8, y - 4, x + 8, y + 4, 1.2f)); }
+static void iconSqr (ModuleSpec& s, float x, float y) { s.lines.push_back (L (x - 8, y + 4, x - 8, y - 4, 1.2f)); s.lines.push_back (L (x - 8, y - 4, x, y - 4, 1.2f)); s.lines.push_back (L (x, y - 4, x, y + 4, 1.2f)); s.lines.push_back (L (x, y + 4, x + 8, y + 4, 1.2f)); s.lines.push_back (L (x + 8, y + 4, x + 8, y - 4, 1.2f)); }
+static void iconTri (ModuleSpec& s, float x, float y) { s.lines.push_back (L (x - 9, y + 4, x - 4.5f, y - 4, 1.2f)); s.lines.push_back (L (x - 4.5f, y - 4, x, y + 4, 1.2f)); s.lines.push_back (L (x, y + 4, x + 4.5f, y - 4, 1.2f)); s.lines.push_back (L (x + 4.5f, y - 4, x + 9, y + 4, 1.2f)); }
+static void iconSine (ModuleSpec& s, float x, float y)
+{
+    float px = x - 9, py = y;
+    for (int i = 1; i <= 12; ++i) { const float t = (float) i / 12.0f; const float nx = x - 9 + 18 * t, ny = y - 4.0f * std::sin (6.2832f * t); s.lines.push_back (L (px, py, nx, ny, 1.2f)); px = nx; py = ny; }
+}
+// scale a layout drawn in photo pixels to panel units (knob / jack sizes and font sizes are not scaled)
+static void scaleSpec (ModuleSpec& s, float k)
+{
+    s.width *= k; s.height *= k;
+    for (auto& j : s.jacks) { j.x *= k; j.y *= k; }
+    for (auto& c : s.controls) { c.x *= k; c.y *= k; }
+    for (auto& t : s.texts) { t.x *= k; t.y *= k; }
+    for (auto& l : s.lines) { l.x1 *= k; l.y1 *= k; l.x2 *= k; l.y2 *= k; }
+    for (auto& d : s.leds) { d.x *= k; d.y *= k; }
+    for (auto& sc : s.sections) { sc.x *= k; sc.y *= k; sc.w *= k; sc.h *= k; }
+}
+
 // ---------------------------------------------------------------------------------------------
-// CW-259 Complex Waveform Generator
+// CW-259 Complex Waveform Generator - layout of the 259t front (photo, 560 x 422 px), plus a narrow
+// "program" strip with the programming inputs of the original 259.
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make259()
 {
     using K = JackKind;
     ModuleSpec s;
     s.type = MT_259;
-    s.name = "COMPLEX WAVEFORM GENERATOR";
+    s.name = "PROGRAMMABLE COMPLEX WAVEFORM GENERATOR";
     s.model = "CW-259";
-    s.after = "after Buchla 259";
-    s.width = 640.0f;
-    s.height = 430.0f;
-    s.sections = {
-        { "modulation oscillator", 8, 34, 168, 362 },
-        { "modulation", 182, 34, 150, 362 },
-        { "principal oscillator", 338, 34, 150, 362 },
-        { "timbre", 494, 34, 138, 362 },
-    };
+    s.after = "after Buchla 259t";
+    s.width = 622.0f;
+    s.height = 422.0f;
+    // ---- jacks: inputs in DSP order (M259::In) ----
     s.jacks = {
-        J ("pitch", K::Banana, false, 30, 336),       // In_MoPitch
-        J ("c.v. in", K::Banana, false, 72, 336),     // In_MoCv
-        J ("fm", K::Mini, false, 114, 336),           // In_MoFm
-        J ("index", K::Banana, false, 202, 378),      // In_IndexCv
-        J ("wave", K::Banana, false, 200, 336),       // In_ProgWave
-        J ("pitch", K::Banana, false, 238, 336, true),   // In_ProgPitch  (program gates: red)
-        J ("timbre", K::Banana, false, 276, 336, true),  // In_ProgTimbre
-        J ("amp", K::Banana, false, 314, 336, true),     // In_ProgAmp
-        J ("lock", K::Mini, false, 312, 378),         // In_Lock
-        J ("pitch", K::Banana, false, 362, 336),      // In_PoPitch
-        J ("c.v. in", K::Banana, false, 413, 336),    // In_PoCv
-        J ("fm", K::Mini, false, 464, 336),           // In_PoFm
-        J ("timbre", K::Banana, false, 516, 336),     // In_TimbreCv
-        J ("sym", K::Banana, false, 563, 336),        // In_SymCv
-        J ("order", K::Banana, false, 610, 336),      // In_OrderCv
-        J ("signal", K::Mini, true, 114, 378),        // Out_MoSignal
-        J ("c.v. out", K::Banana, true, 156, 378),    // Out_MoCv
-        J ("sine", K::Mini, true, 413, 378),          // Out_Sine
-        J ("square", K::Mini, true, 464, 378),        // Out_Square
-        J ("final", K::Mini, true, 563, 378),         // Out_Final1
-        J ("final", K::Mini, true, 610, 378),         // Out_Final2
+        JT ("kbd input", K::Banana, false, 105, 357, kTintGrey),   // In_MoPitch
+        J ("c.v. in", K::Banana, false, 168, 357),                 // In_MoCv
+        J ("f.m. in", K::Mini, false, 48, 357),                    // In_MoFm
+        J ("c.v. in", K::Banana, false, 235, 357),                 // In_IndexCv
+        J ("wave", K::Banana, false, 591, 124),                    // In_ProgWave
+        J ("pitch", K::Banana, false, 591, 230, true),             // In_ProgPitch
+        J ("timbre", K::Banana, false, 591, 280, true),            // In_ProgTimbre
+        J ("ampl.", K::Banana, false, 591, 178, true),             // In_ProgAmp
+        J ("", K::Mini, false, 357, 124),                          // In_Lock (phase lock input)
+        JT ("kbd input", K::Banana, false, 365, 357, kTintGrey),   // In_PoPitch
+        J ("c.v. in", K::Banana, false, 428, 357),                 // In_PoCv
+        J ("f.m. in", K::Mini, false, 305, 357),                   // In_PoFm
+        J ("c.v. in", K::Banana, false, 505, 357),                 // In_TimbreCv
+        J ("", K::Banana, false, 538, 56),                         // In_SymCv
+        J ("", K::Banana, false, 538, 140),                        // In_OrderCv
+        // outputs (M259::Out)
+        J ("", K::Mini, true, 125, 56),                            // Out_MoSignal
+        J ("", K::Banana, true, 75, 56),                           // Out_MoCv (blue)
+        J ("", K::Mini, true, 295, 56),                            // Out_Sine
+        J ("", K::Mini, true, 340, 56),                            // Out_Square
+        J ("", K::Mini, true, 385, 56),                            // Out_Final1
+        J ("final", K::Mini, true, 591, 340),                      // Out_Final2
+        J ("", K::Mini, true, 30, 56),                             // Out_MoTri
+        J ("", K::Banana, true, 172, 56, true),                    // Out_MoPulse  (GATE OUT)
+        J ("", K::Banana, true, 425, 56, true),                    // Out_PoPulse  (GATE OUT)
     };
+    // ---- controls ----
     s.controls = {
-        C ("mo_freq", "frequency", CtrlStyle::BigKnob, 92, 104, kGreyKnob, "28|55|110|220|440|880|1.7k|3.5k|7k"),
-        C ("mo_fine", "fine", CtrlStyle::Knob, 46, 196, kGreyKnob, "-|0|+"),
-        C ("mo_wave", "saw|sqr|tri", CtrlStyle::Switch3, 124, 196),
-        C ("mo_range", "high|low", CtrlStyle::Toggle, 40, 266),
-        C ("mo_cv", "c.v.", CtrlStyle::SmallKnob, 100, 268, kBlack, "-|0|+"),
-        C ("mo_fm", "fm", CtrlStyle::SmallKnob, 146, 268, kBlack),
+        C ("mo_freq", "", CtrlStyle::BigKnob, 85, 214, kSkirt, "27.5|55|110|220|440|880|1760|3520|7040"),
+        C ("mo_fine", "", CtrlStyle::SmallKnob, 166, 178, kSkirt),
+        C ("mo_range", "high|low", CtrlStyle::Button, 82, 114),
+        C ("mo_wave", "", CtrlStyle::Switch3, 176, 116),
+        C ("mo_fm", "", CtrlStyle::SmallKnob, 46, 302, kSkirt),
+        C ("mo_cv", "", CtrlStyle::SmallKnob, 166, 302, kSkirt),
 
-        C ("idx", "mod index", CtrlStyle::BigKnob, 236, 104, kGreyKnob, "0|2|4|6|8|10"),
-        C ("idx_cv", "c.v.", CtrlStyle::SmallKnob, 306, 84, kBlack),
-        C ("mod_amp", "amp", CtrlStyle::Toggle, 212, 204),
-        C ("mod_pitch", "pitch", CtrlStyle::Toggle, 257, 204),
-        C ("mod_timbre", "timbre", CtrlStyle::Toggle, 302, 204),
-        C ("prog", "local|remote|both", CtrlStyle::Switch3, 226, 268),
-        C ("lock", "lock", CtrlStyle::SmallKnob, 262, 378, kBlack),
+        C ("lock_on", "", CtrlStyle::Toggle, 256, 52, kSkirt),
+        C ("mod_amp", "", CtrlStyle::Toggle, 256, 90, kSkirt),
+        C ("mod_pitch", "", CtrlStyle::Toggle, 256, 128, kSkirt),
+        C ("mod_timbre", "", CtrlStyle::Toggle, 256, 166, kSkirt),
+        C ("idx", "", CtrlStyle::Knob, 235, 236, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("idx_cv", "", CtrlStyle::SmallKnob, 235, 302, kSkirt),
 
-        C ("po_freq", "frequency", CtrlStyle::BigKnob, 413, 104, kGreyKnob, "28|55|110|220|440|880|1.7k|3.5k|7k"),
-        C ("po_fine", "fine", CtrlStyle::Knob, 372, 196, kGreyKnob, "-|0|+"),
-        C ("po_cv", "c.v.", CtrlStyle::SmallKnob, 456, 196, kBlack, "-|0|+"),
-        C ("po_fm", "fm", CtrlStyle::SmallKnob, 456, 262, kBlack),
+        C ("volt1", "", CtrlStyle::Button, 290, 114),
+        C ("lock", "", CtrlStyle::SmallKnob, 423, 124, kSkirt),
+        C ("po_freq", "", CtrlStyle::BigKnob, 345, 214, kSkirt, "27.5|55|110|220|440|880|1760|3520|7040"),
+        C ("po_fine", "", CtrlStyle::SmallKnob, 426, 178, kSkirt),
+        C ("po_fm", "", CtrlStyle::SmallKnob, 297, 302, kSkirt),
+        C ("po_cv", "", CtrlStyle::SmallKnob, 426, 302, kSkirt),
 
-        C ("timbre", "timbre", CtrlStyle::BigKnob, 540, 104, kGreyKnob, "0|2|4|6|8|10"),
-        C ("timbre_cv", "c.v.", CtrlStyle::SmallKnob, 608, 84, kBlack, "-|0|+"),
-        C ("sym", "symmetry", CtrlStyle::Knob, 526, 222, kGreyKnob, "0|5|10"),
-        C ("order", "order", CtrlStyle::Knob, 602, 222, kGreyKnob, "0|5|10"),
+        C ("sym", "", CtrlStyle::Knob, 492, 96, kSkirt),
+        C ("order", "", CtrlStyle::Knob, 492, 176, kSkirt),
+        C ("timbre", "", CtrlStyle::Knob, 505, 244, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("timbre_cv", "", CtrlStyle::SmallKnob, 505, 310, kSkirt),
+
+        C ("prog", "local|rem|both", CtrlStyle::Switch3, 576, 66),
     };
+    s.controls[0].scale2 = ".25|.5|1|2|4|8|16|32|64";
+    s.controls[14].scale2 = "A0|A1|A2|A3|A4|A5|A6|A7|A8";
+    // ---- silkscreen ----
+    s.lines = {
+        L (4, 22, 618, 22), L (4, 392, 618, 392),
+        L (150, 22, 150, 92), L (200, 22, 200, 392), L (270, 22, 270, 392), L (400, 22, 400, 92), L (455, 22, 455, 392), L (560, 22, 560, 392),
+        L (4, 92, 200, 92), L (270, 92, 455, 92), L (4, 150, 200, 150), L (270, 150, 455, 150),
+        L (105, 92, 105, 150), L (335, 92, 335, 150), L (455, 250, 560, 250), L (200, 196, 270, 196),
+        L (255, 34, 215, 34, 1.4f, false, true),                    // the arrow in the modulation column
+        L (370, 124, 405, 124, 1.2f),                                // phase lock input -> gain
+    };
+    iconTri (s, 30, 78); iconSine (s, 295, 78); iconSqr (s, 340, 78);
+    iconSaw (s, 142, 100); iconSqr (s, 142, 116); iconTri (s, 142, 132);
+    s.texts = {
+        T ("PROGRAMMABLE COMPLEX WAVEFORM GENERATOR  MODEL CW-259", 290, 13, 10.5f, 4),
+        T ("MODULATION   OSC. OUTPUTS", 12, 33, 9.5f, 1, 1),
+        T ("c.v.", 75, 78), T ("signal", 125, 78),
+        T ("GATE", 175, 33, 9.5f, 1), T ("OUT", 165, 80, 8.5f, 1),
+        T ("PRINCIPAL   OSC. OUTPUTS", 278, 33, 9.5f, 1, 1), T ("final", 385, 78),
+        T ("GATE", 428, 33, 9.5f, 1), T ("OUT", 418, 80, 8.5f, 1),
+        T ("HARMONICS", 462, 33, 9.5f, 1, 1),
+        T ("low", 32, 101, 9.0f, 0, 1), T ("high", 32, 117, 9.0f, 0, 1),
+        T ("RANGE", 82, 138, 8.5f, 1), T ("WAVESHAPE", 152, 141, 8.5f, 1),
+        T ("FREQUENCY (Hz)", 85, 272, 9.5f, 1),
+        T ("phase", 217, 47, 8.5f, 0, 1), T ("lock", 217, 58, 8.5f, 0, 1),
+        T ("ampl.", 217, 85, 8.5f, 0, 1), T ("mod.", 217, 96, 8.5f, 0, 1),
+        T ("pitch", 217, 123, 8.5f, 0, 1), T ("mod.", 217, 134, 8.5f, 0, 1),
+        T ("timbre", 217, 161, 8.5f, 0, 1), T ("mod.", 217, 172, 8.5f, 0, 1),
+        T ("MOD. INDEX", 235, 272, 9.0f, 1),
+        T ("1V/OCT", 290, 98, 8.5f, 1), T ("1v/oct", 315, 132, 7.5f),
+        T ("input", 357, 102), T ("gain", 423, 98), T ("PHASE LOCK", 395, 143, 8.5f, 1),
+        T ("PITCH (Hz)", 345, 272, 9.5f, 1),
+        T ("Symmetry", 500, 54, 9.5f, 1), T ("even", 463, 130, 8.5f), T ("odd", 524, 130, 8.5f),
+        T ("Order", 496, 140, 9.5f, 1), T ("low", 463, 210, 8.5f), T ("high", 524, 210, 8.5f),
+        T ("TIMBRE", 505, 280, 9.5f, 1),
+        T ("-", 148, 279, 11.0f, 1), T ("+", 184, 279, 11.0f, 1), T ("-", 217, 279, 11.0f, 1), T ("+", 253, 279, 11.0f, 1),
+        T ("-", 408, 279, 11.0f, 1), T ("+", 444, 279, 11.0f, 1), T ("-", 484, 296, 11.0f, 1), T ("+", 526, 296, 11.0f, 1),
+        T ("PROGRAM", 591, 33, 8.5f, 1),
+        T ("CALABI YAU   -   after Buchla 259t", 290, 407, 9.0f, 1),
+    };
+    s.leds = {
+        D (22, 101, M259::Led_High), D (22, 117, M259::Led_Low),
+        D (122, 100, M259::Led_Saw), D (122, 116, M259::Led_Sqr), D (122, 132, M259::Led_Tri),
+        D (188, 80, M259::Led_MoGate), D (441, 80, M259::Led_PoGate),
+        D (209, 52, M259::Led_Lock), D (209, 90, M259::Led_Amp), D (209, 128, M259::Led_Pitch), D (209, 166, M259::Led_Timbre),
+        D (315, 116, M259::Led_1V), D (468, 52, M259::Led_Sym), D (468, 140, M259::Led_Order),
+    };
+    scaleSpec (s, 430.0f / 422.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// QF-281 Quad Function Generator - layout of the 281t: four rows A..D, quadrature column on the right
+// QF-281 Quad Function Generator - layout of the 281t front (photo, 413 x 370 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make281()
 {
@@ -98,52 +180,74 @@ static ModuleSpec make281()
     s.type = MT_281;
     s.name = "QUAD FUNCTION GENERATOR";
     s.model = "QF-281";
-    s.after = "after Buchla 281";
-    s.width = 486.0f;
-    s.height = 430.0f;
-    const float rowY[4] = { 78, 162, 246, 330 };
-    for (int n = 0; n < 4; ++n) s.sections.push_back ({ "", 8, rowY[n] - 40, 372, 80 });
-    s.sections.push_back ({ "quadrature", 386, 38, 92, 372 });
-    for (int n = 0; n < 4; ++n)          // inputs per row: trig, cycle, c.v. in (attack), c.v. in (decay)
+    s.after = "after Buchla 281t";
+    s.width = 413.0f;
+    s.height = 370.0f;
+    const float yc[4] = { 67, 145, 223, 301 };
+    for (int n = 0; n < 4; ++n)
     {
-        const float y = rowY[n];
-        s.jacks.push_back (J ("trig", K::Banana, false, 24, y - 16, true));
-        s.jacks.push_back (J ("cycle", K::Banana, false, 62, y - 16, true));
-        s.jacks.push_back (J ("c.v. in", K::Banana, false, 106, y - 16));
-        s.jacks.push_back (J ("c.v. in", K::Banana, false, 306, y - 16));
+        const float y = yc[n];
+        s.jacks.push_back (J ("trig", K::Banana, false, 22, y - 20, true));
+        s.jacks.push_back (J ("cycle", K::Banana, false, 60, y - 20, true));
+        s.jacks.push_back (J ("c.v. in", K::Banana, false, 97, y - 20));
+        s.jacks.push_back (J ("c.v. in", K::Banana, false, 263, y - 20));
     }
-    for (int n = 0; n < 4; ++n)          // outputs per row: function (blue), end of decay (red)
+    for (int n = 0; n < 4; ++n)
     {
-        const float y = rowY[n];
-        s.jacks.push_back (J ("", K::Banana, true, 346, y + 17));
-        s.jacks.push_back (J ("", K::Banana, true, 346, y - 17, true));
+        const float y = yc[n];
+        s.jacks.push_back (J ("", K::Banana, true, 301, y + 14));          // FUNC (blue)
+        s.jacks.push_back (J ("", K::Banana, true, 301, y - 20, true));    // EOD (red)
     }
-    s.jacks.push_back (J ("", K::Banana, true, 410, 152));    // quadrature mixes
-    s.jacks.push_back (J ("", K::Banana, true, 454, 152));
-    s.jacks.push_back (J ("", K::Banana, true, 410, 302));
-    s.jacks.push_back (J ("", K::Banana, true, 454, 302));
-
+    s.jacks.push_back (J ("", K::Banana, true, 357, 116));
+    s.jacks.push_back (J ("", K::Banana, true, 395, 116));
+    s.jacks.push_back (J ("", K::Banana, true, 357, 256));
+    s.jacks.push_back (J ("", K::Banana, true, 395, 256));
     static const char* att[4] = { "att1", "att2", "att3", "att4" };
     static const char* dec[4] = { "dec1", "dec2", "dec3", "dec4" };
     static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
     static const char* trg[4] = { "trig1", "trig2", "trig3", "trig4" };
     for (int n = 0; n < 4; ++n)
     {
-        const float y = rowY[n];
-        s.controls.push_back (C (trg[n], "", CtrlStyle::Push, 24, y + 22));
-        s.controls.push_back (C (mode[n], "trans|sust|cycle", CtrlStyle::Switch3, 62, y + 22));
-        s.controls.push_back (C (att[n], "attack", CtrlStyle::Knob, 162, y - 2, kGreyKnob, kTimeScale));
-        s.controls.push_back (C (dec[n], "decay", CtrlStyle::Knob, 252, y - 2, kGreyKnob, kTimeScale));
+        const float y = yc[n];
+        s.controls.push_back (C (trg[n], "", CtrlStyle::Push, 22, y + 20));
+        s.controls.push_back (C (mode[n], "", CtrlStyle::Switch3, 60, y + 20, 0xffd8261f));     // red-tipped, as on the 281t
+        s.controls.push_back (C (att[n], "attack", CtrlStyle::Knob, 146, y - 10, kSkirt, kTimeScale));
+        s.controls.push_back (C (dec[n], "decay", CtrlStyle::Knob, 216, y - 10, kSkirt, kTimeScale));
     }
-    s.controls.push_back (C ("mix12", "", CtrlStyle::BigKnob, 432, 88, kGreyKnob, "A|B"));
-    s.controls.push_back (C ("mix34", "", CtrlStyle::BigKnob, 432, 238, kGreyKnob, "C|D"));
-    s.controls.push_back (C ("quad12", "on|off", CtrlStyle::Toggle, 404, 368));
-    s.controls.push_back (C ("quad34", "on|off", CtrlStyle::Toggle, 444, 368));
+    s.controls.push_back (C ("mix12", "", CtrlStyle::BigKnob, 376, 64, kSkirt));
+    s.controls.push_back (C ("mix34", "", CtrlStyle::BigKnob, 376, 204, kSkirt));
+    s.controls.push_back (C ("quad12", "", CtrlStyle::Toggle, 357, 320, 0xffe8c22a));   // yellow-tipped
+    s.controls.push_back (C ("quad34", "", CtrlStyle::Toggle, 397, 320, 0xffe8c22a));
+    // silkscreen
+    s.lines = { L (4, 22, 409, 22), L (4, 345, 409, 345), L (338, 22, 338, 345) };
+    for (int n = 1; n < 4; ++n) s.lines.push_back (L (4, yc[n] - 39, 338, yc[n] - 39));
+    const char* letters[4] = { "A", "B", "C", "D" };
+    for (int n = 0; n < 4; ++n)
+    {
+        const float y = yc[n];
+        iconSaw (s, 74, y + 12); iconTri (s, 74, y + 28);                    // cycle switch icons
+        s.texts.push_back (T (letters[n], 254, y + 24, 10.0f, 3));            // circled letter
+        s.texts.push_back (T ("outs", 330, y - 3, 8.0f, 0, 1));
+        s.lines.push_back (L (314, y - 28, 314, y - 20, 1.2f)); s.lines.push_back (L (310, y - 20, 318, y - 20, 1.2f));  // pulse symbol
+        s.lines.push_back (L (310, y + 22, 314, y + 12, 1.2f)); s.lines.push_back (L (314, y + 12, 318, y + 22, 1.2f));  // function symbol
+        s.leds.push_back (D (323, y - 20, n * 2, 0xffffd23a));                // EOD / peak
+        s.leds.push_back (D (323, y + 14, n * 2 + 1));                         // function level
+    }
+    s.texts.push_back (T ("A", 349, 92, 9.0f, 1)); s.texts.push_back (T ("B", 403, 92, 9.0f, 1));
+    s.texts.push_back (T ("C", 349, 232, 9.0f, 1)); s.texts.push_back (T ("D", 403, 232, 9.0f, 1));
+    s.lines.push_back (L (360, 90, 357, 102, 1.2f, false, true)); s.lines.push_back (L (392, 90, 395, 102, 1.2f, false, true));
+    s.lines.push_back (L (360, 230, 357, 242, 1.2f, false, true)); s.lines.push_back (L (392, 230, 395, 242, 1.2f, false, true));
+    s.texts.push_back (T ("A - B", 357, 298, 8.5f, 1)); s.texts.push_back (T ("C - D", 397, 298, 8.5f, 1));
+    s.texts.push_back (T ("on", 377, 314, 7.5f, 1)); s.texts.push_back (T ("off", 377, 327, 7.5f, 1));
+    s.texts.push_back (T ("QUADRATURE", 375, 340, 8.5f, 1));
+    s.texts.push_back (T ("QUAD FUNCTION GENERATOR  QF-281", 206, 12, 10.5f, 4));
+    s.texts.push_back (T ("CALABI YAU   -   after Buchla 281t", 206, 358, 9.0f, 1));
+    scaleSpec (s, 430.0f / 370.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// LG-292 Quad Lowpass Gate - four columns with blue offset knobs and blue mode switches, "all" mix out
+// LG-292 Quad Lowpass Gate - layout of the 292t front (photo, 400 x 630 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make292()
 {
@@ -152,35 +256,51 @@ static ModuleSpec make292()
     s.type = MT_292;
     s.name = "QUAD LOPASS GATE";
     s.model = "LG-292";
-    s.after = "after Buchla 292";
-    s.width = 444.0f;
-    s.height = 430.0f;
-    const float cx[4] = { 53, 147, 241, 335 };
-    for (int n = 0; n < 4; ++n) s.sections.push_back ({ "", cx[n] - 45, 36, 90, 372 });
-    s.sections.push_back ({ "", 386, 36, 50, 372 });
+    s.after = "after Buchla 292t";
+    s.width = 400.0f;
+    s.height = 630.0f;
+    const float cx[4] = { 130, 200, 268, 340 };
+    const float cy[4] = { 165, 245, 320, 395 };
     for (int n = 0; n < 4; ++n)
     {
-        s.jacks.push_back (J ("input", K::Mini, false, cx[n], 290));
-        s.jacks.push_back (J ("c.v. in", K::Banana, false, cx[n], 336));
+        s.jacks.push_back (J ("", K::Mini, false, cx[n], 540));       // signal input
+        s.jacks.push_back (J ("", K::Banana, false, 45, cy[n]));      // c.v. in
     }
-    for (int n = 0; n < 4; ++n) s.jacks.push_back (J ("output", K::Mini, true, cx[n], 382));
-    s.jacks.push_back (J ("all", K::Mini, true, 411, 382));
+    for (int n = 0; n < 4; ++n) s.jacks.push_back (J ("", K::Mini, true, cx[n], 80));
+    s.jacks.push_back (J ("", K::Mini, true, 38, 76));                // all
     static const char* off[4] = { "off1", "off2", "off3", "off4" };
-    static const char* cv[4] = { "cv1", "cv2", "cv3", "cv4" };
-    static const char* res[4] = { "res1", "res2", "res3", "res4" };
     static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
+    const char* letters[4] = { "A", "B", "C", "D" };
+    s.lines = { L (4, 30, 396, 30), L (4, 115, 396, 115), L (4, 450, 396, 450), L (4, 505, 396, 505), L (4, 585, 396, 585) };
     for (int n = 0; n < 4; ++n)
     {
-        s.controls.push_back (C (off[n], "offset", CtrlStyle::Knob, cx[n], 88, kBlueKnob, "0|5|10"));
-        s.controls.push_back (C (cv[n], "c.v. level", CtrlStyle::SmallKnob, cx[n] - 20, 160, kBlack));
-        s.controls.push_back (C (res[n], "res", CtrlStyle::SmallKnob, cx[n] + 22, 160, kBlack));
-        s.controls.push_back (C (mode[n], "lopass|combo|gate", CtrlStyle::Switch3, cx[n] - 26, 224, kBlueKnob));
+        s.controls.push_back (C (off[n], "", CtrlStyle::Knob, cx[n], cy[n], kSkirt));
+        s.controls.push_back (C (mode[n], "", CtrlStyle::Switch3, cx[n] - 4, 477, kSkirt));
+        s.lines.push_back (L (cx[n], 96, cx[n], 445, 1.6f));
+        s.lines.push_back (L (cx[n], 505, cx[n], 520, 1.6f));
+        s.lines.push_back (L (62, cy[n], cx[n] - 30, cy[n], 1.6f));
+        s.leds.push_back (D (cx[n] + 26, 463, n * 2));
+        s.leds.push_back (D (cx[n] + 26, 491, n * 2 + 1));
+        s.texts.push_back (T (letters[n], cx[n], 50, 10.0f, 1));
+        s.texts.push_back (T (letters[n], 78, cy[n] - 18, 10.0f, 1));
+        s.texts.push_back (T (letters[n], cx[n], 516, 10.0f, 1));
     }
+    s.texts.push_back (T ("QUAD LOPASS GATE  LG-292", 200, 16, 10.5f, 4));
+    s.texts.push_back (T ("OUTPUTS", 14, 54, 10.0f, 1, 1));
+    s.texts.push_back (T ("all", 72, 100, 10.0f, 0));
+    s.texts.push_back (T ("cv in", 45, 428, 9.5f, 0));
+    s.texts.push_back (T ("min", 306, 438, 9.0f)); s.texts.push_back (T ("max", 370, 438, 9.0f));
+    s.texts.push_back (T ("M", 18, 460, 9.0f, 1)); s.texts.push_back (T ("O", 18, 472, 9.0f, 1));
+    s.texts.push_back (T ("D", 18, 484, 9.0f, 1)); s.texts.push_back (T ("E", 18, 496, 9.0f, 1));
+    s.texts.push_back (T ("lopass", 34, 463, 9.0f, 0, 1)); s.texts.push_back (T ("combo", 34, 477, 9.0f, 0, 1)); s.texts.push_back (T ("gate", 34, 491, 9.0f, 0, 1));
+    s.texts.push_back (T ("SIGNAL", 14, 528, 10.0f, 1, 1)); s.texts.push_back (T ("INPUTS", 14, 546, 10.0f, 1, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 292t", 200, 604, 9.0f, 1));
+    scaleSpec (s, 430.0f / 630.0f);
     return s;
 }
 
 // ---------------------------------------------------------------------------------------------
-// SU-266 Source of Uncertainty
+// SU-266 Source of Uncertainty - layout of the 266t front (photo, 590 x 610 px)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make266()
 {
@@ -189,50 +309,84 @@ static ModuleSpec make266()
     s.type = MT_266;
     s.name = "SOURCE OF UNCERTAINTY";
     s.model = "SU-266";
-    s.after = "after Buchla 266";
-    s.width = 524.0f;
-    s.height = 430.0f;
-    s.sections = {
-        { "noise", 8, 36, 82, 176 },
-        { "fluctuating random voltages", 96, 36, 150, 176 },
-        { "sample & hold", 252, 36, 264, 176 },
-        { "integrator", 8, 220, 166, 188 },
-        { "quantized random voltages", 180, 220, 166, 188 },
-        { "stored random voltages", 352, 220, 164, 188 },
-    };
-    // inputs (DSP order = M266::In)
+    s.after = "after Buchla 266t";
+    s.width = 590.0f;
+    s.height = 610.0f;
     s.jacks = {
-        J ("c.v. in", K::Banana, false, 122, 176),            // In_FluctCv
-        J ("pulse in", K::Banana, false, 278, 90, true),      // In_ShPulse
-        J ("c.v. in", K::Banana, false, 278, 166),            // In_ShCv
-        J ("input", K::Banana, false, 34, 278),               // In_IntIn
-        J ("c.v. in", K::Banana, false, 34, 370),             // In_IntCv
-        J ("pulse in", K::Banana, false, 206, 278, true),     // In_QPulse
-        J ("c.v. in", K::Banana, false, 206, 370),            // In_QCv
-        J ("pulse in", K::Banana, false, 378, 278, true),     // In_SPulse
-        J ("c.v. in", K::Banana, false, 378, 370),            // In_SCv
-        // outputs (DSP order = M266::Out)
-        J ("pink", K::Mini, true, 49, 82),                    // Out_Pink
-        J ("white", K::Mini, true, 49, 130),                  // Out_White
-        J ("blue", K::Mini, true, 49, 178),                   // Out_Blue
-        J ("c.v. out", K::Banana, true, 220, 176),            // Out_Fluct
-        J ("c.v. out", K::Banana, true, 344, 128),            // Out_Sh
-        J ("alt", K::Banana, true, 438, 90),                  // Out_ShAltA
-        J ("alt", K::Banana, true, 488, 90),                  // Out_ShAltB
-        J ("alt", K::Banana, true, 438, 166, true),           // Out_ShPulseA
-        J ("alt", K::Banana, true, 488, 166, true),           // Out_ShPulseB
-        J ("c.v. out", K::Banana, true, 148, 370),            // Out_Int
-        J ("c.v. out", K::Banana, true, 320, 370),            // Out_Quant
-        J ("c.v. out", K::Banana, true, 452, 370),            // Out_StoredUni
-        J ("c.v. out", K::Banana, true, 494, 370),            // Out_StoredDist
+        // inputs (M266::In)
+        J ("input", K::Banana, false, 175, 80),                       // In_Fluct1Cv
+        J ("input", K::Banana, false, 175, 190),                      // In_Fluct2Cv
+        JT ("", K::Banana, false, 445, 145, kTintOrange, true),       // In_ShPulse
+        J ("", K::Banana, false, 445, 205),                           // In_ShCv
+        J ("", K::Banana, false, 40, 310),                            // In_QCv
+        JT ("inputs", K::Banana, false, 40, 375, kTintOrange, true),  // In_QPulse
+        J ("", K::Banana, false, 40, 470),                            // In_SCv
+        JT ("inputs", K::Banana, false, 40, 535, kTintOrange, true),  // In_SPulse
+        J ("inputs", K::Banana, false, 445, 395),                     // In_IntIn
+        J ("", K::Banana, false, 445, 480),                           // In_IntCv
+        // outputs (M266::Out)
+        J ("", K::Mini, true, 40, 70),                                // Out_Pink   (-3 dB/oct)
+        J ("", K::Mini, true, 40, 155),                               // Out_White  (flat)
+        J ("", K::Mini, true, 40, 240),                               // Out_Blue   (+3 dB/oct)
+        JT ("", K::Banana, true, 375, 80, kTintPurple),               // Out_Fluct1
+        JT ("", K::Banana, true, 375, 190, kTintPurple),              // Out_Fluct2
+        JT ("", K::Banana, true, 545, 90, kTintRed, true),            // Out_ShPulseA
+        JT ("alt", K::Banana, true, 545, 145, kTintRed, true),        // Out_ShPulseB
+        J ("", K::Banana, true, 445, 270),                            // Out_Sh
+        J ("", K::Banana, true, 545, 245),                            // Out_ShAltA
+        J ("alt", K::Banana, true, 545, 300),                         // Out_ShAltB
+        J ("", K::Banana, true, 300, 330),                            // Out_Q2n
+        J ("", K::Banana, true, 385, 330),                            // Out_Qn1
+        JT ("", K::Banana, true, 300, 492, kTintPurple),              // Out_StoredUni
+        JT ("", K::Banana, true, 385, 492, kTintPurple),              // Out_StoredDist
+        JT ("out", K::Banana, true, 545, 395, kTintPurple),           // Out_Int
     };
     s.controls = {
-        C ("rate", "rate", CtrlStyle::Knob, 171, 98, kGreyKnob, ".05|.5|5|50"),
-        C ("smooth", "smoothing", CtrlStyle::Knob, 112, 290, kGreyKnob, ".01|.1|1|10"),
-        C ("steps", "n", CtrlStyle::Knob, 272, 290, kGreyKnob, "1|2|3|4|5|6"),
-        C ("qmode", "n+1|2^n", CtrlStyle::Toggle, 312, 286),
-        C ("dist", "distribution", CtrlStyle::Knob, 452, 290, kGreyKnob, "lo|bell|hi"),
+        C ("rate", "", CtrlStyle::Knob, 290, 84, kSkirt, ".05|.5|5|50"),
+        C ("rate2", "", CtrlStyle::Knob, 290, 194, kSkirt, ".05|.5|5|50"),
+        C ("steps", "quantization", CtrlStyle::Knob, 140, 322, kSkirt, "1|2|3|4|5|6"),
+        C ("dist", "probability", CtrlStyle::Knob, 140, 482, kSkirt, "low|*|*|*|high"),
+        C ("smooth", "", CtrlStyle::Knob, 510, 500, kSkirt, ".01|.1|1|10"),
     };
+    s.lines = {
+        L (4, 28, 586, 28), L (4, 592, 586, 592),
+        L (145, 28, 145, 275), L (410, 28, 410, 592), L (4, 275, 410, 275), L (4, 440, 410, 440), L (410, 340, 586, 340),
+        // noise source rules
+        L (58, 70, 138, 70, 1.4f), L (58, 155, 138, 155, 1.4f), L (58, 240, 138, 240, 1.4f),
+        // fluctuating: input -> knob
+        L (190, 80, 262, 84, 1.4f), L (190, 190, 262, 194, 1.4f),
+        // sample and hold: dashed alternating arrows
+        L (462, 138, 528, 96, 1.4f, true, true), L (462, 150, 528, 145, 1.4f, true, true),
+        L (462, 262, 528, 248, 1.4f, true, true), L (462, 276, 528, 298, 1.4f, true, true),
+        // quantized / stored: c.v. in -> knob
+        L (56, 310, 116, 318, 1.4f), L (56, 470, 116, 478, 1.4f),
+        // integrator: input -> out, c.v. -> knob
+        L (462, 395, 526, 395, 1.4f, false, true), L (462, 480, 484, 492, 1.4f),
+    };
+    s.texts = {
+        T ("SOURCE OF UNCERTAINTY  SU-266", 295, 15, 10.5f, 4),
+        T ("-3db/oct", 98, 60, 10.0f), T ("flat", 98, 145, 10.0f), T ("+3db/oct", 98, 230, 10.0f),
+        T ("NOISE SOURCE", 75, 264, 10.0f, 1),
+        T ("out", 375, 56, 10.0f), T ("out", 375, 166, 10.0f),
+        T ("FLUCTUATING RANDOM VOLTAGES", 278, 158, 10.0f, 1), T ("FLUCTUATING RANDOM VOLTAGES", 278, 264, 10.0f, 1),
+        T ("pulse in", 445, 98, 10.0f), T ("c.v. in", 492, 205, 10.0f, 0, 1), T ("c.v. out", 492, 270, 10.0f, 0, 1),
+        T ("SAMPLE AND HOLD", 495, 328, 10.0f, 1),
+        T ("2^n", 240, 340, 10.0f), T ("n + 1", 345, 340, 10.0f), T ("out", 300, 306, 10.0f), T ("out", 385, 306, 10.0f),
+        T ("distribution", 340, 368, 10.0f),
+        T ("QUANTIZED RANDOM VOLTAGES", 210, 428, 10.0f, 1),
+        T ("out", 300, 468, 10.0f), T ("out", 385, 468, 10.0f), T ("uniform", 240, 500, 9.0f), T ("shaped", 345, 500, 9.0f),
+        T ("distribution", 340, 528, 10.0f),
+        T ("STORED RANDOM VOLTAGES", 210, 580, 10.0f, 1),
+        T ("c.v. in", 445, 510, 9.0f),
+        T ("INTEGRATOR", 495, 580, 10.0f, 1),
+        T ("CALABI YAU  -  after Buchla 266t", 295, 602, 9.0f, 1),
+    };
+    s.leds = {
+        D (375, 124, M266::Led_Fluct1), D (375, 234, M266::Led_Fluct2),
+        D (240, 306, M266::Led_Q2n), D (345, 306, M266::Led_Qn1),
+        D (240, 466, M266::Led_StoredUni), D (345, 466, M266::Led_StoredDist),
+    };
+    scaleSpec (s, 430.0f / 610.0f);
     return s;
 }
 

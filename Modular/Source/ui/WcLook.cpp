@@ -45,34 +45,53 @@ WcLook::WcLook()
     setColour (juce::TooltipWindow::textColourId, juce::Colour (0xffeeeeee));
 }
 
-// 200-series knobs: a light grey (or blue / black) skirted knob with a black (or white) index line.
-// The blue ring and numbers around it are printed on the panel (ModulePanel::paint).
+// 200t knobs: a brushed silver cap on a coloured (blue) knurled skirt, black index line.
+// The printed scale around the knob is drawn by the panel.
 void WcLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s)
 {
     const int style = (int) s.getProperties().getWithDefault ("style", 1);
-    const juce::Colour body ((juce::uint32) (juce::int64) s.getProperties().getWithDefault ("cap", (juce::int64) 0xffe6e6e1));
+    const juce::Colour skirt ((juce::uint32) (juce::int64) s.getProperties().getWithDefault ("cap", (juce::int64) 0xff2c55b4));
     const auto area = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
     const auto c = area.getCentre();
-    const float kr = style == 0 ? 30.0f : (style == 1 ? 21.0f : 13.5f);
+    const float kr = style == 0 ? 33.0f : (style == 1 ? 22.0f : 14.0f);       // skirt radius
+    const float cr = style == 0 ? kr * 0.5f : kr * 0.72f;                    // cap radius (big knobs: wide blue skirt)
     const float ang = a0 + pos * (a1 - a0);
-    // shadow
     g.setColour (juce::Colours::black.withAlpha (0.30f));
     g.fillEllipse (c.x - kr + 1.5f, c.y - kr + 3.0f, kr * 2.0f, kr * 2.0f);
-    // skirt
-    g.setGradientFill (juce::ColourGradient (body.brighter (0.15f), c.x - kr, c.y - kr, body.darker (0.35f), c.x + kr, c.y + kr, false));
-    g.fillEllipse (c.x - kr, c.y - kr, kr * 2.0f, kr * 2.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.35f));
-    g.drawEllipse (c.x - kr, c.y - kr, kr * 2.0f, kr * 2.0f, 0.8f);
-    // cap
-    const float cr = kr * 0.74f;
-    g.setGradientFill (juce::ColourGradient (body.brighter (0.35f), c.x - cr * 0.6f, c.y - cr * 0.8f, body.darker (0.12f), c.x + cr * 0.6f, c.y + cr, true));
+    // knurled skirt
+    {
+        juce::Path sk;
+        const int teeth = style == 0 ? 48 : 30;
+        for (int i = 0; i <= teeth * 2; ++i)
+        {
+            const float a = juce::MathConstants<float>::twoPi * (float) i / (float) (teeth * 2) + ang;
+            const float rr = kr * (i % 2 == 0 ? 1.0f : 0.965f);
+            if (i == 0) sk.startNewSubPath (c.x + rr * std::sin (a), c.y - rr * std::cos (a));
+            else sk.lineTo (c.x + rr * std::sin (a), c.y - rr * std::cos (a));
+        }
+        sk.closeSubPath();
+        g.setGradientFill (juce::ColourGradient (skirt.brighter (0.35f), c.x - kr, c.y - kr, skirt.darker (0.45f), c.x + kr, c.y + kr, false));
+        g.fillPath (sk);
+        g.setColour (juce::Colours::black.withAlpha (0.3f));
+        g.strokePath (sk, juce::PathStrokeType (0.7f));
+    }
+    // brushed silver cap
+    juce::ColourGradient grad (juce::Colour (0xfff7f8fa), c.x - cr * 0.7f, c.y - cr * 0.8f, juce::Colour (0xff9da2aa), c.x + cr * 0.7f, c.y + cr * 0.9f, false);
+    grad.addColour (0.5, juce::Colour (0xffd9dce1));
+    g.setGradientFill (grad);
     g.fillEllipse (c.x - cr, c.y - cr, cr * 2.0f, cr * 2.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.18f));
-    g.drawEllipse (c.x - cr, c.y - cr, cr * 2.0f, cr * 2.0f, 0.7f);
-    // index line
-    const bool dark = body.getPerceivedBrightness() < 0.5f;
-    g.setColour (dark ? juce::Colour (0xfff4f4f2) : juce::Colour (0xff141416));
-    g.drawLine (c.x + kr * 0.12f * std::sin (ang), c.y - kr * 0.12f * std::cos (ang), c.x + kr * 0.96f * std::sin (ang), c.y - kr * 0.96f * std::cos (ang), style == 0 ? 3.0f : 2.2f);
+    for (int i = 0; i < 6; ++i)   // concentric brushing
+    {
+        const float rr = cr * (0.25f + 0.12f * (float) i);
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.drawEllipse (c.x - rr, c.y - rr, rr * 2.0f, rr * 2.0f, 0.5f);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.drawEllipse (c.x - cr, c.y - cr, cr * 2.0f, cr * 2.0f, 0.8f);
+    // index line on the cap (big knobs: across the skirt too)
+    g.setColour (juce::Colour (0xff121316));
+    const float r1 = style == 0 ? 0.0f : cr * 0.15f, r2 = style == 0 ? kr * 0.95f : cr * 0.98f;
+    g.drawLine (c.x + r1 * std::sin (ang), c.y - r1 * std::cos (ang), c.x + r2 * std::sin (ang), c.y - r2 * std::cos (ang), style == 0 ? 2.6f : 2.0f);
     if (s.isMouseOverOrDragging())
     {
         g.setColour (juce::Colours::white.withAlpha (0.12f));

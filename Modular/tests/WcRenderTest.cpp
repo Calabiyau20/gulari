@@ -177,7 +177,7 @@ int main (int argc, char** argv)
         p.loadBuiltinPatch (7);
         for (float lock : { 0.0f, 0.8f })
         {
-            setP (p, "b_lock", lock);
+            setP (p, "b_lock", lock); setP (p, "b_lock_on", lock > 0.0f ? 1.0f : 0.0f);
             run (p, 2400);
             auto a = run (p, (int) SR * 2, kInst259, M259::Out_Sine, 48);
             auto b = run (p, (int) SR * 2, kInst259 + 1, M259::Out_Sine);
@@ -310,20 +310,20 @@ int main (int argc, char** argv)
                 if (std::fabs (slope - (k == 0 ? -3.0 : (k == 1 ? 0.0 : 3.0))) > 0.8) ok = false;
             }
         }
-        // quantized: count distinct levels
-        for (int mode = 0; mode < 2; ++mode)
+        // quantized: count distinct levels on both outputs (n = 3: 2^n = 8 levels in 10 V, n+1 = 4 levels in 5 V)
         {
-            setP (p, "ua_qmode", (float) mode); setP (p, "ua_steps", 3.0f);
+            setP (p, "ua_steps", 3.0f);
             u.beginBlock (256);
-            std::set<int> levels;
+            std::set<int> l2n, ln1;
             for (int i = 0; i < 4000; ++i)
             {
                 in[M266::In_QPulse] = (i % 2) ? 10.0f : 0.0f;
                 u.tick (in, out);
-                if (i > 2) levels.insert ((int) std::lround (out[M266::Out_Quant] * 1000.0f));
+                if (i > 2) { l2n.insert ((int) std::lround (out[M266::Out_Q2n] * 1000.0f)); ln1.insert ((int) std::lround (out[M266::Out_Qn1] * 1000.0f)); }
             }
-            std::printf ("  quantized n=3 (%s): %d levels, max %.2f V\n", mode == 0 ? "n+1" : "2^n", (int) levels.size(), *levels.rbegin() / 1000.0);
-            if ((int) levels.size() != (mode == 0 ? 4 : 8)) ok = false;
+            std::printf ("  quantized n=3: 2^n out %d levels (max %.2f V), n+1 out %d levels (max %.2f V)\n",
+                         (int) l2n.size(), *l2n.rbegin() / 1000.0, (int) ln1.size(), *ln1.rbegin() / 1000.0);
+            if (l2n.size() != 8 || ln1.size() != 4) ok = false;
         }
         in[M266::In_QPulse] = 0.0f;
         // sample & hold alternation

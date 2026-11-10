@@ -37,7 +37,7 @@ static void drawItalic (juce::Graphics& g, const juce::String& text, juce::Recta
 // JackComp
 // =================================================================================================
 JackComp::JackComp (RackView& rv, int i, const JackSpec& s, int dsp)
-    : inst (i), index (dsp), output (s.output), kind (s.kind), pulse (s.pulse), rack (rv)
+    : inst (i), index (dsp), output (s.output), kind (s.kind), pulse (s.pulse), tint (s.tint), rack (rv)
 {
     setTooltip (jackTip (s));
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -55,7 +55,7 @@ void JackComp::paint (juce::Graphics& g)
     if (kind == JackKind::Banana)
     {
         // colour code of the 200 series: red = pulses, black = control in, blue = control out
-        const juce::Colour ins = pulse ? juce::Colour (0xffc62127) : (output ? juce::Colour (0xff2452b8) : juce::Colour (0xff17181b));
+        const juce::Colour ins = tint != 0 ? juce::Colour (tint) : (pulse ? juce::Colour (0xffc62127) : (output ? juce::Colour (0xff2452b8) : juce::Colour (0xff17181b)));
         g.setColour (juce::Colours::black.withAlpha (0.28f));
         g.fillEllipse (c.x - 10.0f, c.y - 8.5f, 21.0f, 21.0f);
         g.setGradientFill (juce::ColourGradient (ins.brighter (0.35f), c.x - 5, c.y - 8, ins.darker (0.3f), c.x + 6, c.y + 9, false));
@@ -106,14 +106,14 @@ void JackComp::mouseUp (const juce::MouseEvent& e) { if (! e.mods.isPopupMenu())
 // =================================================================================================
 // ParamSwitch
 // =================================================================================================
-ParamSwitch::ParamSwitch (juce::RangedAudioParameter& p, int n, const juce::String& l)
-    : param (p), positions (n), attach (p, [this] (float v) { value = juce::roundToInt (v); repaint(); })
+ParamSwitch::ParamSwitch (juce::RangedAudioParameter& p, int n, const juce::String& l, juce::Colour t)
+    : param (p), positions (n), tip (t), attach (p, [this] (float v) { value = juce::roundToInt (v); repaint(); })
 {
     topIsOne = dynamic_cast<juce::AudioParameterBool*> (&p) != nullptr;
-    labels = juce::StringArray::fromTokens (l, "|", "");
+    if (l.isNotEmpty()) labels = juce::StringArray::fromTokens (l, "|", "");
     attach.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip (p.getName (64) + ": " + l.replace ("|", " / ") + "  (click a position)");
+    setTooltip (p.getName (64) + (l.isNotEmpty() ? ": " + l.replace ("|", " / ") : juce::String()) + "  (click a position)");
 }
 
 // chrome bat-handle toggle, vertical, labels printed to its right
@@ -143,10 +143,11 @@ void ParamSwitch::paint (juce::Graphics& g)
     g.drawLine (cx + 1.0f, cy + 1.0f, cx + 1.0f, ty + 1.0f, 4.5f);
     g.setGradientFill (juce::ColourGradient (juce::Colours::white, cx - 2, ty, juce::Colour (0xff9a9da3), cx + 2, cy, false));
     g.drawLine (cx, cy, cx, ty, 4.0f);
-    g.setColour (juce::Colour (0xfff7f7f5));
+    g.setColour (tip);
     g.fillEllipse (cx - 3.6f, ty - 3.6f, 7.2f, 7.2f);
     g.setColour (juce::Colour (0xff6c6f75));
     g.drawEllipse (cx - 3.6f, ty - 3.6f, 7.2f, 7.2f, 0.7f);
+    if (labels.isEmpty()) return;
     if (labels.size() == 1)
     {
         drawItalic (g, labels[0], { 0.0f, 0.0f, 24.0f + 30.0f, 10.0f }, juce::Justification::centredLeft, WcLook::label (9.0f), col::ink);
@@ -169,6 +170,37 @@ void ParamSwitch::mouseDown (const juce::MouseEvent& e)
     else pos = rel < 0.5f ? 0 : 1;
     const int v = topIsOne ? (pos == 0 ? 1 : 0) : pos;
     attach.setValueAsCompleteGesture ((float) v);
+}
+
+ParamButton::ParamButton (juce::RangedAudioParameter& p)
+    : param (p), attach (p, [this] (float v) { value = v; repaint(); })
+{
+    attach.sendInitialUpdate();
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTooltip (p.getName (64) + " - click to change");
+}
+
+void ParamButton::mouseDown (const juce::MouseEvent&)
+{
+    down = true;
+    const int steps = juce::jmax (2, param.getNumSteps());
+    const float hi = param.convertFrom0to1 (1.0f), lo = param.convertFrom0to1 (0.0f);
+    float next = value + (hi - lo) / (float) (steps - 1);
+    if (next > hi + 1.0e-3f) next = lo;
+    attach.setValueAsCompleteGesture (next);
+    repaint();
+}
+
+void ParamButton::paint (juce::Graphics& g)
+{
+    const auto c = getLocalBounds().toFloat().getCentre();
+    g.setColour (juce::Colours::black.withAlpha (0.3f));
+    g.fillEllipse (c.x - 11.0f, c.y - 9.5f, 23.0f, 23.0f);
+    g.setColour (juce::Colour (0xff9c9d9a));
+    g.fillEllipse (c.x - 11.5f, c.y - 11.5f, 23.0f, 23.0f);
+    const float r = down ? 8.0f : 9.0f;
+    g.setGradientFill (juce::ColourGradient (juce::Colour (down ? 0xffd5d5d1 : 0xffffffff), c.x - 4, c.y - 6, juce::Colour (0xffc4c4bf), c.x + 4, c.y + 6, false));
+    g.fillEllipse (c.x - r, c.y - r, 2.0f * r, 2.0f * r);
 }
 
 // white momentary button, as on the 281t
@@ -204,12 +236,22 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             continue;
         }
         auto* param = proc.apvts.getParameter (prefix + c.suffix);
+        if (param != nullptr && c.style == CtrlStyle::Button)
+        {
+            auto b = std::make_unique<ParamButton> (*param);
+            b->setBounds ((int) c.x - 14, (int) c.y - 14, 28, 28);
+            addAndMakeVisible (*b);
+            buttons.push_back (std::move (b));
+            continue;
+        }
         jassert (param != nullptr);
         if (param == nullptr) continue;
         if (c.style == CtrlStyle::Toggle || c.style == CtrlStyle::Switch3)
         {
-            auto sw = std::make_unique<ParamSwitch> (*param, c.style == CtrlStyle::Switch3 ? 3 : 2, c.label);
-            const bool single = ! juce::String (c.label).containsChar ('|');
+            auto sw = std::make_unique<ParamSwitch> (*param, c.style == CtrlStyle::Switch3 ? 3 : 2, c.label,
+                                                     c.colour == 0xff2c55b4 ? juce::Colour (0xff2f62d0)
+                                                         : (c.colour == 0 || c.colour == 0xffe6e6e1 ? juce::Colour (0xfff7f7f5) : juce::Colour (c.colour)));
+            const bool single = juce::String (c.label).isNotEmpty() && ! juce::String (c.label).containsChar ('|');
             const int h = c.style == CtrlStyle::Switch3 ? 46 : (single ? 50 : 38);
             sw->setBounds ((int) c.x - 12, (int) c.y - h / 2, single ? 56 : 74, h);
             addAndMakeVisible (*sw);
@@ -246,35 +288,52 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     }
 }
 
-// printed scale around a knob (blue ring + numbers), as on the 200-series panels
+// printed scale around a knob: numbers (or dots for "*") on one or two rings
 static void drawScale (juce::Graphics& g, const ControlSpec& c)
 {
-    const float r = c.style == CtrlStyle::BigKnob ? 33.0f : (c.style == CtrlStyle::Knob ? 24.0f : 16.0f);
+    const float r = c.style == CtrlStyle::BigKnob ? 34.0f : (c.style == CtrlStyle::Knob ? 24.0f : 16.0f);
     const float a0 = juce::MathConstants<float>::pi * 1.2f, a1 = juce::MathConstants<float>::pi * 2.8f;
+    auto ring = [&] (const char* sc, float tr, float size)
+    {
+        if (sc == nullptr) return;
+        const auto marks = juce::StringArray::fromTokens (sc, "|", "");
+        for (int i = 0; i < marks.size(); ++i)
+        {
+            const float t = marks.size() == 1 ? 0.5f : (float) i / (float) (marks.size() - 1);
+            const float a = a0 + (a1 - a0) * t;
+            const float x = c.x + tr * std::sin (a), y = c.y - tr * std::cos (a);
+            if (marks[i] == "*") { g.setColour (col::ink); g.fillEllipse (x - 1.8f, y - 1.8f, 3.6f, 3.6f); }
+            else drawItalic (g, marks[i], { x - 18.0f, y - 6.0f, 36.0f, 12.0f }, juce::Justification::centred, WcLook::label (size), col::ink);
+        }
+    };
+    if (c.scale2 != nullptr) { ring (c.scale, r + 26.0f, 8.5f); ring (c.scale2, r + 13.0f, 7.5f); }
+    else ring (c.scale, r + (c.style == CtrlStyle::BigKnob ? 13.0f : 11.0f), c.style == CtrlStyle::BigKnob ? 9.0f : 8.0f);
+}
+
+static void drawArrowLine (juce::Graphics& g, const LineSpec& l)
+{
+    juce::Line<float> line (l.x1, l.y1, l.x2, l.y2);
     g.setColour (col::ink);
-    if (c.style != CtrlStyle::SmallKnob)
+    if (l.dashed)
     {
-        juce::Path arc;
-        arc.addCentredArc (c.x, c.y, r + 3.0f, r + 3.0f, 0.0f, a0, a1, true);
-        g.strokePath (arc, juce::PathStrokeType (c.style == CtrlStyle::BigKnob ? 2.6f : 2.0f));
+        const float dashes[] = { 4.0f, 3.0f };
+        g.drawDashedLine (line, dashes, 2, l.width);
     }
-    if (c.scale == nullptr) return;
-    const auto marks = juce::StringArray::fromTokens (c.scale, "|", "");
-    const float tr = r + (c.style == CtrlStyle::BigKnob ? 13.0f : 11.0f);
-    for (int i = 0; i < marks.size(); ++i)
+    else g.drawLine (line, l.width);
+    if (l.arrow)
     {
-        const float t = marks.size() == 1 ? 0.5f : (float) i / (float) (marks.size() - 1);
-        const float a = a0 + (a1 - a0) * t;
-        const float x = c.x + tr * std::sin (a), y = c.y - tr * std::cos (a);
-        drawItalic (g, marks[i], { x - 16.0f, y - 6.0f, 32.0f, 12.0f }, juce::Justification::centred, WcLook::label (c.style == CtrlStyle::BigKnob ? 9.0f : 8.0f), col::ink);
+        juce::Path head;
+        head.addArrow (juce::Line<float> (line.getPointAlongLineProportionally (0.8f), line.getEnd()), 0.0f, 7.0f, 7.0f);
+        g.fillPath (head);
     }
 }
 
 void ModulePanel::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    // anodised light grey aluminium
-    g.setGradientFill (juce::ColourGradient (col::panelHi, 0, 0, col::panelLo, 0, r.getHeight(), false));
+    const bool silk = ! spec.lines.empty();        // modules drawn from a photo layout
+    // anodised aluminium
+    g.setGradientFill (juce::ColourGradient (silk ? juce::Colour (0xffe3e5e8) : col::panelHi, 0, 0, silk ? juce::Colour (0xffc7cad0) : col::panelLo, 0, r.getHeight(), false));
     g.fillRect (r);
     juce::Random rnd (inst * 977 + 3);
     for (int y = 0; y < getHeight(); y += 2)
@@ -284,153 +343,105 @@ void ModulePanel::paint (juce::Graphics& g)
     }
     g.setColour (juce::Colours::black.withAlpha (0.45f));
     g.drawRect (r, 1.0f);
-    // mounting screws
-    for (auto p : { juce::Point<float> (9, 9), juce::Point<float> (r.getWidth() - 9, r.getHeight() - 9), juce::Point<float> (9, r.getHeight() - 9) })
+    // mounting slots
+    for (auto p : { juce::Point<float> (14, 7), juce::Point<float> (r.getWidth() - 40, r.getHeight() - 7), juce::Point<float> (14, r.getHeight() - 7) })
     {
-        g.setColour (juce::Colour (0xffa3a4a6));
-        g.fillEllipse (p.x - 3.5f, p.y - 3.5f, 7.0f, 7.0f);
-        g.setColour (juce::Colour (0xff6a6c70));
-        g.drawLine (p.x - 2.5f, p.y, p.x + 2.5f, p.y, 1.0f);
+        g.setColour (juce::Colour (0xfff4f4f2));
+        g.fillRoundedRectangle (p.x - 7.0f, p.y - 3.0f, 14.0f, 6.0f, 2.0f);
+        g.setColour (juce::Colour (0xff9a9ca0));
+        g.drawRoundedRectangle (p.x - 7.0f, p.y - 3.0f, 14.0f, 6.0f, 2.0f, 0.7f);
     }
 
-    // title (upper case, bold italic, blue) and footer
+    if (! silk)
     {
-        juce::String t = spec.name;
-        if (isRemovable (inst) && typeOfInst (inst) != MT_266) t << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
-        drawItalic (g, t, { 20.0f, 6.0f, r.getWidth() - 50.0f, 22.0f }, juce::Justification::centred, WcLook::title (15.0f), col::ink);
-        juce::String foot ("CALABI YAU   ");
-        foot << spec.model;
-        if (juce::String (spec.after).isNotEmpty()) foot << "   -   " << spec.after;
-        drawItalic (g, foot, { 20.0f, r.getHeight() - 20.0f, r.getWidth() - 40.0f, 14.0f }, juce::Justification::centred, WcLook::title (9.5f), col::ink);
-    }
-
-    // section frames: blue rules with the title on the frame
-    for (auto& sct : spec.sections)
-    {
-        auto sr = juce::Rectangle<float> (sct.x, sct.y, sct.w, sct.h);
-        g.setColour (col::ink);
-        g.drawRoundedRectangle (sr, 5.0f, 1.4f);
-        if (juce::String (sct.title).isNotEmpty())
+        // our own modules (MIDI, Output): title, footer and rounded section frames
+        drawItalic (g, spec.name, { 20.0f, 6.0f, r.getWidth() - 50.0f, 22.0f }, juce::Justification::centred, WcLook::title (15.0f), col::ink);
+        drawItalic (g, juce::String ("CALABI YAU   ") + spec.model, { 20.0f, r.getHeight() - 20.0f, r.getWidth() - 40.0f, 14.0f },
+                    juce::Justification::centred, WcLook::title (9.5f), col::ink);
+        for (auto& sct : spec.sections)
         {
-            const auto f = WcLook::label (10.0f);
-            const float tw = juce::GlyphArrangement::getStringWidth (f, sct.title) + 12.0f;
-            auto tr = juce::Rectangle<float> (tw, 13.0f).withCentre ({ sr.getCentreX(), sr.getY() });
-            g.setGradientFill (juce::ColourGradient (col::panelHi, 0, 0, col::panelLo, 0, r.getHeight(), false));
-            g.fillRect (tr);
-            drawItalic (g, sct.title, tr, juce::Justification::centred, f, col::ink);
+            auto sr = juce::Rectangle<float> (sct.x, sct.y, sct.w, sct.h);
+            g.setColour (col::ink);
+            g.drawRoundedRectangle (sr, 5.0f, 1.4f);
+            if (juce::String (sct.title).isNotEmpty())
+            {
+                const auto f = WcLook::label (10.0f);
+                const float tw = juce::GlyphArrangement::getStringWidth (f, sct.title) + 12.0f;
+                auto tr = juce::Rectangle<float> (tw, 13.0f).withCentre ({ sr.getCentreX(), sr.getY() });
+                g.setGradientFill (juce::ColourGradient (col::panelHi, 0, 0, col::panelLo, 0, r.getHeight(), false));
+                g.fillRect (tr);
+                drawItalic (g, sct.title, tr, juce::Justification::centred, f, col::ink);
+            }
         }
     }
 
-    // printed scales and knob labels
+    // silkscreen: rules, arrows, texts
+    for (auto& l : spec.lines) drawArrowLine (g, l);
+    for (auto& t : spec.texts)
+    {
+        juce::String txt (t.text);
+        if (t.style == 4 && isRemovable (inst) && typeOfInst (inst) != MT_266) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
+        const auto f = t.style == 0 ? WcLook::label (t.size) : WcLook::title (t.size);
+        const float w = juce::GlyphArrangement::getStringWidth (f, txt) + 10.0f;
+        juce::Rectangle<float> box;
+        juce::Justification j = juce::Justification::centred;
+        if (t.just == 1) { box = { t.x, t.y - t.size, w, t.size * 2.0f }; j = juce::Justification::centredLeft; }
+        else if (t.just == 2) { box = { t.x - w, t.y - t.size, w, t.size * 2.0f }; j = juce::Justification::centredRight; }
+        else box = { t.x - w * 0.5f, t.y - t.size, w, t.size * 2.0f };
+        if (t.style == 3)
+        {
+            g.setColour (col::ink);
+            g.drawEllipse (t.x - 8.0f, t.y - 8.0f, 16.0f, 16.0f, 1.2f);
+        }
+        if (t.style == 4)   // title strip: white band with blue lettering
+        {
+            g.setColour (juce::Colour (0xfff2f3f5));
+            g.fillRect (juce::Rectangle<float> (4.0f, t.y - 8.0f, r.getWidth() - 8.0f, 16.0f));
+        }
+        drawItalic (g, txt, box, j, f, col::ink);
+    }
+
+    // printed scales and knob captions
     for (auto& c : spec.controls)
     {
         if (c.style == CtrlStyle::BigKnob || c.style == CtrlStyle::Knob || c.style == CtrlStyle::SmallKnob)
         {
             drawScale (g, c);
-            const float half = c.style == CtrlStyle::BigKnob ? 37.0f : (c.style == CtrlStyle::Knob ? 28.0f : 20.0f);
-            const float extra = c.scale != nullptr && c.style != CtrlStyle::SmallKnob ? 6.0f : 0.0f;
-            drawItalic (g, c.label, { c.x - 46.0f, c.y + half + extra - 2.0f, 92.0f, 13.0f }, juce::Justification::centred,
-                        WcLook::label (c.style == CtrlStyle::SmallKnob ? 9.0f : 10.5f), col::ink);
+            if (juce::String (c.label).isNotEmpty())
+            {
+                const float half = c.style == CtrlStyle::BigKnob ? 37.0f : (c.style == CtrlStyle::Knob ? 28.0f : 20.0f);
+                const float extra = c.scale != nullptr && c.style != CtrlStyle::SmallKnob ? 6.0f : 0.0f;
+                drawItalic (g, c.label, { c.x - 46.0f, c.y + half + extra - 2.0f, 92.0f, 13.0f }, juce::Justification::centred,
+                            WcLook::label (c.style == CtrlStyle::SmallKnob ? 9.0f : 10.5f), col::ink);
+            }
         }
     }
-    // jack labels (below the jack, lowercase italics)
     for (auto& j : spec.jacks)
         if (juce::String (j.label).isNotEmpty())
-            drawItalic (g, j.label, { j.x - 26.0f, j.y + 11.0f, 52.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), col::ink);
-
-    // module-specific printing
-    const auto type = typeOfInst (inst);
-    if (type == MT_281)
-    {
-        const float rowY[4] = { 78, 162, 246, 330 };
-        const char* L[4] = { "A", "B", "C", "D" };
-        for (int n = 0; n < 4; ++n)
-        {
-            const float y = rowY[n];
-            g.setColour (col::ink);
-            g.drawEllipse (199.0f, y + 20.0f, 16.0f, 16.0f, 1.2f);                 // channel letter
-            drawItalic (g, L[n], { 199.0f, y + 20.0f, 16.0f, 16.0f }, juce::Justification::centred, WcLook::title (10.0f), col::ink);
-            g.drawLine (322.0f, y - 12.0f, 330.0f, y - 12.0f, 1.2f);               // pulse symbol by the EOD jack
-            g.drawLine (326.0f, y - 22.0f, 326.0f, y - 12.0f, 1.2f);
-            juce::Path fn;                                                           // function symbol by the FUNC jack
-            fn.startNewSubPath (320.0f, y + 22.0f); fn.lineTo (326.0f, y + 12.0f); fn.lineTo (332.0f, y + 22.0f);
-            g.strokePath (fn, juce::PathStrokeType (1.2f));
-            drawItalic (g, "outs", { 340.0f, y - 6.0f, 40.0f, 12.0f }, juce::Justification::centredRight, WcLook::label (8.0f), col::ink);
-        }
-        for (int p = 0; p < 2; ++p)
-        {
-            const float ky = p == 0 ? 88.0f : 238.0f, jy = p == 0 ? 152.0f : 302.0f;
-            juce::Path a1, a2;
-            a1.startNewSubPath (420.0f, ky + 38.0f); a1.lineTo (412.0f, jy - 14.0f);
-            a2.startNewSubPath (444.0f, ky + 38.0f); a2.lineTo (452.0f, jy - 14.0f);
-            g.setColour (col::ink);
-            g.strokePath (a1, juce::PathStrokeType (1.2f));
-            g.strokePath (a2, juce::PathStrokeType (1.2f));
-            drawItalic (g, p == 0 ? "A>B" : "C>D", { 392.0f, jy + 11.0f, 36.0f, 12.0f }, juce::Justification::centred, WcLook::label (8.5f), col::ink);
-            drawItalic (g, p == 0 ? "B>A" : "D>C", { 436.0f, jy + 11.0f, 36.0f, 12.0f }, juce::Justification::centred, WcLook::label (8.5f), col::ink);
-        }
-        drawItalic (g, "A - B", { 386.0f, 338.0f, 40.0f, 12.0f }, juce::Justification::centred, WcLook::label (8.5f), col::ink);
-        drawItalic (g, "C - D", { 426.0f, 338.0f, 40.0f, 12.0f }, juce::Justification::centred, WcLook::label (8.5f), col::ink);
-    }
-    else if (type == MT_292)
-    {
-        const float cx[4] = { 53, 147, 241, 335 };
-        const char* L[4] = { "A", "B", "C", "D" };
-        for (int n = 0; n < 4; ++n)
-        {
-            g.setColour (col::ink);
-            g.drawEllipse (cx[n] - 8.0f, 44.0f, 16.0f, 16.0f, 1.2f);
-            drawItalic (g, L[n], { cx[n] - 8.0f, 44.0f, 16.0f, 16.0f }, juce::Justification::centred, WcLook::title (10.0f), col::ink);
-            g.drawLine (cx[n], 302.0f, cx[n], 324.0f, 1.0f);       // signal flow: input -> c.v. -> output
-        }
-        drawItalic (g, "mix", { 386.0f, 340.0f, 50.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), col::ink);
-    }
-    else if (type == MT_259)
-    {
-        drawItalic (g, "program inputs", { 182.0f, 300.0f, 150.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), col::ink);
-        g.setColour (col::ink);
-        g.drawLine (192.0f, 313.0f, 322.0f, 313.0f, 1.0f);
-    }
+            drawItalic (g, j.label, { j.x - 30.0f, j.y + 11.0f, 60.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), col::ink);
 }
 
 void ModulePanel::paintOverChildren (juce::Graphics& g)
 {
     auto led = [&] (float x, float y, juce::Colour c, float a)
     {
-        g.setColour (juce::Colour (0xff3a2222));
-        g.fillEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+        g.setColour (juce::Colour (0xff4a2222));
+        g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.drawEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f, 0.7f);
         if (a > 0.02f)
         {
             g.setColour (c.withAlpha (juce::jlimit (0.0f, 1.0f, a)));
-            g.fillEllipse (x - 3.2f, y - 3.2f, 6.4f, 6.4f);
+            g.fillEllipse (x - 3.6f, y - 3.6f, 7.2f, 7.2f);
             g.setColour (c.withAlpha (0.25f * juce::jlimit (0.0f, 1.0f, a)));
-            g.fillEllipse (x - 7.5f, y - 7.5f, 15.0f, 15.0f);
+            g.fillEllipse (x - 8.0f, y - 8.0f, 16.0f, 16.0f);
         }
     };
+    for (size_t i = 0; i < spec.leds.size(); ++i)
+        led (spec.leds[i].x, spec.leds[i].y, juce::Colour (spec.leds[i].colour), i < ledCache.size() ? ledCache[i] : 0.0f);
     const auto type = typeOfInst (inst);
-    if (type == MT_259)
-    {
-        led (156.0f, 54.0f, ledA >= 0.0f ? col::ledGreen : col::ledRed, std::fabs (ledA));
-        led (229.0f, 378.0f, col::ledGreen, ledOn ? 1.0f : 0.0f);
-    }
-    else if (type == MT_Midi)
+    if (type == MT_Midi)
         led (150.0f, 56.0f, col::ledRed, ledOn ? 1.0f : 0.0f);
-    else if (type == MT_281)
-    {
-        const float rowY[4] = { 78, 162, 246, 330 };
-        for (int n = 0; n < 4; ++n)
-        {
-            led (366.0f, rowY[n] - 17.0f, juce::Colour (0xffffd23a), leds4[n] > 0.999f ? 1.0f : 0.0f);   // peak / pulse
-            led (366.0f, rowY[n] + 17.0f, col::ledRed, leds4[n]);                                        // function level
-        }
-    }
-    else if (type == MT_292)
-    {
-        const float cx[4] = { 53, 147, 241, 335 };
-        for (int n = 0; n < 4; ++n) led (cx[n] + 32.0f, 200.0f, juce::Colour (0xffffb14a), leds4[n]);
-    }
-    else if (type == MT_266)
-        led (171.0f, 150.0f, col::ledRed, ledA);
     else if (type == MT_Output)
     {
         for (int ch = 0; ch < 2; ++ch)
@@ -450,30 +461,21 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
 void ModulePanel::updateLeds()
 {
     const auto type = typeOfInst (inst);
-    if (type == MT_259)
+    if (! spec.leds.empty())
     {
-        auto* m = proc.rack.m259 (subIndex (inst));
-        const float a = m->moLed.load (std::memory_order_relaxed);
-        const bool l = m->lockLed.load (std::memory_order_relaxed);
-        if (std::fabs (a - ledA) > 0.02f || l != ledOn) { ledA = a; ledOn = l; repaint (140, 40, 32, 30); repaint (215, 364, 30, 30); }
-    }
-    else if (type == MT_281 || type == MT_292)
-    {
-        bool changed = false;
-        for (int n = 0; n < 4; ++n)
+        auto* m = proc.rack.module (inst);
+        ledCache.resize (spec.leds.size(), 0.0f);
+        for (size_t i = 0; i < spec.leds.size(); ++i)
         {
-            float v = type == MT_281 ? proc.rack.m281 (subIndex (inst))->level[n].load (std::memory_order_relaxed)
-                                     : std::sqrt (proc.rack.m292 (subIndex (inst))->led[n].load (std::memory_order_relaxed));
-            if (std::fabs (v - leds4[n]) > 0.01f) { leds4[n] = v; changed = true; }
+            const float v = m->led (spec.leds[i].id);
+            if (std::fabs (v - ledCache[i]) > 0.02f)
+            {
+                ledCache[i] = v;
+                repaint (juce::Rectangle<int> ((int) spec.leds[i].x - 9, (int) spec.leds[i].y - 9, 18, 18));
+            }
         }
-        if (changed) { if (type == MT_281) repaint (354, 30, 26, 340); else repaint (0, 186, getWidth(), 30); }
     }
-    else if (type == MT_266)
-    {
-        const float v = proc.rack.m266()->fluctLed.load (std::memory_order_relaxed);
-        if (std::fabs (v - ledA) > 0.01f) { ledA = v; repaint (160, 139, 22, 22); }
-    }
-    else if (type == MT_Midi)
+    if (type == MT_Midi)
     {
         const bool on = proc.rack.midi().gateLed.load (std::memory_order_relaxed);
         if (on != ledOn) { ledOn = on; repaint (136, 42, 30, 30); }

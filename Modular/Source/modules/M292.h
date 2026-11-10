@@ -41,7 +41,16 @@ public:
     void tick (const float* in, float* out) noexcept override;
     void reset() override;
 
-    std::atomic<float> led[4] {};
+    std::atomic<float> ledV[4] {};
+    // LEDs per channel, as on the 292t: 2n = lopass, 2n+1 = gate (both dark in combo); brightness follows the vactrol
+    float led (int id) const noexcept override
+    {
+        const int n = juce::jlimit (0, 3, id / 2);
+        const int m = modeNow[n].load (std::memory_order_relaxed);
+        const bool on = id % 2 == 0 ? m == 0 : m == 2;
+        return on ? 0.3f + 0.7f * std::sqrt (ledV[n].load (std::memory_order_relaxed)) : 0.0f;
+    }
+    std::atomic<int> modeNow[4] {};
 
     // exposed for the tests
     static float ldrOhms (float ledAmps) { return 3.464f / std::pow (juce::jmax (1.0e-5f, ledAmps), 1.4f) + 1136.212f; }

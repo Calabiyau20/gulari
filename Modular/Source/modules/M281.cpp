@@ -98,6 +98,8 @@ void M281::tick (const float* in, float* out) noexcept
         out[outEod (n)] = c.eodLeft > 0 ? 10.0f : 0.0f;
         if (c.eodLeft > 0) --c.eodLeft;
         level[n].store (c.v, std::memory_order_relaxed);
+        c.eodFlash = c.eodLeft > 0 ? 1.0f : c.eodFlash * (1.0f - 1.0f / (0.08f * fs));
+        eodLed[n].store (juce::jmax (c.eodFlash, c.v >= 1.0f ? 1.0f : 0.0f), std::memory_order_relaxed);
     }
     // quadrature mix: A <-> B and C <-> D crossfades, each with its complement
     for (int p = 0; p < 2; ++p)

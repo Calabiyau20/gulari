@@ -265,7 +265,7 @@ endif()
 # Self-contained: its own small asset bundle (official isologo + fonts).
 # =============================================================================
 set(WC_PRODUCT_NAME "Calabi Yau West Coast Modular")
-set(WC_VERSION      "0.3.0")
+set(WC_VERSION      "0.4.0")
 juce_add_binary_data(WcAssets NAMESPACE WcData HEADER_NAME WcData.h SOURCES
     Resources/brand/isologo.png Resources/fonts/Montserrat-SemiBold.ttf Resources/fonts/Montserrat-Bold.ttf Resources/fonts/Syncopate-Bold.ttf)
 set_target_properties(WcAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -12,7 +12,12 @@ class M259 : public Module
 public:
     enum In { In_MoPitch, In_MoCv, In_MoFm, In_IndexCv, In_ProgWave, In_ProgPitch, In_ProgTimbre, In_ProgAmp, In_Lock,
               In_PoPitch, In_PoCv, In_PoFm, In_TimbreCv, In_SymCv, In_OrderCv, In_Count };
-    enum Out { Out_MoSignal, Out_MoCv, Out_Sine, Out_Square, Out_Final1, Out_Final2, Out_Count };
+    enum Out { Out_MoSignal, Out_MoCv, Out_Sine, Out_Square, Out_Final1, Out_Final2,
+               Out_MoTri, Out_MoPulse, Out_PoPulse, Out_Count };   // 259t: fixed triangle, the two GATE OUT pulse jacks
+    // panel LEDs
+    enum Led { Led_Low, Led_High, Led_Saw, Led_Sqr, Led_Tri, Led_Lock, Led_Amp, Led_Pitch, Led_Timbre, Led_1V,
+               Led_Sym, Led_Order, Led_MoGate, Led_PoGate, Led_Count };
+    float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
 
     M259 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
 
@@ -27,6 +32,10 @@ public:
 
 private:
     struct P { std::atomic<float>* v = nullptr; float get() const { return v != nullptr ? v->load() : 0.0f; } };
+    std::array<std::atomic<float>, Led_Count> leds {};
+    P lockOn, volt1;
+    float pitchDiv = 1.2f;
+    bool lockOnV = false;
     P moFreq, moFine, moRange, moWave, moCvAmt, moFmAmt, index, indexCvAmt, modAmp, modPitch, modTimbre, prog, lockAmt,
       poFreq, poFine, poCvAmt, poFmAmt, timbre, timbreCvAmt, sym, order;
 
@@ -60,7 +69,8 @@ private:
     dsp::Vactrol amVactrol;
     dsp::DcBlock acSine, acSquare, acFinal, acMo;
     std::array<float, dsp::Decimator4::kTaps> taps {};
-    dsp::Decimator4 decFinal, decSine, decSquare, decMo;
+    dsp::Decimator4 decFinal, decSine, decSquare, decMo, decTri;
+    dsp::DcBlock acTri;
 
     float foldComp (float A) const noexcept;
 };

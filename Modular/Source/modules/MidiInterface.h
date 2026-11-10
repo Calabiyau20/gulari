@@ -19,6 +19,7 @@ public:
 
     void handle (const juce::MidiMessage& m) noexcept;
     std::atomic<bool> gateLed { false };
+    float led (int) const noexcept override { return gateLed.load (std::memory_order_relaxed) ? 1.0f : 0.0f; }
 
 private:
     std::atomic<float>* glide = nullptr;

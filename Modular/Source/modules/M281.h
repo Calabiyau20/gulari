@@ -32,6 +32,13 @@ public:
     static float timeSeconds (float norm) { return 0.001f * std::pow (10.0f, 4.0f * norm); }   // 1 ms .. 10 s
 
     std::atomic<bool> manual[4] {};          // panel trigger buttons
+    // LEDs: 2n = end-of-decay / peak (yellow), 2n+1 = function level (red)
+    float led (int id) const noexcept override
+    {
+        const int n = juce::jlimit (0, 3, id / 2);
+        return id % 2 == 1 ? level[n].load (std::memory_order_relaxed) : (eodLed[n].load (std::memory_order_relaxed));
+    }
+    std::atomic<float> eodLed[4] {};
     std::atomic<float> level[4] {};          // for the LEDs (0..1)
 
 private:
@@ -44,6 +51,7 @@ private:
         int eodLeft = 0;
         bool pendingTrig = false; // quadrature trigger from the partner
         bool held = false;        // gate currently high (sustained mode)
+        float eodFlash = 0.0f;
     };
     std::atomic<float>* att[4] {};
     std::atomic<float>* dec[4] {};

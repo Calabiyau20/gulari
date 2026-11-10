@@ -26,7 +26,7 @@ void M292::prepare (double sampleRate)
 void M292::reset()
 {
     for (auto& c : ch) { c.ledI = 1.0e-5f; c.s1 = c.s2 = 0.0f; }
-    for (auto& l : led) l.store (0.0f);
+    for (auto& l : ledV) l.store (0.0f);
 }
 
 void M292::beginBlock (int)
@@ -37,7 +37,8 @@ void M292::beginBlock (int)
         set (ch[n].off, offP[n]->load());
         set (ch[n].cv, cvP[n]->load());
         set (ch[n].res, resP[n]->load());
-        ch[n].mode = juce::jlimit (0, 2, (int) std::lround (modeP[n]->load()));   // 0 LOPASS, 1 BOTH, 2 VCA
+        ch[n].mode = juce::jlimit (0, 2, (int) std::lround (modeP[n]->load()));   // 0 LOPASS, 1 COMBO, 2 GATE
+        modeNow[n].store (ch[n].mode, std::memory_order_relaxed);
     }
     first = false;
 }
@@ -91,7 +92,7 @@ void M292::tick (const float* in, float* out) noexcept
         if (! std::isfinite (y)) { c.s1 = c.s2 = 0.0f; y = 0.0f; }
         out[outSig (n)] = y;
         all += y;
-        led[n].store (rel, std::memory_order_relaxed);
+        ledV[n].store (rel, std::memory_order_relaxed);
     }
     out[outAll] = all;
 }

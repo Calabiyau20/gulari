@@ -40,7 +40,9 @@ static void add259 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     group->addChild (std::make_unique<APB> (id ("mod_pitch"), n + "Mod Pitch", false));
     group->addChild (std::make_unique<APB> (id ("mod_timbre"), n + "Mod Timbre", false));
     group->addChild (std::make_unique<APC> (id ("prog"), n + "Program", juce::StringArray { "Local", "Remote", "Both" }, 0));
-    group->addChild (std::make_unique<APF> (id ("lock"), n + "Phase Lock", NR (0.0f, 1.0f), 0.0f));
+    group->addChild (std::make_unique<APF> (id ("lock"), n + "Phase Lock Gain", NR (0.0f, 1.0f), 0.7f));
+    group->addChild (std::make_unique<APB> (id ("lock_on"), n + "Phase Lock", false));
+    group->addChild (std::make_unique<APB> (id ("volt1"), n + "1V/Oct", false));
     // principal oscillator
     group->addChild (std::make_unique<APF> (id ("po_freq"), n + "Principal Frequency", NR (0.0f, 1.0f), coarseNorm (65.406f, false), hzAttr (false)));
     group->addChild (std::make_unique<APF> (id ("po_fine"), n + "Principal Fine", NR (-3.5f, 3.5f), 0.0f, unitAttr (" st")));
@@ -99,11 +101,12 @@ static void add266 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
     auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("ua_grp", "266", "|");
     g->addChild (std::make_unique<APF> (juce::ParameterID (p + "rate", 1), n + "Fluctuating Rate", NR (0.0f, 1.0f), 0.45f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (0.05f * std::pow (1000.0f, v), 2) + " Hz"; })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "rate2", 1), n + "Fluctuating Rate 2", NR (0.0f, 1.0f), 0.3f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (0.05f * std::pow (1000.0f, v), 2) + " Hz"; })));
     g->addChild (std::make_unique<APF> (juce::ParameterID (p + "smooth", 1), n + "Integrator Smoothing", NR (0.0f, 1.0f), 0.3f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (0.01f * std::pow (1000.0f, v), 2) + " s"; })));
     g->addChild (std::make_unique<APF> (juce::ParameterID (p + "steps", 1), n + "Quantized Steps", NR (1.0f, 6.0f, 1.0f), 3.0f));
-    g->addChild (std::make_unique<APC> (juce::ParameterID (p + "qmode", 1), n + "Quantized Scale", juce::StringArray { "n+1", "2^n" }, 0));
-    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "dist", 1), n + "Stored Distribution", NR (0.0f, 1.0f), 0.5f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "dist", 1), n + "Stored Probability", NR (0.0f, 1.0f), 0.5f));
     l.add (std::move (g));
 }
 

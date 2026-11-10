@@ -14,6 +14,7 @@ M259::M259 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     modTimbre = get ("mod_timbre"); prog = get ("prog"); lockAmt = get ("lock");
     poFreq = get ("po_freq"); poFine = get ("po_fine"); poCvAmt = get ("po_cv"); poFmAmt = get ("po_fm");
     timbre = get ("timbre"); timbreCvAmt = get ("timbre_cv"); sym = get ("sym"); order = get ("order");
+    lockOn = get ("lock_on"); volt1 = get ("volt1");
     taps = Decimator4::makeTaps();
 }
 
@@ -24,7 +25,7 @@ void M259::prepare (double sampleRate)
     rampLen = juce::jmax (1, (int) (0.012f * fs));   // 12 ms glide on every knob: no zipper, no clicks
     folder.prepare (fsOs);
     amVactrol.set (3.0f, 40.0f, fs);                 // LED/LDR: fast on, slow off
-    for (auto* d : { &acSine, &acSquare, &acFinal, &acMo }) d->set (8.0f, fs);   // AC-coupled outputs
+    for (auto* d : { &acSine, &acSquare, &acFinal, &acMo, &acTri }) d->set (8.0f, fs);   // AC-coupled outputs
 
     // folder level compensation: RMS of the static transfer for a sine of amplitude A (no filter),
     // partially compensated (70 %) so higher Timbre still gets brighter and a little louder, like the hardware
@@ -57,8 +58,8 @@ void M259::reset()
     moPhase = poPhase = 0.0;
     moLast = 0.0f;
     folder.reset();
-    for (auto* d : { &acSine, &acSquare, &acFinal, &acMo }) d->reset();
-    for (auto* d : { &decFinal, &decSine, &decSquare, &decMo }) d->reset();
+    for (auto* d : { &acSine, &acSquare, &acFinal, &acMo, &acTri }) d->reset();
+    for (auto* d : { &decFinal, &decSine, &decSquare, &decMo, &decTri }) d->reset();
     std::fill (std::begin (prevIn), std::end (prevIn), 0.0f);
     lockPrev = 0.0f; lockSamplesSince = 0.0; lockPeriod = 0.0; lockDivCount = 0; lockRatio = 1.0f;
     firstBlock = true;
@@ -78,6 +79,10 @@ void M259::beginBlock (int)
     moWaveLocal = juce::jlimit (0, 2, (int) std::lround (moWave.get()));
     ampLocal = modAmp.get() > 0.5f; pitchLocal = modPitch.get() > 0.5f; timbreLocal = modTimbre.get() > 0.5f;
     progMode = juce::jlimit (0, 2, (int) std::lround (prog.get()));
+    lockOnV = lockOn.get() > 0.5f;
+    pitchDiv = volt1.get() > 0.5f ? 1.0f : 1.2f;     // 1V/OCT button: Eurorack 1 V/oct, else Buchla 1.2 V/oct
+    leds[Led_Low].store (lowRange ? 1.0f : 0.0f); leds[Led_High].store (lowRange ? 0.0f : 1.0f);
+    leds[Led_1V].store (pitchDiv < 1.1f ? 1.0f : 0.0f);
     firstBlock = false;
 }
 
@@ -85,13 +90,13 @@ void M259::tick (const float* in, float* out) noexcept
 {
     // ---- stage 01: control summing + expo (1.2 V/oct) ----
     const float moLog = sMoHz.next(), poLog = sPoHz.next();
-    const float moHz = std::exp2 (moLog + (in[In_MoPitch] + sMoCv.next() * in[In_MoCv]) / 1.2f);
-    float poHz = std::exp2 (poLog + (in[In_PoPitch] + sPoCv.next() * in[In_PoCv]) / 1.2f);
+    const float moHz = std::exp2 (moLog + (in[In_MoPitch] + sMoCv.next() * in[In_MoCv]) / pitchDiv);
+    float poHz = std::exp2 (poLog + (in[In_PoPitch] + sPoCv.next() * in[In_PoCv]) / pitchDiv);
     const float idxV = clampf (sIndex.next() + sIndexCv.next() * in[In_IndexCv] / 10.0f, 0.0f, 1.0f);
     const float timbreBase = sTimbre.next() + sTimbreCv.next() * in[In_TimbreCv] / 10.0f;
     const float symV = clampf (sSym.next() + in[In_SymCv] / 10.0f, 0.0f, 1.0f);
     const float orderV = clampf (sOrder.next() + in[In_OrderCv] / 10.0f, 0.0f, 1.0f);
-    const float moFm = sMoFm.next(), poFm = sPoFm.next(), lockA = sLock.next();
+    const float moFm = sMoFm.next(), poFm = sPoFm.next(), lockA = lockOnV ? sLock.next() : (sLock.next(), 0.0f);
 
     // ---- stage 04: programming (Local / Remote / Both) ----
     bool ampOn = ampLocal, pitchOn = pitchLocal, timbreOn = timbreLocal;
@@ -223,6 +228,7 @@ void M259::tick (const float* in, float* out) noexcept
         decSine.push (sine);
         decSquare.push (sq * 0.8f);
         decMo.push (mo);
+        decTri.push (1.0f - 4.0f * std::fabs (mp - 0.5f));
     }
     std::copy (in, in + In_Count, prevIn);
 
@@ -232,8 +238,23 @@ void M259::tick (const float* in, float* out) noexcept
     out[Out_Sine] = acSine.process (decSine.output (taps));
     out[Out_Square] = acSquare.process (decSquare.output (taps));
     const float m = decMo.output (taps);
+    const float moTriOs = lowRange ? decTri.output (taps) : acTri.process (decTri.output (taps));
     out[Out_MoSignal] = lowRange ? m : acMo.process (m);
     out[Out_MoCv] = 5.0f + 5.0f * moLast;
+    out[Out_MoTri] = moTriOs;
+    out[Out_MoPulse] = moPhase < 0.5 ? 10.0f : 0.0f;          // GATE OUT: the modulation oscillator as a pulse
+    out[Out_PoPulse] = poPhase >= 0.25 && poPhase < 0.75 ? 10.0f : 0.0f;
     moLed.store (moLast, std::memory_order_relaxed);
+    leds[Led_Saw].store (wave == 0 ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Sqr].store (wave == 1 ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Tri].store (wave == 2 ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Lock].store (lockOnV ? (lockLed.load (std::memory_order_relaxed) ? 1.0f : 0.35f) : 0.0f, std::memory_order_relaxed);
+    leds[Led_Amp].store (ampOn ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Pitch].store (pitchOn ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Timbre].store (timbreOn ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_Sym].store (clampf (std::fabs (in[In_SymCv]) / 10.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+    leds[Led_Order].store (clampf (std::fabs (in[In_OrderCv]) / 10.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+    leds[Led_MoGate].store (moPhase < 0.5 ? 1.0f : 0.0f, std::memory_order_relaxed);
+    leds[Led_PoGate].store (0.5f, std::memory_order_relaxed);
 }
 } // namespace wc

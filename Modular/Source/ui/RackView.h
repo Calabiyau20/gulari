@@ -23,6 +23,7 @@ public:
     const bool output;
     const JackKind kind;
     const bool pulse;
+    const juce::uint32 tint;
 private:
     RackView& rack;
 };
@@ -31,15 +32,31 @@ private:
 class ParamSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    ParamSwitch (juce::RangedAudioParameter& p, int positions, const juce::String& labels);
+    ParamSwitch (juce::RangedAudioParameter& p, int positions, const juce::String& labels, juce::Colour tip = juce::Colour (0xfff7f7f5));
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
 private:
     juce::RangedAudioParameter& param;
     int positions, value = 0;
     bool topIsOne = false;          // on/off switches: up = on
+    juce::Colour tip;
     juce::StringArray labels;       // one per position, top to bottom
     juce::ParameterAttachment attach;
+};
+
+// white panel button that steps a parameter (259t RANGE, 1V/OCT)
+class ParamButton : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit ParamButton (juce::RangedAudioParameter& p);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override { down = false; repaint(); }
+private:
+    juce::RangedAudioParameter& param;
+    juce::ParameterAttachment attach;
+    float value = 0.0f;
+    bool down = false;
 };
 
 // momentary panel button (281 manual triggers)
@@ -75,6 +92,8 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::vector<std::unique_ptr<ParamSwitch>> switches;
     std::vector<std::unique_ptr<PushButton>> pushes;
+    std::vector<std::unique_ptr<ParamButton>> buttons;
+    std::vector<float> ledCache;
     float leds4[4] {};
     juce::TextButton removeButton { "x" };
     float ledA = 0.0f, ledB = 0.0f;

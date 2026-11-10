@@ -193,7 +193,7 @@ void WcProcessor::loadBuiltinPatch (int index)
         case 7:   // Phase Lock Unison: B detuned, then locked to A's sine - the beating disappears
             voice (A); voice (B);
             toOut (A, OutputModule::In_Left); toOut (B, OutputModule::In_Right); gateToOut();
-            setParam (b + "po_fine", 0.25f); setParam (b + "lock", 0.8f);
+            setParam (b + "po_fine", 0.25f); setParam (b + "lock", 0.8f); setParam (b + "lock_on", 1.0f);
             cables.push_back ({ A, M259::Out_Sine, B, M259::In_Lock, nextColour (false) });
             setParam (a + "timbre", 0.4f); setParam (b + "timbre", 0.4f); setParam (b + "order", 0.6f);
             break;
@@ -247,14 +247,14 @@ void WcProcessor::loadBuiltinPatch (int index)
             const juce::String f (prefix281 (0)), l (prefix292 (0));
             setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.05f); setParam (f + "dec1", 0.6f);
             cables.push_back ({ kInst281, M281::outEod (0), kInst266, M266::In_QPulse, nextColour (true) });
-            cables.push_back ({ kInst266, M266::Out_Quant, kInst266, M266::In_IntIn, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Qn1, kInst266, M266::In_IntIn, nextColour (true) });
             cables.push_back ({ kInst266, M266::Out_Int, A, M259::In_PoPitch, nextColour (true) });
             cables.push_back ({ kInst266, M266::Out_Int, A, M259::In_MoPitch, nextColour (true) });
-            cables.push_back ({ kInst266, M266::Out_Fluct, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Fluct1, A, M259::In_TimbreCv, nextColour (true) });
             cables.push_back ({ kInst281, M281::outEod (0), kInst292, M292::inCtl (0), nextColour (true) });
             cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
             cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
-            setParam ("ua_steps", 4.0f); setParam ("ua_qmode", 0.0f); setParam ("ua_smooth", 0.12f); setParam ("ua_rate", 0.35f);
+            setParam ("ua_steps", 4.0f); setParam ("ua_smooth", 0.12f); setParam ("ua_rate", 0.35f);
             setParam (a + "po_freq", hz (130.81f)); setParam (a + "mo_freq", hz (130.81f * 2.0f)); setParam (a + "idx", 0.2f); setParam (a + "mod_pitch", 1.0f);
             setParam (a + "timbre", 0.1f); setParam (a + "timbre_cv", 0.45f);
             setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
@@ -311,6 +311,12 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
         if (old == 9) return kInstOutput;
         return -1;
     };
+    if (version < 3)   // the phase lock toggle is new: older patches that used the lock get it switched on
+        for (int i = 0; i < kMax259; ++i)
+        {
+            const juce::String p (prefix259 (i));
+            if (auto* l = apvts.getRawParameterValue (p + "lock")) if (l->load() > 0.001f) setParam (p + "lock_on", 1.0f);
+        }
     present.fill (false);
     auto mods = t.getChildWithName ("MODULES");
     if (version >= 3)
