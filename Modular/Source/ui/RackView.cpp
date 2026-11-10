@@ -2,6 +2,8 @@
 #include "../modules/M259.h"
 #include "../modules/MidiInterface.h"
 #include "../modules/OutputModule.h"
+#include "../modules/M281.h"
+#include "../modules/M292.h"
 
 namespace wc::ui
 {
@@ -144,16 +146,37 @@ void ParamSwitch::mouseDown (const juce::MouseEvent& e)
     attach.setValueAsCompleteGesture ((float) v);
 }
 
+void PushButton::paint (juce::Graphics& g)
+{
+    const auto c = getLocalBounds().toFloat().getCentre();
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillEllipse (c.x - 10.0f, c.y - 9.0f, 21.0f, 21.0f);
+    g.setColour (juce::Colour (0xff1c1d21));
+    g.fillEllipse (c.x - 11.0f, c.y - 11.0f, 22.0f, 22.0f);
+    const float r = down ? 7.0f : 8.0f;
+    g.setGradientFill (juce::ColourGradient (juce::Colour (down ? 0xff9b9ea5 : 0xffeceae4), c.x - 4, c.y - 6, juce::Colour (0xff6e7178), c.x + 4, c.y + 6, false));
+    g.fillEllipse (c.x - r, c.y - r, 2.0f * r, 2.0f * r);
+}
+
 // =================================================================================================
 // ModulePanel
 // =================================================================================================
 ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     : inst (i), rack (rv), proc (p), spec (specFor (typeOfInst (i)))
 {
-    prefix = typeOfInst (i) == MT_259 ? juce::String (prefix259 (i - kInst259)) : juce::String();
+    prefix = instPrefix (i);
     setSize ((int) spec.width, (int) spec.height);
     for (auto& c : spec.controls)
     {
+        if (c.style == CtrlStyle::Push)
+        {
+            const int n = juce::String (c.suffix).getTrailingIntValue() - 1;
+            auto b = std::make_unique<PushButton> (proc.rack.m281 (subIndex (inst))->manual[juce::jlimit (0, 3, n)]);
+            b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
+            addAndMakeVisible (*b);
+            pushes.push_back (std::move (b));
+            continue;
+        }
         auto* param = proc.apvts.getParameter (prefix + c.suffix);
         jassert (param != nullptr);
         if (param == nullptr) continue;
@@ -187,7 +210,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         addAndMakeVisible (*jc);
         jacks.push_back (std::move (jc));
     }
-    if (typeOfInst (i) == MT_259)
+    if (isRemovable (i))
     {
         removeButton.setTooltip ("Remove this module from the rack");
         removeButton.setBounds ((int) spec.width - 26, 7, 18, 18);
@@ -211,7 +234,7 @@ void ModulePanel::paint (juce::Graphics& g)
     // rack screws
     for (auto p : { juce::Point<float> (10, 10), juce::Point<float> (r.getWidth() - 10, 10), juce::Point<float> (10, r.getHeight() - 10), juce::Point<float> (r.getWidth() - 10, r.getHeight() - 10) })
     {
-        if (typeOfInst (inst) == MT_259 && p.x > r.getWidth() - 20 && p.y < 20) continue;
+        if (isRemovable (inst) && p.x > r.getWidth() - 20 && p.y < 20) continue;
         g.setColour (juce::Colour (0xff8e9096));
         g.fillEllipse (p.x - 4.0f, p.y - 4.0f, 8.0f, 8.0f);
         g.setColour (juce::Colour (0xff55585e));
@@ -224,13 +247,13 @@ void ModulePanel::paint (juce::Graphics& g)
     g.setColour (col::ink);
     g.setFont (WcLook::title (15.0f));
     juce::String t = spec.name;
-    if (typeOfInst (inst) == MT_259) t << "   " << juce::String::charToString ((juce::juce_wchar) ('A' + inst - kInst259));
+    if (isRemovable (inst)) t << "   " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
     g.drawText (t, 24, 6, (int) r.getWidth() - 48, 20, juce::Justification::centred);
     g.setFont (WcLook::label (10.0f));
     g.setColour (col::inkSoft);
     g.drawText (juce::String ("MODEL ") + spec.model, 20, 22, 160, 14, juce::Justification::left);
-    if (typeOfInst (inst) == MT_259)
-        g.drawText ("after Buchla 259", (int) r.getWidth() - 190, 22, 160, 14, juce::Justification::right);
+    if (juce::String (spec.after).isNotEmpty())
+        g.drawText (spec.after, (int) r.getWidth() - 190, 22, 160, 14, juce::Justification::right);
 
     // sections: thin ruled frames with a title
     for (auto& s : spec.sections)
@@ -251,7 +274,7 @@ void ModulePanel::paint (juce::Graphics& g)
     g.setColour (col::ink);
     for (auto& c : spec.controls)
     {
-        const float half = c.style == CtrlStyle::BigKnob ? 37.0f : (c.style == CtrlStyle::Knob ? 27.0f : (c.style == CtrlStyle::SmallKnob ? 19.0f : 12.0f));
+        const float half = c.style == CtrlStyle::BigKnob ? 37.0f : (c.style == CtrlStyle::Knob ? 27.0f : (c.style == CtrlStyle::SmallKnob ? 19.0f : (c.style == CtrlStyle::Push ? 15.0f : 12.0f)));
         g.setFont (WcLook::label (c.style == CtrlStyle::SmallKnob ? 8.5f : 9.5f));
         const float y = c.style == CtrlStyle::Toggle || c.style == CtrlStyle::Switch3 ? c.y + 15.0f : c.y + half - 1.0f;
         g.drawText (c.label, juce::Rectangle<float> (c.x - 45.0f, y, 90.0f, 12.0f), juce::Justification::centred);
@@ -296,6 +319,16 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
     }
     else if (type == MT_Midi)
         led (150.0f, 62.0f, col::ledRed, ledOn ? 1.0f : 0.0f);
+    else if (type == MT_281)
+    {
+        const float cx[4] = { 58, 158, 266, 366 };
+        for (int n = 0; n < 4; ++n) led (cx[n] + 32.0f, 304.0f, col::ledRed, leds4[n]);
+    }
+    else if (type == MT_292)
+    {
+        const float cx[4] = { 53, 147, 241, 335 };
+        for (int n = 0; n < 4; ++n) led (cx[n], 318.0f, juce::Colour (0xffffb14a), leds4[n]);
+    }
     else if (type == MT_Output)
     {
         for (int ch = 0; ch < 2; ++ch)
@@ -323,6 +356,17 @@ void ModulePanel::updateLeds()
         // only the low range is slow enough to see the LED move; at audio rate it shows a steady glow
         if (std::fabs (a - ledA) > 0.02f || l != ledOn) { ledA = a; ledOn = l; repaint (130, 40, 50, 44); repaint (213, 384, 32, 32); }
     }
+    else if (type == MT_281 || type == MT_292)
+    {
+        bool changed = false;
+        for (int n = 0; n < 4; ++n)
+        {
+            float v = type == MT_281 ? proc.rack.m281 (subIndex (inst))->level[n].load (std::memory_order_relaxed)
+                                     : std::sqrt (proc.rack.m292 (subIndex (inst))->led[n].load (std::memory_order_relaxed));
+            if (std::fabs (v - leds4[n]) > 0.01f) { leds4[n] = v; changed = true; }
+        }
+        if (changed) { if (type == MT_281) repaint (0, 288, getWidth(), 32); else repaint (0, 306, getWidth(), 24); }
+    }
     else if (type == MT_Midi)
     {
         const bool on = proc.rack.midi().gateLed.load (std::memory_order_relaxed);
@@ -338,7 +382,7 @@ void ModulePanel::updateLeds()
 
 void ModulePanel::mouseDown (const juce::MouseEvent& e)
 {
-    if (! e.mods.isPopupMenu() || typeOfInst (inst) != MT_259) return;
+    if (! e.mods.isPopupMenu() || ! isRemovable (inst)) return;
     juce::PopupMenu m;
     m.addItem (1, "Remove " + instName (inst));
     m.showMenuAsync (juce::PopupMenu::Options(), [this] (int r) { if (r == 1) proc.setPresent (inst, false); });
@@ -428,7 +472,7 @@ void RackView::rebuild()
     // order on the rails: MIDI, the 259s, OUTPUT; rows wrap at ~1330 units
     std::vector<int> order;
     order.push_back (kInstMidi);
-    for (int i = 0; i < kMax259; ++i) if (proc.isPresent (kInst259 + i)) order.push_back (kInst259 + i);
+    for (int i = 1; i < kInstOutput; ++i) if (proc.isPresent (i)) order.push_back (i);   // 281s, 259s, 292s
     order.push_back (kInstOutput);
     const int gap = 6, maxW = 1336, rowH = 430;
     int x = gap, y = gap, rowW = 0;

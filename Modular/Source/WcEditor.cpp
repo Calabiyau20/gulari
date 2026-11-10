@@ -125,17 +125,23 @@ void WcEditor::addModuleMenu()
 {
     juce::PopupMenu m;
     m.addSectionHeader ("Add to the rack");
-    bool any = false;
-    for (int i = 0; i < kMax259; ++i)
-        if (! proc.isPresent (kInst259 + i)) { m.addItem (1 + i, "CW-259 Complex Waveform Generator  (" + instName (kInst259 + i) + ")"); any = true; }
-    if (! any) m.addItem (99, "All four 259 slots are in use", false);
+    auto addType = [&] (int first, int count, const juce::String& title)
+    {
+        bool any = false;
+        for (int i = 0; i < count; ++i)
+            if (! proc.isPresent (first + i)) { m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")"); any = true; }
+        if (! any) m.addItem (999, title + "  - all slots in use", false);
+    };
+    addType (kInst281, kMax281, "QF-281 Quad Function Generator");
+    addType (kInst259, kMax259, "CW-259 Complex Waveform Generator");
+    addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
     m.addSeparator();
     m.addSectionHeader ("Coming next");
-    for (auto* s : { "281 Quad Function Generator", "292 Quad Lowpass Gate", "266 Source of Uncertainty", "248 Multiple Arbitrary Function Generator" })
-        m.addItem (200, s, false);
+    for (auto* s : { "266 Source of Uncertainty", "248 Multiple Arbitrary Function Generator", "291 Dual Bandpass Filter", "285 Frequency Shifter" })
+        m.addItem (998, s, false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {
-        if (r >= 1 && r <= kMax259) proc.setPresent (kInst259 + r - 1, true);
+        if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) proc.setPresent (r - 1, true);
     });
 }
 

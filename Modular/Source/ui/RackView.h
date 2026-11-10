@@ -39,6 +39,19 @@ private:
     juce::ParameterAttachment attach;
 };
 
+// momentary panel button (281 manual triggers)
+class PushButton : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit PushButton (std::atomic<bool>& t) : target (t) { setMouseCursor (juce::MouseCursor::PointingHandCursor); setTooltip ("Trigger (hold for a sustained function)"); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { target.store (true); down = true; repaint(); }
+    void mouseUp (const juce::MouseEvent&) override { target.store (false); down = false; repaint(); }
+private:
+    std::atomic<bool>& target;
+    bool down = false;
+};
+
 class ModulePanel : public juce::Component
 {
 public:
@@ -58,6 +71,8 @@ private:
     std::vector<std::unique_ptr<juce::Slider>> sliders;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::vector<std::unique_ptr<ParamSwitch>> switches;
+    std::vector<std::unique_ptr<PushButton>> pushes;
+    float leds4[4] {};
     juce::TextButton removeButton { "x" };
     float ledA = 0.0f, ledB = 0.0f;
     bool ledOn = false;

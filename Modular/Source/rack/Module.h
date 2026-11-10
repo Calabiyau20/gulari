@@ -9,7 +9,7 @@ namespace wc
 // Banana jacks carry control (DC, 0..10 V, pulses), mini jacks carry audio, exactly like a Series 200 system.
 enum class JackKind { Banana, Mini };
 
-enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_Count };
+enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_Count };
 
 struct JackSpec
 {
@@ -19,7 +19,7 @@ struct JackSpec
     float x, y;          // panel position, in panel units (1 unit = 1 px at 100% zoom)
 };
 
-enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3 };
+enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3, Push };   // Push = momentary button (not a parameter)
 
 struct ControlSpec
 {
@@ -36,7 +36,8 @@ struct ModuleSpec
 {
     ModuleType type;
     const char* name;      // panel title
-    const char* model;     // "Model 259-style" etc
+    const char* model;     // model code on the panel
+    const char* after;     // "after Buchla 259" (historical reference), or ""
     float width, height;
     std::vector<JackSpec> jacks;      // inputs first, then outputs (order = DSP indices)
     std::vector<ControlSpec> controls;

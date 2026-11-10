@@ -16,6 +16,7 @@ static ModuleSpec make259()
     s.type = MT_259;
     s.name = "COMPLEX WAVEFORM GENERATOR";
     s.model = "CW-259";
+    s.after = "after Buchla 259";
     s.width = 640.0f;
     s.height = 430.0f;
     s.sections = {
@@ -85,6 +86,7 @@ static ModuleSpec makeMidi()
     s.type = MT_Midi;
     s.name = "MIDI INTERFACE";
     s.model = "KB-225";
+    s.after = "";
     s.width = 176.0f;
     s.height = 430.0f;
     s.sections = { { "KEYBOARD", 8, 40, 160, 190 }, { "OUTPUTS", 8, 236, 160, 186 } };
@@ -113,6 +115,7 @@ static ModuleSpec makeOutput()
     s.type = MT_Output;
     s.name = "OUTPUT";
     s.model = "OUT-2";
+    s.after = "";
     s.width = 156.0f;
     s.height = 430.0f;
     s.sections = { { "LEVEL", 8, 40, 140, 246 }, { "INPUTS", 8, 292, 140, 130 } };
@@ -130,9 +133,84 @@ static ModuleSpec makeOutput()
     return s;
 }
 
+// QF-281 Quad Function Generator: two pairs (A-B, C-D), each pair with a QUAD switch
+static ModuleSpec make281()
+{
+    using J = JackKind;
+    ModuleSpec s;
+    s.type = MT_281;
+    s.name = "QUAD FUNCTION GENERATOR";
+    s.model = "QF-281";
+    s.after = "after Buchla 281";
+    s.width = 424.0f;
+    s.height = 430.0f;
+    s.sections = { { "FUNCTIONS  A - B", 8, 40, 200, 382 }, { "FUNCTIONS  C - D", 216, 40, 200, 382 } };
+    const float cx[4] = { 58, 158, 266, 366 };
+    const char* names[4] = { "A", "B", "C", "D" };
+    juce::ignoreUnused (names);
+    for (int n = 0; n < 4; ++n)          // inputs: TRIG, ATT, DEC per channel
+    {
+        s.jacks.push_back ({ "TRIG", J::Banana, false, cx[n] - 26, 352 });
+        s.jacks.push_back ({ "ATT", J::Banana, false, cx[n] - 26, 400 });
+        s.jacks.push_back ({ "DEC", J::Banana, false, cx[n], 400 });
+    }
+    for (int n = 0; n < 4; ++n)          // outputs: FUNCTION, END OF DECAY
+    {
+        s.jacks.push_back ({ "OUT", J::Banana, true, cx[n] + 26, 352 });
+        s.jacks.push_back ({ "EOD", J::Banana, true, cx[n] + 26, 400 });
+    }
+    static const char* att[4] = { "att1", "att2", "att3", "att4" };
+    static const char* dec[4] = { "dec1", "dec2", "dec3", "dec4" };
+    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
+    static const char* trg[4] = { "trig1", "trig2", "trig3", "trig4" };
+    for (int n = 0; n < 4; ++n)
+    {
+        s.controls.push_back ({ att[n], "ATTACK", CtrlStyle::Knob, cx[n], 112, kOrange });
+        s.controls.push_back ({ dec[n], "DECAY", CtrlStyle::Knob, cx[n], 194, kBlue });
+        s.controls.push_back ({ mode[n], "TRAN  SUS  CYC", CtrlStyle::Switch3, cx[n], 262, kGrey });
+        s.controls.push_back ({ trg[n], "TRIGGER", CtrlStyle::Push, cx[n], 304, kGrey });
+    }
+    s.controls.push_back ({ "quad12", "QUAD", CtrlStyle::Toggle, 108, 66, kGrey });
+    s.controls.push_back ({ "quad34", "QUAD", CtrlStyle::Toggle, 316, 66, kGrey });
+    return s;
+}
+
+// LG-292 Quad Lowpass Gate: four vactrol channels
+static ModuleSpec make292()
+{
+    using J = JackKind;
+    ModuleSpec s;
+    s.type = MT_292;
+    s.name = "QUAD LOWPASS GATE";
+    s.model = "LG-292";
+    s.after = "after Buchla 292";
+    s.width = 392.0f;
+    s.height = 430.0f;
+    s.sections = { { "1", 8, 40, 90, 382 }, { "2", 102, 40, 90, 382 }, { "3", 196, 40, 90, 382 }, { "4", 290, 40, 90, 382 } };
+    const float cx[4] = { 53, 147, 241, 335 };
+    for (int n = 0; n < 4; ++n)
+    {
+        s.jacks.push_back ({ "SIGNAL", J::Mini, false, cx[n] - 20, 352 });
+        s.jacks.push_back ({ "CONTROL", J::Banana, false, cx[n] + 20, 352 });
+    }
+    for (int n = 0; n < 4; ++n) s.jacks.push_back ({ "OUT", J::Mini, true, cx[n], 400 });
+    static const char* off[4] = { "off1", "off2", "off3", "off4" };
+    static const char* cv[4] = { "cv1", "cv2", "cv3", "cv4" };
+    static const char* res[4] = { "res1", "res2", "res3", "res4" };
+    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
+    for (int n = 0; n < 4; ++n)
+    {
+        s.controls.push_back ({ off[n], "OFFSET", CtrlStyle::Knob, cx[n], 104, kGrey });
+        s.controls.push_back ({ cv[n], "CV LEVEL", CtrlStyle::SmallKnob, cx[n], 180, kWhite });
+        s.controls.push_back ({ res[n], "RES", CtrlStyle::SmallKnob, cx[n], 238, kWhite });
+        s.controls.push_back ({ mode[n], "LP  BOTH  VCA", CtrlStyle::Switch3, cx[n], 288, kGrey });
+    }
+    return s;
+}
+
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292() };
     return specs[t];
 }
 } // namespace wc

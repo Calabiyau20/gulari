@@ -1,0 +1,91 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "devices": ["Buchla Model 281 Quad Function Generator", "Buchla Model 292 Quad Lopass Gate"],
+    "clone_names": ["QF-281 Quad Function Generator", "LG-292 Quad Lowpass Gate"],
+    "host": "Calabi Yau West Coast Modular (mismo rack que el CW-259)",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla, 281 y 292 se usan como referencia historica; emulaciones independientes, no afiliadas a Buchla USA."
+  },
+  "sources": [
+    {"id": "S1", "title": "Parker, D'Angelo - A Digital Model of the Buchla Lowpass-Gate (DAFx-13)", "url": "https://dafx.de/paper-archive/details/uqLQLFI9j52bBmv10UKKMg", "used_for": "292: circuito, valores (tablas 1 y 2), funcion de transferencia, limite de resonancia, modelo del vactrol"},
+    {"id": "S2", "title": "Rohs - MUMT618 Buchla LPG report (McGill, 2018)", "url": "https://www.music.mcgill.ca/~gary/courses/projects/618_2018/rohs/MUMT618_Buchla_LPG_Report.pdf", "used_for": "292: discretizacion TPT, dinamica del vactrol dependiente del nivel"},
+    {"id": "S3", "title": "Buchla 281 Quad Function Generator (panel / descripcion)", "url": "https://helpwiki.evergreen.edu/wiki/images/3/30/Buchla_281_Quad_Function_Generator.pdf", "used_for": "281: tiempos 1 ms - 10 s, modos, cuadratura (A dispara B al fin del ataque)"},
+    {"id": "S4", "title": "Buchla & Tiptop Audio 281t manual", "url": "https://analoguehaven.com/tiptop-audio/281t/manual.pdf", "used_for": "281: Transient / Sustained / Cyclic, salida 0-10 V, pulso de fin de decay, CV suma al tiempo"}
+  ],
+  "modules": [
+    {
+      "module": "QF-281 Quad Function Generator",
+      "stages": [
+        {
+          "stage_id": "281_01_rate_control",
+          "name": "Control de tiempo (Attack / Decay + CV)",
+          "fidelity": "measured",
+          "description": "Cada canal tiene un integrador cargado por una fuente de corriente controlada; la perilla y la CV se suman, de modo que mas tension = mas rapido. Rango 1 ms a 10 s (4 decadas).",
+          "schematic_ascii": "  knob ATT --+\n  ATT CV ----+--[suma]--[expo]--> I_attack --+\n                                               +--> (C) integrador --> FUNCTION 0..10 V\n  knob DEC --+--[suma]--[expo]--> I_decay  ---+\n  DEC CV ----+",
+          "equations": ["t = 1 ms * 10^(4 * clamp(knob - V_cv/10, 0, 1))", "rampa lineal: dV/dt = 10 V / t"],
+          "cpp": "Modular/Source/modules/M281.cpp"
+        },
+        {
+          "stage_id": "281_02_mode_logic",
+          "name": "Logica de modos y cuadratura",
+          "fidelity": "behavioral",
+          "description": "TRANSIENT: un flanco > 3 V dispara ataque y decay completos. SUSTAINED: mantiene 10 V mientras el gate esta alto. CYCLE: al terminar el decay vuelve a atacar (LFO). Redisparo durante el decay reinicia el ataque desde el nivel actual. QUAD: el canal A (C) dispara al B (D) al final de su ataque. EOD: pulso de 5 ms al terminar el decay.",
+          "schematic_ascii": "  TRIG >3V --[detector de flanco]--+--> [flip-flop ATTACK]--(fin de ataque)--+--> [DECAY] --(0 V)--> EOD pulse\n  boton TRIGGER -------------------+                                       |\n                                                     QUAD (A->B, C->D) <---+",
+          "cpp": "Modular/Source/modules/M281.cpp"
+        }
+      ]
+    },
+    {
+      "module": "LG-292 Quad Lowpass Gate",
+      "stages": [
+        {
+          "stage_id": "292_01_control_path",
+          "name": "Camino de control: OFFSET + CV -> corriente del LED",
+          "fidelity": "behavioral",
+          "description": "OFFSET y CONTROL (con CV LEVEL) se suman y manejan el LED del vactrol. La corriente crece exponencialmente con la tension (region Shockley del LED antes del codo del zener): 0 V = 10 uA (oscuro), 10 V = 40 mA. S1 da el circuito de control completo (Cc = 2 nF, R3 = 150k, zener 3.9 V, G = 2e5); aca se usa su comportamiento resultante.",
+          "schematic_ascii": "  OFFSET pot --+\n  CONTROL ----[CV LEVEL]--+--[op-amp G=2e5, R3 150k, Cc 2n]--[zener 3.9V]--[R9 470]--> LED (vactrol VTL5C3/2)",
+          "equations": ["I_LED = 10 uA * (40 mA / 10 uA)^(V/10),  V = clamp(10*offset + cv_level*V_ctl, 0, 10)"],
+          "cpp": "Modular/Source/modules/M292.cpp"
+        },
+        {
+          "stage_id": "292_02_vactrol",
+          "name": "Vactrol (LED + LDR)",
+          "fidelity": "circuit",
+          "description": "La resistencia del LDR sigue a la corriente del LED con la ley de S1 (eq. 39). La dinamica es asimetrica: sube rapido (~12 ms) y cae lento (~250 ms), ambas mas rapidas cuanto mas iluminado esta el LED (datasheet VTL5C3/2, S1, S2). Esa caida lenta es el 'bongo' de las LPG.",
+          "equations": [
+            "R_f = A / I^1.4 + B,  A = 3.464,  B = 1136.212 Ohm   (34 MOhm a 10 uA ... 1.45 kOhm a 40 mA)",
+            "subida: w = (5 / 12 ms) * (0.5 + 0.5 * I_target/40 mA)",
+            "bajada: w = (5 / 250 ms) * (0.6 + 2.0 * I/40 mA)",
+            "I[n+1] = I[n] + (I_target - I[n]) * (1 - exp(-w/fs))"
+          ],
+          "cpp": "Modular/Source/modules/M292.cpp"
+        },
+        {
+          "stage_id": "292_03_audio_path",
+          "name": "Camino de audio: Sallen-Key modificado con dos LDR",
+          "fidelity": "circuit",
+          "description": "Dos LDR (Rf) con C1 y C2 forman un pasa bajos de 2 polos; Ra a masa fija la atenuacion. El switch de modo cambia componentes: BOTH (Ra = 5 M, filtra y atenua), VCA (Ra = 5 k en paralelo: casi sin filtro, atenua), LOPASS (C3 = 4.7 nF y amplificador de realimentacion 'a': filtra con resonancia).",
+          "component_values": {"C1": "1 nF", "C2": "220 pF", "C3": "0 / 4.7 nF (LOPASS)", "Ra": "5 MOhm (BOTH, LOPASS) / 5 kOhm (VCA)", "Rf": "1.45 kOhm .. 34 MOhm (vactrol)"},
+          "schematic_ascii": "  IN --[Rf]--+--[Rf]--+---------------------+--> OUT\n             |        |                     |\n            C1       C2 --[buffer]--+       Ra\n             |        |             |       |\n            GND      +--[C3]--[x a]-+      GND",
+          "equations": [
+            "H(s) = 1 / (a1 + a2*s + a3*s^2)",
+            "a1 = 1 + 2*Rf/Ra",
+            "a2 = Rf*(2*C1 + C2 - C3*(a - 1) + (C2 + C3)*Rf/Ra)",
+            "a3 = Rf^2 * C1 * (C2 + C3)",
+            "a_max = (2*C1*Ra + (C2 + C3)*(Ra + Rf)) / (C3*Ra);  a = 0.97 * RES * a_max  (solo LOPASS)",
+            "Se resuelve como SVF de topologia preservada (trapezoidal): w0^2 = a1/a3, 1/Q = a2/(a3*w0), ganancia DC = 1/a1"
+          ],
+          "notes": "S1 tambien propone un limitador tanh en la realimentacion de resonancia; esta version es lineal. La ganancia de 4-5 dB del op-amp de entrada en modo VCA no esta compensada (S1 tampoco la modela).",
+          "cpp": "Modular/Source/modules/M292.cpp"
+        }
+      ],
+      "measured_in_tests": {
+        "BOTH (saw 110 Hz)": "10 V: 0 dB / 5 V: -0.9 dB y mas oscuro / 2 V: -16 dB / 0.5 V: -36 dB; caida a -40 dB en 660 ms",
+        "LOPASS": "5 V: -2 dB con brillo 15 %; caida a -40 dB en 465 ms",
+        "VCA": "atenua sin oscurecer (brillo 88 % a -32 dB); caida a -40 dB en 285 ms"
+      }
+    }
+  ]
+}

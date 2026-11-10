@@ -2,6 +2,8 @@
 #include "modules/M259.h"
 #include "modules/MidiInterface.h"
 #include "modules/OutputModule.h"
+#include "modules/M281.h"
+#include "modules/M292.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -90,7 +92,7 @@ void WcProcessor::disconnectOutput (int inst, int outJack)
 
 void WcProcessor::setPresent (int inst, bool on)
 {
-    if (inst == kInstMidi || inst == kInstOutput) return;
+    if (! isRemovable (inst)) return;
     present[(size_t) inst] = on;
     if (! on)
         cables.erase (std::remove_if (cables.begin(), cables.end(), [&] (const Cable& c) { return c.srcInst == inst || c.dstInst == inst; }), cables.end());
@@ -119,7 +121,8 @@ void WcProcessor::resetParams()
 
 juce::StringArray WcProcessor::builtinPatchNames()
 {
-    return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison" };
+    return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison",
+             "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -193,6 +196,49 @@ void WcProcessor::loadBuiltinPatch (int index)
             cables.push_back ({ A, M259::Out_Sine, B, M259::In_Lock, nextColour (false) });
             setParam (a + "timbre", 0.4f); setParam (b + "timbre", 0.4f); setParam (b + "order", 0.6f);
             break;
+        case 8:   // Bongo: the keyboard's 5 ms pulse pings the vactrol of the lowpass gate (BOTH mode)
+        {
+            voice (A);
+            present[(size_t) kInst292] = true;
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInstMidi, MI::Out_Pulse, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "timbre", 0.38f); setParam (a + "mo_freq", hz (65.406f * 2.0f)); setParam (a + "idx", 0.25f); setParam (a + "mod_pitch", 1.0f);
+            setParam ("midi_trans", 1.0f);
+            break;
+        }
+        case 9:   // Function Pluck: a 281 transient function opens the gate and the 259's Timbre at once
+        {
+            voice (A);
+            present[(size_t) kInst281] = present[(size_t) kInst292] = true;
+            const juce::String f (prefix281 (0)), l (prefix292 (0));
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst281, M281::inTrig (0), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (0), kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (0), A, M259::In_TimbreCv, nextColour (true) });     // stacked banana
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (f + "att1", 0.08f); setParam (f + "dec1", 0.64f);
+            setParam (a + "timbre", 0.08f); setParam (a + "timbre_cv", 0.7f); setParam (a + "sym", 0.58f);
+            setParam (l + "mode1", 0.0f); setParam (l + "res1", 0.55f);
+            break;
+        }
+        case 10:  // Quadrature Drift: 281 A cycles and fires B at its peak; A sweeps Timbre, B sweeps Order
+        {
+            voice (A);
+            present[(size_t) kInst281] = present[(size_t) kInst292] = true;
+            const juce::String f (prefix281 (0)), l (prefix292 (0));
+            setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.78f); setParam (f + "dec1", 0.82f);
+            setParam (f + "att2", 0.7f); setParam (f + "dec2", 0.85f); setParam (f + "quad12", 1.0f);
+            cables.push_back ({ kInst281, M281::outFunc (0), A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (1), A, M259::In_OrderCv, nextColour (true) });
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "timbre", 0.15f); setParam (a + "timbre_cv", 0.6f); setParam (a + "order", 0.0f);
+            setParam (a + "mo_freq", hz (65.406f * 3.0f)); setParam (a + "idx", 0.18f); setParam (a + "mod_pitch", 1.0f);
+            setParam (l + "mode1", 1.0f);
+            break;
+        }
     }
     patchName = builtinPatchNames()[juce::jlimit (0, builtinPatchNames().size() - 1, index)];
     commit();
@@ -202,7 +248,7 @@ juce::ValueTree WcProcessor::patchToTree() const
 {
     juce::ValueTree t ("WCPATCH");
     t.setProperty ("name", patchName, nullptr);
-    t.setProperty ("version", 1, nullptr);
+    t.setProperty ("version", 2, nullptr);
     juce::ValueTree mods ("MODULES");
     for (int i = 0; i < kNumInst; ++i) mods.setProperty ("m" + juce::String (i), present[(size_t) i], nullptr);
     t.addChild (mods, -1, nullptr);
@@ -223,13 +269,32 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
 {
     if (! t.hasType ("WCPATCH")) return;
     patchName = t.getProperty ("name", "Patch").toString();
+    // version 1 (0.1.0) had six slots: MIDI, 259 A-D, OUTPUT
+    const int version = (int) t.getProperty ("version", 1);
+    auto slot = [version] (int old) -> int
+    {
+        if (version >= 2) return old;
+        if (old == 0) return kInstMidi;
+        if (old >= 1 && old <= 4) return kInst259 + old - 1;
+        if (old == 5) return kInstOutput;
+        return -1;
+    };
+    const int oldCount = version >= 2 ? kNumInst : 6;
     present.fill (false);
     auto mods = t.getChildWithName ("MODULES");
-    for (int i = 0; i < kNumInst; ++i) present[(size_t) i] = (bool) mods.getProperty ("m" + juce::String (i), false);
+    for (int i = 0; i < oldCount; ++i)
+    {
+        const int s = slot (i);
+        if (s >= 0 && s < kNumInst) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
+    }
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
     cables.clear();
     for (auto ct : t.getChildWithName ("CABLES"))
-        cables.push_back ({ (int) ct["si"], (int) ct["sj"], (int) ct["di"], (int) ct["dj"], (int) ct["col"] });
+    {
+        const int si = slot ((int) ct["si"]), di = slot ((int) ct["di"]);
+        if (si >= 0 && di >= 0 && si < kNumInst && di < kNumInst)
+            cables.push_back ({ si, (int) ct["sj"], di, (int) ct["dj"], (int) ct["col"] });
+    }
     colourCounter = (int) cables.size();
     commit();
 }

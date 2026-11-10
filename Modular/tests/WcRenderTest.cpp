@@ -7,6 +7,9 @@
 #include "WcProcessor.h"
 #include "modules/M259.h"
 #include "modules/MidiInterface.h"
+#include "modules/M281.h"
+#include "modules/M292.h"
+#include "modules/OutputModule.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 
@@ -181,6 +184,108 @@ int main (int argc, char** argv)
             juce::AudioBuffer<float> bb (2, 16); juce::MidiBuffer m; m.addEvent (juce::MidiMessage::noteOff (1, 48), 0); p.processBlock (bb, m);
             if (lock > 0.5f && std::fabs (1200.0 * std::log2 (fb / fa)) > 1.0) ok = false;
         }
+    }
+
+    // ---- 3b. 281 timing ----
+    {
+        std::printf ("281 FUNCTION TIMING\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        p.loadBuiltinPatch (9);   // gate -> 281 A ch1
+        for (float a : { 0.25f, 0.5f })
+        {
+            setP (p, "fa_att1", a); setP (p, "fa_dec1", a);
+            run (p, 4800);
+            auto x = run (p, (int) SR * 3, kInst281, M281::outFunc (0), 48);
+            int peakAt = 0; for (int i = 0; i < (int) x.size(); ++i) if (x[(size_t) i] > x[(size_t) peakAt]) peakAt = i;
+            int endAt = peakAt; while (endAt < (int) x.size() - 1 && x[(size_t) endAt] > 0.0f) ++endAt;
+            const double want = M281::timeSeconds (a);
+            std::printf ("  knob %.2f: attack %.4f s, decay %.4f s (want %.4f), peak %.2f V\n", a, peakAt / SR, (endAt - peakAt) / SR, want, x[(size_t) peakAt]);
+            if (std::fabs (peakAt / SR - want) > 0.002 + 0.01 * want) ok = false;
+            juce::AudioBuffer<float> bb (2, 16); juce::MidiBuffer m; m.addEvent (juce::MidiMessage::noteOff (1, 48), 0); p.processBlock (bb, m);
+        }
+    }
+
+    // ---- 3c. 292 gate: level and brightness vs control voltage, vactrol release ----
+    {
+        std::printf ("292 LOWPASS GATE (input: 110 Hz saw; level re input, spectral centroid)\n");
+        const char* modes[3] = { "LOPASS", "BOTH", "VCA" };
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            WcProcessor p;
+            p.prepareToPlay (SR, 256);
+            setP (p, "la_mode1", (float) mode);
+            setP (p, "la_res1", 0.0f);
+            auto& g = *p.rack.m292 (0);
+            float in[24] {}, out[24] {};
+            for (float v : { 10.0f, 5.0f, 2.0f, 0.5f })
+            {
+                double ein = 0, eout = 0, cIn = 0, cOut = 0, dIn = 0, dOut = 0;
+                double ph = 0, prevIn = 0, prevOut = 0;
+                const int N = (int) SR;
+                for (int i = 0; i < N; ++i)
+                {
+                    if (i % 256 == 0) g.beginBlock (256);
+                    ph += 110.0 / SR; ph -= std::floor (ph);
+                    in[M292::inSig (0)] = (float) (2.0 * ph - 1.0);
+                    in[M292::inCtl (0)] = v;
+                    g.tick (in, out);
+                    if (i > N / 2)
+                    {
+                        const double x = in[M292::inSig (0)], y = out[M292::outSig (0)];
+                        ein += x * x; eout += y * y;
+                        // derivative energy / signal energy ~ brightness
+                        cIn += (x - prevIn) * (x - prevIn); cOut += (y - prevOut) * (y - prevOut);
+                        juce::ignoreUnused (dIn, dOut);
+                    }
+                    prevIn = in[M292::inSig (0)]; prevOut = out[M292::outSig (0)];
+                }
+                const double lvl = 10.0 * std::log10 (eout / ein + 1e-30);
+                const double brightIn = std::sqrt (cIn / ein), brightOut = eout > 0 ? std::sqrt (cOut / eout) : 0.0;
+                std::printf ("  %-6s  CV %4.1f V   level %+6.1f dB   brightness %5.1f %%\n", modes[mode], v, lvl, 100.0 * brightOut / brightIn);
+            }
+            // release: open at 10 V for 300 ms, then 0 V; time until the output is 40 dB down
+            {
+                float in2[24] {}, out2[24] {};
+                double ph = 0;
+                std::vector<float> y;
+                for (int i = 0; i < (int) (SR * 2.5); ++i)
+                {
+                    if (i % 256 == 0) g.beginBlock (256);
+                    ph += 110.0 / SR; ph -= std::floor (ph);
+                    in2[M292::inSig (0)] = (float) (2.0 * ph - 1.0);
+                    in2[M292::inCtl (0)] = i < (int) (SR * 0.3) ? 10.0f : 0.0f;
+                    g.tick (in2, out2);
+                    y.push_back (out2[M292::outSig (0)]);
+                }
+                auto rms = [&] (int at) { double e = 0; for (int k = 0; k < 2400; ++k) e += (double) y[(size_t) (at + k)] * y[(size_t) (at + k)]; return std::sqrt (e / 2400); };
+                const double ref = rms ((int) (SR * 0.2));
+                int t = (int) (SR * 0.3);
+                while (t < (int) y.size() - 2400 && rms (t) > ref * 0.01) t += 240;
+                std::printf ("  %-6s  release to -40 dB: %.0f ms\n", modes[mode], 1000.0 * (t - SR * 0.3) / SR);
+            }
+        }
+    }
+
+    // ---- 3d. a 0.1.0 patch still loads (slot remap) ----
+    {
+        WcProcessor p;
+        juce::ValueTree t ("WCPATCH");
+        t.setProperty ("version", 1, nullptr);
+        juce::ValueTree mods ("MODULES");
+        for (int i = 0; i < 6; ++i) mods.setProperty ("m" + juce::String (i), i <= 2 || i == 5, nullptr);
+        t.addChild (mods, -1, nullptr);
+        juce::ValueTree cs ("CABLES");
+        auto cable = [&] (int si, int sj, int di, int dj) { juce::ValueTree c ("CABLE"); c.setProperty ("si", si, nullptr); c.setProperty ("sj", sj, nullptr); c.setProperty ("di", di, nullptr); c.setProperty ("dj", dj, nullptr); c.setProperty ("col", 0, nullptr); cs.addChild (c, -1, nullptr); };
+        cable (0, 0, 1, M259::In_PoPitch);       // MIDI pitch -> old 259 A
+        cable (2, M259::Out_Final1, 5, 0);       // old 259 B -> old OUTPUT L
+        t.addChild (cs, -1, nullptr);
+        p.patchFromTree (t);
+        bool good = p.isPresent (kInst259) && p.isPresent (kInst259 + 1) && ! p.isPresent (kInst281);
+        for (auto& c : p.getCables())
+            good = good && (c.dstInst == kInst259 || (c.srcInst == kInst259 + 1 && c.dstInst == kInstOutput));
+        std::printf ("0.1.0 PATCH COMPAT: %s (%d cables)\n", good ? "ok" : "BROKEN", (int) p.getCables().size());
+        if (! good || p.getCables().size() != 2) ok = false;
     }
 
     // ---- 4. CPU ----

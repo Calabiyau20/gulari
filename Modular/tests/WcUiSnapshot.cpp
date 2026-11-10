@@ -9,11 +9,12 @@ int main (int argc, char** argv)
     const juce::File out (juce::String (argc > 1 ? argv[1] : "/tmp/wc_ui"));
     out.createDirectory();
     const auto names = WcProcessor::builtinPatchNames();
-    for (int k : { 0, 6 })
+    for (int k : { 9, 99 })
     {
         WcProcessor proc;
         proc.prepareToPlay (48000.0, 512);
-        proc.loadBuiltinPatch (k);
+        proc.loadBuiltinPatch (k == 99 ? 9 : k);
+        if (k == 99) for (int i = 1; i < wc::kInstOutput; ++i) proc.setPresent (i, true);
         // play a note so the meters and LEDs show something
         for (int b = 0; b < 60; ++b)
         {
@@ -23,14 +24,14 @@ int main (int argc, char** argv)
             proc.processBlock (buf, midi);
         }
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-        ed->setSize (1360, k == 6 ? 1100 : 640);
+        ed->setSize (1360, k == 99 ? 1500 : 1100);
         for (int i = 0; i < 5; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         auto f = out.getChildFile ("patch" + juce::String (k) + ".png");
         f.deleteFile();
         juce::FileOutputStream os (f);
         juce::PNGImageFormat().writeImageToStream (img, os);
-        std::printf ("%s: %d cables\n", names[k].toRawUTF8(), (int) proc.getCables().size());
+        std::printf ("%d: %d cables\n", k, (int) proc.getCables().size());
     }
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {

@@ -14,10 +14,34 @@ namespace wc
 class MidiInterface;
 class OutputModule;
 class M259;
+class M281;
+class M292;
 
-constexpr int kInstMidi = 0, kInst259 = 1, kInstOutput = 1 + kMax259, kNumInst = kInstOutput + 1;
-inline ModuleType typeOfInst (int inst) { return inst == kInstMidi ? MT_Midi : (inst == kInstOutput ? MT_Output : MT_259); }
-juce::String instName (int inst);        // "MIDI", "259 A", ... "OUTPUT"
+// slots, in processing order: control sources first, then oscillators, then gates, then the output
+constexpr int kInstMidi = 0;
+constexpr int kInst281 = 1;
+constexpr int kInst259 = kInst281 + kMax281;
+constexpr int kInst292 = kInst259 + kMax259;
+constexpr int kInstOutput = kInst292 + kMax292;
+constexpr int kNumInst = kInstOutput + 1;
+inline ModuleType typeOfInst (int inst)
+{
+    if (inst == kInstMidi) return MT_Midi;
+    if (inst < kInst259) return MT_281;
+    if (inst < kInst292) return MT_259;
+    if (inst < kInstOutput) return MT_292;
+    return MT_Output;
+}
+inline int subIndex (int inst)
+{
+    switch (typeOfInst (inst)) { case MT_281: return inst - kInst281; case MT_259: return inst - kInst259; case MT_292: return inst - kInst292; default: return 0; }
+}
+inline juce::String instPrefix (int inst)
+{
+    switch (typeOfInst (inst)) { case MT_281: return prefix281 (subIndex (inst)); case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {}; }
+}
+inline bool isRemovable (int inst) { return inst != kInstMidi && inst != kInstOutput; }
+juce::String instName (int inst);        // "MIDI", "281 A", "259 A", "292 A", "OUTPUT"
 
 struct Cable
 {
@@ -47,6 +71,8 @@ public:
 
     Module* module (int inst) const { return mods[(size_t) inst].get(); }
     M259* m259 (int i) const;
+    M281* m281 (int i) const;
+    M292* m292 (int i) const;
     MidiInterface& midi() const;
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)
