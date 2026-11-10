@@ -2,6 +2,7 @@
 // one image per built-in patch, plus a test that patches a cable through the editor's API.
 #include "WcEditor.h"
 #include "modules/M259.h"
+#include "ui/RackView.h"
 
 int main (int argc, char** argv)
 {
@@ -26,7 +27,25 @@ int main (int argc, char** argv)
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
         ed->setSize (1400, k == 99 ? 2400 : 1100);
         for (int i = 0; i < 5; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
-        auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+        auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, k == 99 ? 1.0f : 2.0f);
+        if (k == 99)   // every panel on its own, at 2x (for the manual)
+        {
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+            {
+                if (auto* pn = dynamic_cast<wc::ui::ModulePanel*> (&c))
+                {
+                    for (auto* ch : pn->getChildren()) if (dynamic_cast<juce::TextButton*> (ch) != nullptr) ch->setVisible (false);   // no remove button
+                    auto pi = pn->createComponentSnapshot (pn->getLocalBounds(), true, 2.0f);
+                    auto pf = out.getChildFile ("panel_" + wc::instName (pn->inst).replace (" ", "") + ".png");
+                    pf.deleteFile();
+                    juce::FileOutputStream ps (pf);
+                    juce::PNGImageFormat().writeImageToStream (pi, ps);
+                    return;
+                }
+                for (auto* ch : c.getChildren()) walk (*ch);
+            };
+            walk (*ed);
+        }
         auto f = out.getChildFile ("patch" + juce::String (k) + ".png");
         f.deleteFile();
         juce::FileOutputStream os (f);
