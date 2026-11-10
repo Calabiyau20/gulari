@@ -9,7 +9,7 @@ namespace wc
 // Banana jacks carry control (DC, 0..10 V, pulses), mini jacks carry audio, exactly like a Series 200 system.
 enum class JackKind { Banana, Mini };
 
-enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_Count };
+enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_Count };
 
 struct JackSpec
 {
@@ -17,6 +17,7 @@ struct JackSpec
     JackKind kind;
     bool output;
     float x, y;          // panel position, in panel units (1 unit = 1 px at 100% zoom)
+    bool pulse = false;  // timing signal (gates, triggers): red jack, as on the 200 series
 };
 
 enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3, Push };   // Push = momentary button (not a parameter)
@@ -28,6 +29,7 @@ struct ControlSpec
     CtrlStyle style;
     float x, y;
     juce::uint32 colour; // knob cap colour
+    const char* scale = nullptr;   // printed scale around the knob, "|" separated, e.g. ".001|.01|.1|1|10"
 };
 
 struct SectionSpec { const char* title; float x, y, w, h; };

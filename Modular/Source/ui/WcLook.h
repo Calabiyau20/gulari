@@ -7,10 +7,10 @@ namespace col
 {
     const juce::Colour bg       { 0xff15161a };   // window / rack rails
     const juce::Colour rail     { 0xff2a2b30 };
-    const juce::Colour panelHi  { 0xffd9dadc };   // brushed aluminium
-    const juce::Colour panelLo  { 0xffb9bbbf };
-    const juce::Colour ink      { 0xff16171a };   // silkscreen
-    const juce::Colour inkSoft  { 0xff4a4d53 };
+    const juce::Colour panelHi  { 0xffdedfdc };   // 200-series light grey aluminium
+    const juce::Colour panelLo  { 0xffc9cac6 };
+    const juce::Colour ink      { 0xff2146a8 };   // blue silkscreen
+    const juce::Colour inkSoft  { 0xff5671b8 };
     const juce::Colour accent   { 0xff27c7d8 };   // Calabi Yau cyan (top bar only)
     const juce::Colour ledRed   { 0xffff3b30 };
     const juce::Colour ledGreen { 0xff35e06a };

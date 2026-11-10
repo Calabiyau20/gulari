@@ -4,6 +4,7 @@
 #include "modules/OutputModule.h"
 #include "modules/M281.h"
 #include "modules/M292.h"
+#include "modules/M266.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -122,7 +123,7 @@ void WcProcessor::resetParams()
 juce::StringArray WcProcessor::builtinPatchNames()
 {
     return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison",
-             "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift" };
+             "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -239,6 +240,26 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam (l + "mode1", 1.0f);
             break;
         }
+        case 11:  // Uncertainty: a cycling 281 clocks the 266; quantized random -> integrator -> pitch, fluctuating -> timbre,
+                  // every end-of-decay pulse pings the 292. Plays by itself.
+        {
+            present[(size_t) A] = present[(size_t) kInst266] = present[(size_t) kInst281] = present[(size_t) kInst292] = true;
+            const juce::String f (prefix281 (0)), l (prefix292 (0));
+            setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.05f); setParam (f + "dec1", 0.6f);
+            cables.push_back ({ kInst281, M281::outEod (0), kInst266, M266::In_QPulse, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Quant, kInst266, M266::In_IntIn, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Int, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Int, A, M259::In_MoPitch, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Fluct, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst281, M281::outEod (0), kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam ("ua_steps", 4.0f); setParam ("ua_qmode", 0.0f); setParam ("ua_smooth", 0.12f); setParam ("ua_rate", 0.35f);
+            setParam (a + "po_freq", hz (130.81f)); setParam (a + "mo_freq", hz (130.81f * 2.0f)); setParam (a + "idx", 0.2f); setParam (a + "mod_pitch", 1.0f);
+            setParam (a + "timbre", 0.1f); setParam (a + "timbre_cv", 0.45f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
     }
     patchName = builtinPatchNames()[juce::jlimit (0, builtinPatchNames().size() - 1, index)];
     commit();
@@ -246,18 +267,19 @@ void WcProcessor::loadBuiltinPatch (int index)
 
 juce::ValueTree WcProcessor::patchToTree() const
 {
+    // version 3: modules and cable ends are stored by slot name, so new slots never shift old patches
     juce::ValueTree t ("WCPATCH");
     t.setProperty ("name", patchName, nullptr);
-    t.setProperty ("version", 2, nullptr);
+    t.setProperty ("version", 3, nullptr);
     juce::ValueTree mods ("MODULES");
-    for (int i = 0; i < kNumInst; ++i) mods.setProperty ("m" + juce::String (i), present[(size_t) i], nullptr);
+    for (int i = 0; i < kNumInst; ++i) mods.setProperty (instKey (i), present[(size_t) i], nullptr);
     t.addChild (mods, -1, nullptr);
     juce::ValueTree cs ("CABLES");
     for (auto& c : cables)
     {
         juce::ValueTree ct ("CABLE");
-        ct.setProperty ("si", c.srcInst, nullptr); ct.setProperty ("sj", c.srcJack, nullptr);
-        ct.setProperty ("di", c.dstInst, nullptr); ct.setProperty ("dj", c.dstJack, nullptr);
+        ct.setProperty ("s", instKey (c.srcInst), nullptr); ct.setProperty ("sj", c.srcJack, nullptr);
+        ct.setProperty ("d", instKey (c.dstInst), nullptr); ct.setProperty ("dj", c.dstJack, nullptr);
         ct.setProperty ("col", c.colour, nullptr);
         cs.addChild (ct, -1, nullptr);
     }
@@ -269,31 +291,49 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
 {
     if (! t.hasType ("WCPATCH")) return;
     patchName = t.getProperty ("name", "Patch").toString();
-    // version 1 (0.1.0) had six slots: MIDI, 259 A-D, OUTPUT
     const int version = (int) t.getProperty ("version", 1);
-    auto slot = [version] (int old) -> int
+    // older patches stored slot numbers:
+    //   version 1 (0.1.0): MIDI, 259 A-D, OUTPUT
+    //   version 2 (0.2.0): MIDI, 281 A-B, 259 A-D, 292 A-B, OUTPUT
+    auto oldSlot = [version] (int old) -> int
     {
-        if (version >= 2) return old;
+        if (version == 1)
+        {
+            if (old == 0) return kInstMidi;
+            if (old >= 1 && old <= 4) return kInst259 + old - 1;
+            if (old == 5) return kInstOutput;
+            return -1;
+        }
         if (old == 0) return kInstMidi;
-        if (old >= 1 && old <= 4) return kInst259 + old - 1;
-        if (old == 5) return kInstOutput;
+        if (old >= 1 && old <= 2) return kInst281 + old - 1;
+        if (old >= 3 && old <= 6) return kInst259 + old - 3;
+        if (old >= 7 && old <= 8) return kInst292 + old - 7;
+        if (old == 9) return kInstOutput;
         return -1;
     };
-    const int oldCount = version >= 2 ? kNumInst : 6;
     present.fill (false);
     auto mods = t.getChildWithName ("MODULES");
-    for (int i = 0; i < oldCount; ++i)
-    {
-        const int s = slot (i);
-        if (s >= 0 && s < kNumInst) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
-    }
+    if (version >= 3)
+        for (int i = 0; i < kNumInst; ++i) present[(size_t) i] = (bool) mods.getProperty (instKey (i), false);
+    else
+        for (int i = 0; i < (version == 1 ? 6 : 10); ++i)
+        {
+            const int s = oldSlot (i);
+            if (s >= 0) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
+        }
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
     cables.clear();
     for (auto ct : t.getChildWithName ("CABLES"))
     {
-        const int si = slot ((int) ct["si"]), di = slot ((int) ct["di"]);
-        if (si >= 0 && di >= 0 && si < kNumInst && di < kNumInst)
-            cables.push_back ({ si, (int) ct["sj"], di, (int) ct["dj"], (int) ct["col"] });
+        int si, di, sj = (int) ct["sj"], dj = (int) ct["dj"];
+        if (version >= 3) { si = instFromKey (ct["s"].toString()); di = instFromKey (ct["d"].toString()); }
+        else
+        {
+            si = oldSlot ((int) ct["si"]); di = oldSlot ((int) ct["di"]);
+            if (version == 2 && di >= 0 && typeOfInst (di) == MT_281) dj = M281::inFromV2 (dj);   // 281 gained CYCLE inputs
+        }
+        if (si >= 0 && di >= 0)
+            cables.push_back ({ si, sj, di, dj, (int) ct["col"] });
     }
     colourCounter = (int) cables.size();
     commit();

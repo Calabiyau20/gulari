@@ -1,0 +1,42 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 266 Source of Uncertainty",
+    "clone_name": "SU-266 Source of Uncertainty",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla y 266 se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [
+    {"id": "S1", "title": "Buchla & Tiptop Audio 266t manual", "url": "https://analoguehaven.com/tiptop-audio/266t/manual.pdf", "used_for": "funciones, rangos (0.05-50 Hz, 0.01-10, 1-6 pasos, n+1 / 2^n, distribucion)"}
+  ],
+  "stages": [
+    {"stage_id": "266_01_noise", "name": "Noise source", "fidelity": "measured",
+     "description": "Tres salidas de audio: pink (-3 dB/oct), white (plano), blue (+3 dB/oct).",
+     "schematic_ascii": "  [generador de ruido] --+--> WHITE\n                         +--[filtro -3 dB/oct]--+--> PINK\n                                                +--[derivador +6 dB/oct]--> BLUE",
+     "equations": ["pink: filtro de Kellet sobre ruido blanco", "blue = 2.2 * (pink[n] - pink[n-1])", "medido: -3.0 / 0.0 / +2.8 dB/oct"],
+     "cpp": "Modular/Source/modules/M266.cpp"},
+    {"stage_id": "266_02_fluctuating", "name": "Fluctuating random voltages", "fidelity": "behavioral",
+     "description": "Voltajes aleatorios 0..10 V que cambian a una tasa probable (0.05 a 50 Hz, perilla + CV). Nuevos niveles llegan en instantes aleatorios y se suavizan con dos polos atados a la tasa. LED de actividad.",
+     "equations": ["P(nuevo nivel por sample) = rate / fs", "dos etapas de 1 polo, fc = 0.6 * rate"],
+     "cpp": "Modular/Source/modules/M266.cpp"},
+    {"stage_id": "266_03_sample_hold", "name": "Sample & hold con salidas alternadas", "fidelity": "measured",
+     "description": "Un pulso (> 3 V) muestrea la entrada de CV. Las salidas ALT reparten muestras y pulsos alternadamente entre dos salidas (ping-pong).",
+     "schematic_ascii": "  PULSE IN --[flanco]--[flip-flop]--+--> ALT pulse A / B\n  C.V. IN --[S&H]--> C.V. OUT        +--> ALT c.v. A / B",
+     "cpp": "Modular/Source/modules/M266.cpp"},
+    {"stage_id": "266_04_integrator", "name": "Integrator", "fidelity": "behavioral",
+     "description": "Suaviza voltajes escalonados (glissandi): 0.01 (sin suavizado) a 10 (muy lento), perilla + CV. Modelado como lag RC.",
+     "equations": ["y += (x - y) * (1 - exp(-1 / (0.25 * t * fs))),  t = 0.01 * 1000^k s"],
+     "cpp": "Modular/Source/modules/M266.cpp"},
+    {"stage_id": "266_05_quantized", "name": "Quantized random voltages", "fidelity": "measured",
+     "description": "Cada pulso elige un nivel al azar entre n+1 estados dentro de 5 V, o 2^n estados en 10 V; n de 1 a 6 (perilla + CV).",
+     "equations": ["n+1: V = 5 * k / n, k = 0..n", "2^n: V = 10 * k / (2^n - 1), k = 0..2^n - 1"],
+     "cpp": "Modular/Source/modules/M266.cpp"},
+    {"stage_id": "266_06_stored", "name": "Stored random voltages", "fidelity": "behavioral",
+     "description": "Cada pulso guarda dos voltajes nuevos: uno con distribucion uniforme y otro con distribucion ajustable (perilla + CV): a la izquierda favorece bajos, al centro campana, a la derecha altos.",
+     "equations": ["uniforme: 10 * u", "ajustable: mezcla de u^3 (bajos) / promedio de 3 uniformes (campana) / 1 - u^3 (altos)"],
+     "cpp": "Modular/Source/modules/M266.cpp"}
+  ],
+  "panel_note": "La disposicion del panel es provisoria (secciones del 266t por funcion); se ajusta a la foto del frente original."
+}

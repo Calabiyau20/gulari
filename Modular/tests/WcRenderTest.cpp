@@ -10,8 +10,10 @@
 #include "modules/M281.h"
 #include "modules/M292.h"
 #include "modules/OutputModule.h"
+#include "modules/M266.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
+#include <set>
 
 using namespace wc;
 static constexpr double SR = 48000.0;
@@ -264,6 +266,79 @@ int main (int argc, char** argv)
                 while (t < (int) y.size() - 2400 && rms (t) > ref * 0.01) t += 240;
                 std::printf ("  %-6s  release to -40 dB: %.0f ms\n", modes[mode], 1000.0 * (t - SR * 0.3) / SR);
             }
+        }
+    }
+
+    // ---- 3c2. 266 Source of Uncertainty ----
+    {
+        std::printf ("266 SOURCE OF UNCERTAINTY\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& u = *p.rack.m266();
+        float in[24] {}, out[24] {};
+        // noise colour: energy ratio of the 8-16 kHz band vs the 250-500 Hz band
+        {
+            const int order = 14, N = 1 << order;
+            juce::dsp::FFT fft (order);
+            const char* names[3] = { "pink", "white", "blue" };
+            const int outs[3] = { M266::Out_Pink, M266::Out_White, M266::Out_Blue };
+            std::vector<std::vector<float>> bufs (3, std::vector<float> ((size_t) N * 2, 0.0f));
+            u.beginBlock (256);
+            std::vector<double> spec[3];
+            for (int k = 0; k < 3; ++k) spec[k].assign ((size_t) N / 2, 0.0);
+            for (int rep = 0; rep < 16; ++rep)
+            {
+                for (int i = 0; i < N; ++i)
+                {
+                    u.tick (in, out);
+                    for (int k = 0; k < 3; ++k) bufs[(size_t) k][(size_t) i] = out[outs[k]];
+                }
+                for (int k = 0; k < 3; ++k)
+                {
+                    fft.performFrequencyOnlyForwardTransform (bufs[(size_t) k].data());
+                    for (int b = 0; b < N / 2; ++b) spec[k][(size_t) b] += (double) bufs[(size_t) k][(size_t) b] * bufs[(size_t) k][(size_t) b];
+                    std::fill (bufs[(size_t) k].begin(), bufs[(size_t) k].end(), 0.0f);
+                }
+            }
+            auto band = [&] (int k, double f0, double f1) { double e = 0; for (int b = (int) (f0 * N / SR); b < (int) (f1 * N / SR); ++b) e += spec[k][(size_t) b]; return e / (f1 - f0); };
+            for (int k = 0; k < 3; ++k)
+            {
+                // slope in dB per octave between ~350 Hz and ~11 kHz (5 octaves)
+                const double slope = 10.0 * std::log10 (band (k, 8000, 16000) / band (k, 250, 500)) / 5.0;
+                double e = 0; for (auto v : spec[k]) e += v;
+                std::printf ("  %-5s noise: %+5.1f dB/oct  (level %+5.1f dB re white)\n", names[k], slope, 10.0 * std::log10 (e / [&] { double w = 0; for (auto v : spec[1]) w += v; return w; }()));
+                if (std::fabs (slope - (k == 0 ? -3.0 : (k == 1 ? 0.0 : 3.0))) > 0.8) ok = false;
+            }
+        }
+        // quantized: count distinct levels
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            setP (p, "ua_qmode", (float) mode); setP (p, "ua_steps", 3.0f);
+            u.beginBlock (256);
+            std::set<int> levels;
+            for (int i = 0; i < 4000; ++i)
+            {
+                in[M266::In_QPulse] = (i % 2) ? 10.0f : 0.0f;
+                u.tick (in, out);
+                if (i > 2) levels.insert ((int) std::lround (out[M266::Out_Quant] * 1000.0f));
+            }
+            std::printf ("  quantized n=3 (%s): %d levels, max %.2f V\n", mode == 0 ? "n+1" : "2^n", (int) levels.size(), *levels.rbegin() / 1000.0);
+            if ((int) levels.size() != (mode == 0 ? 4 : 8)) ok = false;
+        }
+        in[M266::In_QPulse] = 0.0f;
+        // sample & hold alternation
+        {
+            float lastA = -1, lastB = -1; int changesA = 0, changesB = 0;
+            for (int i = 0; i < 400; ++i)
+            {
+                in[M266::In_ShPulse] = (i % 20) < 2 ? 10.0f : 0.0f;
+                in[M266::In_ShCv] = (float) (i / 20);
+                u.tick (in, out);
+                if (out[M266::Out_ShAltA] != lastA) { lastA = out[M266::Out_ShAltA]; ++changesA; }
+                if (out[M266::Out_ShAltB] != lastB) { lastB = out[M266::Out_ShAltB]; ++changesB; }
+            }
+            std::printf ("  s&h alternating outputs: A changed %d times, B %d times (20 pulses)\n", changesA, changesB);
+            if (std::abs (changesA - changesB) > 1) ok = false;
         }
     }
 

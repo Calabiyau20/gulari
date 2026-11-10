@@ -47,6 +47,7 @@ void M292::tick (const float* in, float* out) noexcept
     constexpr float C1 = 1.0e-9f, C2 = 220.0e-12f, C3lp = 4.7e-9f;
     constexpr float Imin = 1.0e-5f, Imax = 0.040f;
     constexpr float wOn = 5.0f / 0.012f, wOff = 5.0f / 0.250f;   // rad/s, from the datasheet rise / fall times
+    float all = 0.0f;
     for (int n = 0; n < 4; ++n)
     {
         auto& c = ch[n];
@@ -89,7 +90,9 @@ void M292::tick (const float* in, float* out) noexcept
         float y = lp / a1;
         if (! std::isfinite (y)) { c.s1 = c.s2 = 0.0f; y = 0.0f; }
         out[outSig (n)] = y;
+        all += y;
         led[n].store (rel, std::memory_order_relaxed);
     }
+    out[outAll] = all;
 }
 } // namespace wc

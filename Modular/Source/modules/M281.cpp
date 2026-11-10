@@ -14,6 +14,8 @@ M281::M281 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     }
     quad[0] = apvts.getRawParameterValue (p + "quad12");
     quad[1] = apvts.getRawParameterValue (p + "quad34");
+    mix[0] = apvts.getRawParameterValue (p + "mix12");
+    mix[1] = apvts.getRawParameterValue (p + "mix34");
 }
 
 void M281::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }
@@ -34,6 +36,8 @@ void M281::beginBlock (int)
     }
     quadV[0] = quad[0]->load() > 0.5f;
     quadV[1] = quad[1]->load() > 0.5f;
+    mixV[0] = mix[0]->load();
+    mixV[1] = mix[1]->load();
 }
 
 void M281::tick (const float* in, float* out) noexcept
@@ -55,7 +59,8 @@ void M281::tick (const float* in, float* out) noexcept
         c.held = gate;
         bool trig = rise || c.pendingTrig;
         c.pendingTrig = false;
-        if (modeV[n] == 2 && c.stage == Idle) trig = true;        // cycle: free running
+        const bool cycling = modeV[n] == 2 || in[inCycle (n)] > 3.0f;   // CYC switch, or a gate at CYCLE
+        if (cycling && c.stage == Idle) trig = true;              // cycle: free running
 
         if (trig && c.stage != Attack) c.stage = Attack;          // retrigger restarts the attack from where it is
 
@@ -82,7 +87,7 @@ void M281::tick (const float* in, float* out) noexcept
                     c.v = 0.0f;
                     c.stage = Idle;
                     c.eodLeft = (int) (0.005f * fs);               // end-of-decay pulse, 5 ms
-                    if (modeV[n] == 2) c.stage = Attack;           // cycle
+                    if (cycling) c.stage = Attack;                  // cycle
                 }
                 break;
         }
@@ -93,6 +98,13 @@ void M281::tick (const float* in, float* out) noexcept
         out[outEod (n)] = c.eodLeft > 0 ? 10.0f : 0.0f;
         if (c.eodLeft > 0) --c.eodLeft;
         level[n].store (c.v, std::memory_order_relaxed);
+    }
+    // quadrature mix: A <-> B and C <-> D crossfades, each with its complement
+    for (int p = 0; p < 2; ++p)
+    {
+        const float a = out[outFunc (p * 2)], b = out[outFunc (p * 2 + 1)], m = mixV[p];
+        out[outMix (p, false)] = a + (b - a) * m;
+        out[outMix (p, true)] = b + (a - b) * m;
     }
 }
 } // namespace wc

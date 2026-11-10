@@ -1,17 +1,28 @@
+// Panel layouts, after the Series 200 / 200t front panels:
+// light grey aluminium, blue silkscreen in lowercase italics, printed scales around the knobs,
+// banana jacks colour-coded by signal (red = pulses, black = control in, blue = control out),
+// 3.5 mm jacks for audio.
 #include "Module.h"
-#include "../modules/M259.h"
-#include "../modules/MidiInterface.h"
-#include "../modules/OutputModule.h"
 
 namespace wc
 {
-// knob cap colours (Series 200 panels: aluminium with coloured knob caps)
-static constexpr juce::uint32 kBlue = 0xff2f6db3, kRed = 0xffc8402e, kOrange = 0xffe08a2c, kYellow = 0xffe4c33a,
-                              kGreen = 0xff3c9a5f, kGrey = 0xff7d8288, kWhite = 0xffe9e6df;
+static constexpr juce::uint32 kGreyKnob = 0xffe6e6e1, kBlueKnob = 0xff3a60c0, kBlack = 0xff1b1c20, kWhite = 0xfff2f2ee;
+static const char* kTimeScale = ".001|.01|.03|.1|.3|1|3|10";
 
+static JackSpec J (const char* l, JackKind k, bool out, float x, float y, bool pulse = false) { JackSpec j { l, k, out, x, y }; j.pulse = pulse; return j; }
+static ControlSpec C (const char* id, const char* l, CtrlStyle st, float x, float y, juce::uint32 col = kGreyKnob, const char* scale = nullptr)
+{
+    ControlSpec c { id, l, st, x, y, col };
+    c.scale = scale;
+    return c;
+}
+
+// ---------------------------------------------------------------------------------------------
+// CW-259 Complex Waveform Generator
+// ---------------------------------------------------------------------------------------------
 static ModuleSpec make259()
 {
-    using J = JackKind;
+    using K = JackKind;
     ModuleSpec s;
     s.type = MT_259;
     s.name = "COMPLEX WAVEFORM GENERATOR";
@@ -20,68 +31,217 @@ static ModuleSpec make259()
     s.width = 640.0f;
     s.height = 430.0f;
     s.sections = {
-        { "MODULATION OSCILLATOR", 8, 40, 168, 382 },
-        { "MODULATION", 182, 40, 150, 382 },
-        { "PRINCIPAL OSCILLATOR", 338, 40, 150, 382 },
-        { "WAVESHAPE", 494, 40, 138, 382 },
+        { "modulation oscillator", 8, 34, 168, 362 },
+        { "modulation", 182, 34, 150, 362 },
+        { "principal oscillator", 338, 34, 150, 362 },
+        { "timbre", 494, 34, 138, 362 },
     };
-    // inputs (DSP order = M259::In)
     s.jacks = {
-        { "PITCH", J::Banana, false, 30, 352 },     // In_MoPitch
-        { "CV", J::Banana, false, 72, 352 },        // In_MoCv
-        { "FM", J::Mini, false, 114, 352 },         // In_MoFm
-        { "INDEX", J::Banana, false, 202, 400 },    // In_IndexCv
-        { "WAVE", J::Banana, false, 200, 352 },     // In_ProgWave
-        { "PITCH", J::Banana, false, 238, 352 },    // In_ProgPitch
-        { "TIMBRE", J::Banana, false, 276, 352 },   // In_ProgTimbre
-        { "AMP", J::Banana, false, 314, 352 },      // In_ProgAmp
-        { "LOCK", J::Mini, false, 312, 400 },       // In_Lock
-        { "PITCH", J::Banana, false, 362, 352 },    // In_PoPitch
-        { "CV", J::Banana, false, 413, 352 },       // In_PoCv
-        { "FM", J::Mini, false, 464, 352 },         // In_PoFm
-        { "TIMBRE", J::Banana, false, 516, 352 },   // In_TimbreCv
-        { "SYM", J::Banana, false, 563, 352 },      // In_SymCv
-        { "ORDER", J::Banana, false, 610, 352 },    // In_OrderCv
-        // outputs (DSP order = M259::Out)
-        { "SIGNAL", J::Mini, true, 114, 400 },      // Out_MoSignal
-        { "CV OUT", J::Banana, true, 156, 400 },    // Out_MoCv
-        { "SINE", J::Mini, true, 413, 400 },        // Out_Sine
-        { "SQUARE", J::Mini, true, 464, 400 },      // Out_Square
-        { "FINAL", J::Mini, true, 563, 400 },       // Out_Final1
-        { "FINAL", J::Mini, true, 610, 400 },       // Out_Final2
+        J ("pitch", K::Banana, false, 30, 336),       // In_MoPitch
+        J ("c.v. in", K::Banana, false, 72, 336),     // In_MoCv
+        J ("fm", K::Mini, false, 114, 336),           // In_MoFm
+        J ("index", K::Banana, false, 202, 378),      // In_IndexCv
+        J ("wave", K::Banana, false, 200, 336),       // In_ProgWave
+        J ("pitch", K::Banana, false, 238, 336, true),   // In_ProgPitch  (program gates: red)
+        J ("timbre", K::Banana, false, 276, 336, true),  // In_ProgTimbre
+        J ("amp", K::Banana, false, 314, 336, true),     // In_ProgAmp
+        J ("lock", K::Mini, false, 312, 378),         // In_Lock
+        J ("pitch", K::Banana, false, 362, 336),      // In_PoPitch
+        J ("c.v. in", K::Banana, false, 413, 336),    // In_PoCv
+        J ("fm", K::Mini, false, 464, 336),           // In_PoFm
+        J ("timbre", K::Banana, false, 516, 336),     // In_TimbreCv
+        J ("sym", K::Banana, false, 563, 336),        // In_SymCv
+        J ("order", K::Banana, false, 610, 336),      // In_OrderCv
+        J ("signal", K::Mini, true, 114, 378),        // Out_MoSignal
+        J ("c.v. out", K::Banana, true, 156, 378),    // Out_MoCv
+        J ("sine", K::Mini, true, 413, 378),          // Out_Sine
+        J ("square", K::Mini, true, 464, 378),        // Out_Square
+        J ("final", K::Mini, true, 563, 378),         // Out_Final1
+        J ("final", K::Mini, true, 610, 378),         // Out_Final2
     };
     s.controls = {
-        { "mo_freq", "FREQUENCY", CtrlStyle::BigKnob, 92, 108, kBlue },
-        { "mo_fine", "FINE", CtrlStyle::Knob, 46, 196, kBlue },
-        { "mo_wave", "SAW  SQR  TRI", CtrlStyle::Switch3, 132, 196, kGrey },
-        { "mo_range", "HI / LO", CtrlStyle::Toggle, 46, 262, kGrey },
-        { "mo_cv", "CV", CtrlStyle::SmallKnob, 100, 270, kWhite },
-        { "mo_fm", "FM", CtrlStyle::SmallKnob, 146, 270, kWhite },
+        C ("mo_freq", "frequency", CtrlStyle::BigKnob, 92, 104, kGreyKnob, "28|55|110|220|440|880|1.7k|3.5k|7k"),
+        C ("mo_fine", "fine", CtrlStyle::Knob, 46, 196, kGreyKnob, "-|0|+"),
+        C ("mo_wave", "saw|sqr|tri", CtrlStyle::Switch3, 124, 196),
+        C ("mo_range", "high|low", CtrlStyle::Toggle, 40, 266),
+        C ("mo_cv", "c.v.", CtrlStyle::SmallKnob, 100, 268, kBlack, "-|0|+"),
+        C ("mo_fm", "fm", CtrlStyle::SmallKnob, 146, 268, kBlack),
 
-        { "idx", "MOD INDEX", CtrlStyle::BigKnob, 236, 108, kYellow },
-        { "idx_cv", "CV", CtrlStyle::SmallKnob, 304, 92, kWhite },
-        { "mod_amp", "AMP", CtrlStyle::Toggle, 206, 196, kGrey },
-        { "mod_pitch", "PITCH", CtrlStyle::Toggle, 257, 196, kGrey },
-        { "mod_timbre", "TIMBRE", CtrlStyle::Toggle, 308, 196, kGrey },
-        { "prog", "LOCAL  REM  BOTH", CtrlStyle::Switch3, 236, 266, kGrey },
-        { "lock", "LOCK", CtrlStyle::SmallKnob, 262, 400, kWhite },
+        C ("idx", "mod index", CtrlStyle::BigKnob, 236, 104, kGreyKnob, "0|2|4|6|8|10"),
+        C ("idx_cv", "c.v.", CtrlStyle::SmallKnob, 306, 84, kBlack),
+        C ("mod_amp", "amp", CtrlStyle::Toggle, 212, 204),
+        C ("mod_pitch", "pitch", CtrlStyle::Toggle, 257, 204),
+        C ("mod_timbre", "timbre", CtrlStyle::Toggle, 302, 204),
+        C ("prog", "local|remote|both", CtrlStyle::Switch3, 226, 268),
+        C ("lock", "lock", CtrlStyle::SmallKnob, 262, 378, kBlack),
 
-        { "po_freq", "FREQUENCY", CtrlStyle::BigKnob, 413, 108, kRed },
-        { "po_fine", "FINE", CtrlStyle::Knob, 372, 196, kRed },
-        { "po_cv", "CV", CtrlStyle::SmallKnob, 454, 196, kWhite },
-        { "po_fm", "FM", CtrlStyle::SmallKnob, 454, 262, kWhite },
+        C ("po_freq", "frequency", CtrlStyle::BigKnob, 413, 104, kGreyKnob, "28|55|110|220|440|880|1.7k|3.5k|7k"),
+        C ("po_fine", "fine", CtrlStyle::Knob, 372, 196, kGreyKnob, "-|0|+"),
+        C ("po_cv", "c.v.", CtrlStyle::SmallKnob, 456, 196, kBlack, "-|0|+"),
+        C ("po_fm", "fm", CtrlStyle::SmallKnob, 456, 262, kBlack),
 
-        { "timbre", "TIMBRE", CtrlStyle::BigKnob, 538, 108, kGreen },
-        { "timbre_cv", "CV", CtrlStyle::SmallKnob, 606, 92, kWhite },
-        { "sym", "SYMMETRY", CtrlStyle::Knob, 524, 222, kOrange },
-        { "order", "ORDER", CtrlStyle::Knob, 600, 222, kOrange },
+        C ("timbre", "timbre", CtrlStyle::BigKnob, 540, 104, kGreyKnob, "0|2|4|6|8|10"),
+        C ("timbre_cv", "c.v.", CtrlStyle::SmallKnob, 608, 84, kBlack, "-|0|+"),
+        C ("sym", "symmetry", CtrlStyle::Knob, 526, 222, kGreyKnob, "0|5|10"),
+        C ("order", "order", CtrlStyle::Knob, 602, 222, kGreyKnob, "0|5|10"),
     };
     return s;
 }
 
+// ---------------------------------------------------------------------------------------------
+// QF-281 Quad Function Generator - layout of the 281t: four rows A..D, quadrature column on the right
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make281()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_281;
+    s.name = "QUAD FUNCTION GENERATOR";
+    s.model = "QF-281";
+    s.after = "after Buchla 281";
+    s.width = 486.0f;
+    s.height = 430.0f;
+    const float rowY[4] = { 78, 162, 246, 330 };
+    for (int n = 0; n < 4; ++n) s.sections.push_back ({ "", 8, rowY[n] - 40, 372, 80 });
+    s.sections.push_back ({ "quadrature", 386, 38, 92, 372 });
+    for (int n = 0; n < 4; ++n)          // inputs per row: trig, cycle, c.v. in (attack), c.v. in (decay)
+    {
+        const float y = rowY[n];
+        s.jacks.push_back (J ("trig", K::Banana, false, 24, y - 16, true));
+        s.jacks.push_back (J ("cycle", K::Banana, false, 62, y - 16, true));
+        s.jacks.push_back (J ("c.v. in", K::Banana, false, 106, y - 16));
+        s.jacks.push_back (J ("c.v. in", K::Banana, false, 306, y - 16));
+    }
+    for (int n = 0; n < 4; ++n)          // outputs per row: function (blue), end of decay (red)
+    {
+        const float y = rowY[n];
+        s.jacks.push_back (J ("", K::Banana, true, 346, y + 17));
+        s.jacks.push_back (J ("", K::Banana, true, 346, y - 17, true));
+    }
+    s.jacks.push_back (J ("", K::Banana, true, 410, 152));    // quadrature mixes
+    s.jacks.push_back (J ("", K::Banana, true, 454, 152));
+    s.jacks.push_back (J ("", K::Banana, true, 410, 302));
+    s.jacks.push_back (J ("", K::Banana, true, 454, 302));
+
+    static const char* att[4] = { "att1", "att2", "att3", "att4" };
+    static const char* dec[4] = { "dec1", "dec2", "dec3", "dec4" };
+    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
+    static const char* trg[4] = { "trig1", "trig2", "trig3", "trig4" };
+    for (int n = 0; n < 4; ++n)
+    {
+        const float y = rowY[n];
+        s.controls.push_back (C (trg[n], "", CtrlStyle::Push, 24, y + 22));
+        s.controls.push_back (C (mode[n], "trans|sust|cycle", CtrlStyle::Switch3, 62, y + 22));
+        s.controls.push_back (C (att[n], "attack", CtrlStyle::Knob, 162, y - 2, kGreyKnob, kTimeScale));
+        s.controls.push_back (C (dec[n], "decay", CtrlStyle::Knob, 252, y - 2, kGreyKnob, kTimeScale));
+    }
+    s.controls.push_back (C ("mix12", "", CtrlStyle::BigKnob, 432, 88, kGreyKnob, "A|B"));
+    s.controls.push_back (C ("mix34", "", CtrlStyle::BigKnob, 432, 238, kGreyKnob, "C|D"));
+    s.controls.push_back (C ("quad12", "on|off", CtrlStyle::Toggle, 404, 368));
+    s.controls.push_back (C ("quad34", "on|off", CtrlStyle::Toggle, 444, 368));
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// LG-292 Quad Lowpass Gate - four columns with blue offset knobs and blue mode switches, "all" mix out
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make292()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_292;
+    s.name = "QUAD LOPASS GATE";
+    s.model = "LG-292";
+    s.after = "after Buchla 292";
+    s.width = 444.0f;
+    s.height = 430.0f;
+    const float cx[4] = { 53, 147, 241, 335 };
+    for (int n = 0; n < 4; ++n) s.sections.push_back ({ "", cx[n] - 45, 36, 90, 372 });
+    s.sections.push_back ({ "", 386, 36, 50, 372 });
+    for (int n = 0; n < 4; ++n)
+    {
+        s.jacks.push_back (J ("input", K::Mini, false, cx[n], 290));
+        s.jacks.push_back (J ("c.v. in", K::Banana, false, cx[n], 336));
+    }
+    for (int n = 0; n < 4; ++n) s.jacks.push_back (J ("output", K::Mini, true, cx[n], 382));
+    s.jacks.push_back (J ("all", K::Mini, true, 411, 382));
+    static const char* off[4] = { "off1", "off2", "off3", "off4" };
+    static const char* cv[4] = { "cv1", "cv2", "cv3", "cv4" };
+    static const char* res[4] = { "res1", "res2", "res3", "res4" };
+    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
+    for (int n = 0; n < 4; ++n)
+    {
+        s.controls.push_back (C (off[n], "offset", CtrlStyle::Knob, cx[n], 88, kBlueKnob, "0|5|10"));
+        s.controls.push_back (C (cv[n], "c.v. level", CtrlStyle::SmallKnob, cx[n] - 20, 160, kBlack));
+        s.controls.push_back (C (res[n], "res", CtrlStyle::SmallKnob, cx[n] + 22, 160, kBlack));
+        s.controls.push_back (C (mode[n], "lopass|combo|gate", CtrlStyle::Switch3, cx[n] - 26, 224, kBlueKnob));
+    }
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// SU-266 Source of Uncertainty
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make266()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_266;
+    s.name = "SOURCE OF UNCERTAINTY";
+    s.model = "SU-266";
+    s.after = "after Buchla 266";
+    s.width = 524.0f;
+    s.height = 430.0f;
+    s.sections = {
+        { "noise", 8, 36, 82, 176 },
+        { "fluctuating random voltages", 96, 36, 150, 176 },
+        { "sample & hold", 252, 36, 264, 176 },
+        { "integrator", 8, 220, 166, 188 },
+        { "quantized random voltages", 180, 220, 166, 188 },
+        { "stored random voltages", 352, 220, 164, 188 },
+    };
+    // inputs (DSP order = M266::In)
+    s.jacks = {
+        J ("c.v. in", K::Banana, false, 122, 176),            // In_FluctCv
+        J ("pulse in", K::Banana, false, 278, 90, true),      // In_ShPulse
+        J ("c.v. in", K::Banana, false, 278, 166),            // In_ShCv
+        J ("input", K::Banana, false, 34, 278),               // In_IntIn
+        J ("c.v. in", K::Banana, false, 34, 370),             // In_IntCv
+        J ("pulse in", K::Banana, false, 206, 278, true),     // In_QPulse
+        J ("c.v. in", K::Banana, false, 206, 370),            // In_QCv
+        J ("pulse in", K::Banana, false, 378, 278, true),     // In_SPulse
+        J ("c.v. in", K::Banana, false, 378, 370),            // In_SCv
+        // outputs (DSP order = M266::Out)
+        J ("pink", K::Mini, true, 49, 82),                    // Out_Pink
+        J ("white", K::Mini, true, 49, 130),                  // Out_White
+        J ("blue", K::Mini, true, 49, 178),                   // Out_Blue
+        J ("c.v. out", K::Banana, true, 220, 176),            // Out_Fluct
+        J ("c.v. out", K::Banana, true, 344, 128),            // Out_Sh
+        J ("alt", K::Banana, true, 438, 90),                  // Out_ShAltA
+        J ("alt", K::Banana, true, 488, 90),                  // Out_ShAltB
+        J ("alt", K::Banana, true, 438, 166, true),           // Out_ShPulseA
+        J ("alt", K::Banana, true, 488, 166, true),           // Out_ShPulseB
+        J ("c.v. out", K::Banana, true, 148, 370),            // Out_Int
+        J ("c.v. out", K::Banana, true, 320, 370),            // Out_Quant
+        J ("c.v. out", K::Banana, true, 452, 370),            // Out_StoredUni
+        J ("c.v. out", K::Banana, true, 494, 370),            // Out_StoredDist
+    };
+    s.controls = {
+        C ("rate", "rate", CtrlStyle::Knob, 171, 98, kGreyKnob, ".05|.5|5|50"),
+        C ("smooth", "smoothing", CtrlStyle::Knob, 112, 290, kGreyKnob, ".01|.1|1|10"),
+        C ("steps", "n", CtrlStyle::Knob, 272, 290, kGreyKnob, "1|2|3|4|5|6"),
+        C ("qmode", "n+1|2^n", CtrlStyle::Toggle, 312, 286),
+        C ("dist", "distribution", CtrlStyle::Knob, 452, 290, kGreyKnob, "lo|bell|hi"),
+    };
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// KB-225 MIDI Interface and OUT-2 Output (in the same visual language)
+// ---------------------------------------------------------------------------------------------
 static ModuleSpec makeMidi()
 {
-    using J = JackKind;
+    using K = JackKind;
     ModuleSpec s;
     s.type = MT_Midi;
     s.name = "MIDI INTERFACE";
@@ -89,28 +249,28 @@ static ModuleSpec makeMidi()
     s.after = "";
     s.width = 176.0f;
     s.height = 430.0f;
-    s.sections = { { "KEYBOARD", 8, 40, 160, 190 }, { "OUTPUTS", 8, 236, 160, 186 } };
+    s.sections = { { "keyboard", 8, 36, 160, 190 }, { "outputs", 8, 232, 160, 176 } };
     s.jacks = {
-        { "PITCH", J::Banana, true, 46, 288 },
-        { "GATE", J::Banana, true, 88, 288 },
-        { "PULSE", J::Banana, true, 130, 288 },
-        { "VEL", J::Banana, true, 46, 340 },
-        { "PRESS", J::Banana, true, 88, 340 },
-        { "MOD", J::Banana, true, 130, 340 },
-        { "BEND", J::Banana, true, 46, 392 },
-        { "PITCH", J::Banana, true, 88, 392 },      // second pitch output (stacking convenience)
+        J ("pitch", K::Banana, true, 46, 282),
+        J ("gate", K::Banana, true, 88, 282, true),
+        J ("pulse", K::Banana, true, 130, 282, true),
+        J ("velocity", K::Banana, true, 46, 334),
+        J ("pressure", K::Banana, true, 88, 334),
+        J ("mod", K::Banana, true, 130, 334),
+        J ("bend", K::Banana, true, 46, 386),
+        J ("pitch", K::Banana, true, 88, 386),
     };
     s.controls = {
-        { "midi_glide", "GLIDE", CtrlStyle::Knob, 88, 100, kGrey },
-        { "midi_bend", "BEND", CtrlStyle::SmallKnob, 50, 180, kWhite },
-        { "midi_trans", "OCTAVE", CtrlStyle::SmallKnob, 126, 180, kWhite },
+        C ("midi_glide", "glide", CtrlStyle::Knob, 88, 100, kGreyKnob, "0|1|2"),
+        C ("midi_bend", "bend", CtrlStyle::SmallKnob, 50, 182, kBlack),
+        C ("midi_trans", "octave", CtrlStyle::SmallKnob, 126, 182, kBlack, "-3|0|+3"),
     };
     return s;
 }
 
 static ModuleSpec makeOutput()
 {
-    using J = JackKind;
+    using K = JackKind;
     ModuleSpec s;
     s.type = MT_Output;
     s.name = "OUTPUT";
@@ -118,99 +278,24 @@ static ModuleSpec makeOutput()
     s.after = "";
     s.width = 156.0f;
     s.height = 430.0f;
-    s.sections = { { "LEVEL", 8, 40, 140, 246 }, { "INPUTS", 8, 292, 140, 130 } };
+    s.sections = { { "level", 8, 36, 140, 246 }, { "inputs", 8, 288, 140, 120 } };
     s.jacks = {
-        { "LEFT", J::Mini, false, 46, 344 },
-        { "RIGHT", J::Mini, false, 110, 344 },
-        { "LEVEL CV", J::Banana, false, 78, 398 },
+        J ("left", K::Mini, false, 46, 336),
+        J ("right", K::Mini, false, 110, 336),
+        J ("c.v. in", K::Banana, false, 78, 386),
     };
     s.controls = {
-        { "out_level", "LEVEL", CtrlStyle::Knob, 78, 96, kGrey },
-        { "out_cv", "CV", CtrlStyle::SmallKnob, 44, 176, kWhite },
-        { "out_lag", "LAG", CtrlStyle::SmallKnob, 112, 176, kWhite },
-        { "out_master", "MASTER", CtrlStyle::Knob, 78, 244, kGrey },
+        C ("out_level", "level", CtrlStyle::Knob, 74, 92, kGreyKnob, "0|5|10"),
+        C ("out_cv", "c.v.", CtrlStyle::SmallKnob, 42, 176, kBlack),
+        C ("out_lag", "lag", CtrlStyle::SmallKnob, 106, 176, kBlack),
+        C ("out_master", "master", CtrlStyle::Knob, 74, 240, kGreyKnob),
     };
-    return s;
-}
-
-// QF-281 Quad Function Generator: two pairs (A-B, C-D), each pair with a QUAD switch
-static ModuleSpec make281()
-{
-    using J = JackKind;
-    ModuleSpec s;
-    s.type = MT_281;
-    s.name = "QUAD FUNCTION GENERATOR";
-    s.model = "QF-281";
-    s.after = "after Buchla 281";
-    s.width = 424.0f;
-    s.height = 430.0f;
-    s.sections = { { "FUNCTIONS  A - B", 8, 40, 200, 382 }, { "FUNCTIONS  C - D", 216, 40, 200, 382 } };
-    const float cx[4] = { 58, 158, 266, 366 };
-    const char* names[4] = { "A", "B", "C", "D" };
-    juce::ignoreUnused (names);
-    for (int n = 0; n < 4; ++n)          // inputs: TRIG, ATT, DEC per channel
-    {
-        s.jacks.push_back ({ "TRIG", J::Banana, false, cx[n] - 26, 352 });
-        s.jacks.push_back ({ "ATT", J::Banana, false, cx[n] - 26, 400 });
-        s.jacks.push_back ({ "DEC", J::Banana, false, cx[n], 400 });
-    }
-    for (int n = 0; n < 4; ++n)          // outputs: FUNCTION, END OF DECAY
-    {
-        s.jacks.push_back ({ "OUT", J::Banana, true, cx[n] + 26, 352 });
-        s.jacks.push_back ({ "EOD", J::Banana, true, cx[n] + 26, 400 });
-    }
-    static const char* att[4] = { "att1", "att2", "att3", "att4" };
-    static const char* dec[4] = { "dec1", "dec2", "dec3", "dec4" };
-    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
-    static const char* trg[4] = { "trig1", "trig2", "trig3", "trig4" };
-    for (int n = 0; n < 4; ++n)
-    {
-        s.controls.push_back ({ att[n], "ATTACK", CtrlStyle::Knob, cx[n], 112, kOrange });
-        s.controls.push_back ({ dec[n], "DECAY", CtrlStyle::Knob, cx[n], 194, kBlue });
-        s.controls.push_back ({ mode[n], "TRAN  SUS  CYC", CtrlStyle::Switch3, cx[n], 262, kGrey });
-        s.controls.push_back ({ trg[n], "TRIGGER", CtrlStyle::Push, cx[n], 304, kGrey });
-    }
-    s.controls.push_back ({ "quad12", "QUAD", CtrlStyle::Toggle, 108, 66, kGrey });
-    s.controls.push_back ({ "quad34", "QUAD", CtrlStyle::Toggle, 316, 66, kGrey });
-    return s;
-}
-
-// LG-292 Quad Lowpass Gate: four vactrol channels
-static ModuleSpec make292()
-{
-    using J = JackKind;
-    ModuleSpec s;
-    s.type = MT_292;
-    s.name = "QUAD LOWPASS GATE";
-    s.model = "LG-292";
-    s.after = "after Buchla 292";
-    s.width = 392.0f;
-    s.height = 430.0f;
-    s.sections = { { "1", 8, 40, 90, 382 }, { "2", 102, 40, 90, 382 }, { "3", 196, 40, 90, 382 }, { "4", 290, 40, 90, 382 } };
-    const float cx[4] = { 53, 147, 241, 335 };
-    for (int n = 0; n < 4; ++n)
-    {
-        s.jacks.push_back ({ "SIGNAL", J::Mini, false, cx[n] - 20, 352 });
-        s.jacks.push_back ({ "CONTROL", J::Banana, false, cx[n] + 20, 352 });
-    }
-    for (int n = 0; n < 4; ++n) s.jacks.push_back ({ "OUT", J::Mini, true, cx[n], 400 });
-    static const char* off[4] = { "off1", "off2", "off3", "off4" };
-    static const char* cv[4] = { "cv1", "cv2", "cv3", "cv4" };
-    static const char* res[4] = { "res1", "res2", "res3", "res4" };
-    static const char* mode[4] = { "mode1", "mode2", "mode3", "mode4" };
-    for (int n = 0; n < 4; ++n)
-    {
-        s.controls.push_back ({ off[n], "OFFSET", CtrlStyle::Knob, cx[n], 104, kGrey });
-        s.controls.push_back ({ cv[n], "CV LEVEL", CtrlStyle::SmallKnob, cx[n], 180, kWhite });
-        s.controls.push_back ({ res[n], "RES", CtrlStyle::SmallKnob, cx[n], 238, kWhite });
-        s.controls.push_back ({ mode[n], "LP  BOTH  VCA", CtrlStyle::Switch3, cx[n], 288, kGrey });
-    }
     return s;
 }
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266() };
     return specs[t];
 }
 } // namespace wc

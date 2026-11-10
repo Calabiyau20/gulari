@@ -4,6 +4,7 @@
 #include "../modules/OutputModule.h"
 #include "../modules/M281.h"
 #include "../modules/M292.h"
+#include "../modules/M266.h"
 
 namespace wc
 {
@@ -12,12 +13,13 @@ juce::String instName (int inst)
     if (inst == kInstMidi) return "MIDI";
     if (inst == kInstOutput) return "OUTPUT";
     const auto letter = juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
-    switch (typeOfInst (inst)) { case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; default: return "259 " + letter; }
+    switch (typeOfInst (inst)) { case MT_266: return "266"; case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; default: return "259 " + letter; }
 }
 
 Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
 {
     mods[(size_t) kInstMidi] = std::make_unique<MidiInterface> (apvts);
+    mods[(size_t) kInst266] = std::make_unique<M266> (apvts, "ua_");
     for (int i = 0; i < kMax281; ++i) mods[(size_t) (kInst281 + i)] = std::make_unique<M281> (apvts, prefix281 (i));
     for (int i = 0; i < kMax259; ++i) mods[(size_t) (kInst259 + i)] = std::make_unique<M259> (apvts, prefix259 (i));
     for (int i = 0; i < kMax292; ++i) mods[(size_t) (kInst292 + i)] = std::make_unique<M292> (apvts, prefix292 (i));
@@ -36,6 +38,7 @@ Rack::~Rack() = default;
 M259* Rack::m259 (int i) const { return static_cast<M259*> (mods[(size_t) (kInst259 + i)].get()); }
 M281* Rack::m281 (int i) const { return static_cast<M281*> (mods[(size_t) (kInst281 + i)].get()); }
 M292* Rack::m292 (int i) const { return static_cast<M292*> (mods[(size_t) (kInst292 + i)].get()); }
+M266* Rack::m266() const { return static_cast<M266*> (mods[(size_t) kInst266].get()); }
 MidiInterface& Rack::midi() const { return *static_cast<MidiInterface*> (mods[(size_t) kInstMidi].get()); }
 OutputModule& Rack::output() const { return *static_cast<OutputModule*> (mods[(size_t) kInstOutput].get()); }
 

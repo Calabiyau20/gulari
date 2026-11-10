@@ -9,7 +9,7 @@ int main (int argc, char** argv)
     const juce::File out (juce::String (argc > 1 ? argv[1] : "/tmp/wc_ui"));
     out.createDirectory();
     const auto names = WcProcessor::builtinPatchNames();
-    for (int k : { 9, 99 })
+    for (int k : { 9, 11, 99 })
     {
         WcProcessor proc;
         proc.prepareToPlay (48000.0, 512);
@@ -24,7 +24,7 @@ int main (int argc, char** argv)
             proc.processBlock (buf, midi);
         }
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-        ed->setSize (1360, k == 99 ? 1500 : 1100);
+        ed->setSize (1400, k == 99 ? 1900 : 1100);
         for (int i = 0; i < 5; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         auto f = out.getChildFile ("patch" + juce::String (k) + ".png");

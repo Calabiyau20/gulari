@@ -11,12 +11,17 @@ namespace wc
 class M281 : public Module
 {
 public:
-    // per channel n = 0..3: inputs TRIG, ATT CV, DEC CV; outputs FUNC, EOD
-    static int inTrig (int n) { return n * 3; }
-    static int inAtt (int n) { return n * 3 + 1; }
-    static int inDec (int n) { return n * 3 + 2; }
+    // per channel n = 0..3: inputs TRIG, CYCLE, ATT CV, DEC CV; outputs FUNC, EOD
+    static int inTrig (int n) { return n * 4; }
+    static int inCycle (int n) { return n * 4 + 1; }
+    static int inAtt (int n) { return n * 4 + 2; }
+    static int inDec (int n) { return n * 4 + 3; }
     static int outFunc (int n) { return n * 2; }
     static int outEod (int n) { return n * 2 + 1; }
+    // quadrature section: per pair p (A-B, C-D) a crossfade and its complement
+    static int outMix (int pair, bool complement) { return 8 + pair * 2 + (complement ? 1 : 0); }
+    // 0.2.0 indices (TRIG, ATT, DEC per channel) -> current
+    static int inFromV2 (int old) { const int n = old / 3, k = old % 3; return n * 4 + (k == 0 ? 0 : k + 1); }
 
     M281 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
     void prepare (double sampleRate) override;
@@ -44,6 +49,8 @@ private:
     std::atomic<float>* dec[4] {};
     std::atomic<float>* mode[4] {};
     std::atomic<float>* quad[2] {};
+    std::atomic<float>* mix[2] {};
+    float mixV[2] {};
     float fs = 48000.0f;
     float attK[4] {}, decK[4] {};
     int modeV[4] {};

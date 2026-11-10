@@ -22,6 +22,7 @@ public:
     const int inst, index;
     const bool output;
     const JackKind kind;
+    const bool pulse;
 private:
     RackView& rack;
 };
@@ -30,12 +31,14 @@ private:
 class ParamSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    ParamSwitch (juce::RangedAudioParameter& p, int positions);
+    ParamSwitch (juce::RangedAudioParameter& p, int positions, const juce::String& labels);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
 private:
     juce::RangedAudioParameter& param;
     int positions, value = 0;
+    bool topIsOne = false;          // on/off switches: up = on
+    juce::StringArray labels;       // one per position, top to bottom
     juce::ParameterAttachment attach;
 };
 

@@ -73,6 +73,8 @@ static void add281 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     }
     g->addChild (std::make_unique<APB> (juce::ParameterID (p + "quad12", 1), n + "Quadrature A-B", false));
     g->addChild (std::make_unique<APB> (juce::ParameterID (p + "quad34", 1), n + "Quadrature C-D", false));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "mix12", 1), n + "Quadrature Mix A-B", NR (0.0f, 1.0f), 0.5f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "mix34", 1), n + "Quadrature Mix C-D", NR (0.0f, 1.0f), 0.5f));
     l.add (std::move (g));
 }
 
@@ -86,8 +88,22 @@ static void add292 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
         g->addChild (std::make_unique<APF> (juce::ParameterID (p + "off" + s, 1), n + s + " Offset", NR (0.0f, 1.0f), 0.0f));
         g->addChild (std::make_unique<APF> (juce::ParameterID (p + "cv" + s, 1), n + s + " CV Level", NR (0.0f, 1.0f), 1.0f));
         g->addChild (std::make_unique<APF> (juce::ParameterID (p + "res" + s, 1), n + s + " Resonance", NR (0.0f, 1.0f), 0.6f));
-        g->addChild (std::make_unique<APC> (juce::ParameterID (p + "mode" + s, 1), n + s + " Mode", juce::StringArray { "Lopass", "Both", "VCA" }, 1));
+        g->addChild (std::make_unique<APC> (juce::ParameterID (p + "mode" + s, 1), n + s + " Mode", juce::StringArray { "LoPass", "Combo", "Gate" }, 1));
     }
+    l.add (std::move (g));
+}
+
+static void add266 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
+{
+    const juce::String p ("ua_"), n ("266 ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("ua_grp", "266", "|");
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "rate", 1), n + "Fluctuating Rate", NR (0.0f, 1.0f), 0.45f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (0.05f * std::pow (1000.0f, v), 2) + " Hz"; })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "smooth", 1), n + "Integrator Smoothing", NR (0.0f, 1.0f), 0.3f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (0.01f * std::pow (1000.0f, v), 2) + " s"; })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "steps", 1), n + "Quantized Steps", NR (1.0f, 6.0f, 1.0f), 3.0f));
+    g->addChild (std::make_unique<APC> (juce::ParameterID (p + "qmode", 1), n + "Quantized Scale", juce::StringArray { "n+1", "2^n" }, 0));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "dist", 1), n + "Stored Distribution", NR (0.0f, 1.0f), 0.5f));
     l.add (std::move (g));
 }
 
@@ -101,6 +117,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         g->addChild (std::make_unique<APF> (juce::ParameterID ("midi_trans", 1), "MIDI Transpose", NR (-3.0f, 3.0f, 1.0f), 0.0f, unitAttr (" oct", 0)));
         l.add (std::move (g));
     }
+    add266 (l);
     for (int i = 0; i < kMax281; ++i) add281 (l, i);
     for (int i = 0; i < kMax259; ++i) add259 (l, i);
     for (int i = 0; i < kMax292; ++i) add292 (l, i);

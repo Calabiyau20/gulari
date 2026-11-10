@@ -33,6 +33,7 @@ public:
     static int inSig (int n) { return n * 2; }
     static int inCtl (int n) { return n * 2 + 1; }
     static int outSig (int n) { return n; }
+    static constexpr int outAll = 4;     // 4-to-1 mix of the four outputs
 
     M292 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
     void prepare (double sampleRate) override;
