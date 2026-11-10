@@ -12,6 +12,7 @@ WcEditor::WcEditor (WcProcessor& p)
 {
     setLookAndFeel (&look);
     logo = juce::ImageCache::getFromMemory (WcData::isologo_png, WcData::isologo_pngSize);   // official Calabi Yau isologo
+    proc.setFactoryData (WcData::factory_xml, WcData::factory_xmlSize);
 
     addAndMakeVisible (patchBox);
     patchBox.setTooltip ("Patches: built-in starting points and your saved patches");
@@ -19,6 +20,7 @@ WcEditor::WcEditor (WcProcessor& p)
     {
         const int id = patchBox.getSelectedId();
         if (id >= 1 && id < 1000) proc.loadBuiltinPatch (id - 1);
+        else if (id >= 5000) proc.loadPresetTree (proc.factory.getChild (id - 5000));
         else if (id >= 1000)
         {
             auto files = proc.patchFolder().findChildFiles (juce::File::findFiles, false, "*.wcpatch");
@@ -111,6 +113,23 @@ void WcEditor::refreshPatchMenu()
     root->addSectionHeader ("Built-in");
     const auto names = WcProcessor::builtinPatchNames();
     for (int i = 0; i < names.size(); ++i) patchBox.addItem (names[i], 1 + i);
+    if (proc.factory.getNumChildren() > 0)
+    {
+        root->addSectionHeader ("Factory library (" + juce::String (proc.factory.getNumChildren()) + ")");
+        juce::StringArray cats;
+        for (auto pr : proc.factory) cats.addIfNotAlreadyThere (pr["cat"].toString());
+        for (auto& c : cats)
+        {
+            juce::PopupMenu sub;
+            int i = 0;
+            for (auto pr : proc.factory)
+            {
+                if (pr["cat"].toString() == c) sub.addItem (5000 + i, pr["name"].toString());
+                ++i;
+            }
+            root->addSubMenu (c, sub);
+        }
+    }
     auto files = proc.patchFolder().findChildFiles (juce::File::findFiles, false, "*.wcpatch");
     files.sort();
     if (! files.isEmpty())

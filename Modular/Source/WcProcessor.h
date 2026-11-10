@@ -48,6 +48,13 @@ public:
     bool savePatchFile (const juce::File& f);
     bool loadPatchFile (const juce::File& f);
     juce::File patchFolder() const;
+    // ---- compact presets (only the non-default parameters) and the factory library ----
+    juce::ValueTree presetToTree (const juce::String& name, const juce::String& category) const;
+    void loadPresetTree (const juce::ValueTree& preset);
+    void setFactoryData (const void* data, int size);         // the embedded factory.xml (parsed once)
+    juce::ValueTree factory { "WCFACTORY" };
+    void resetAll();                                           // all parameters to default, no cables, empty 252
+
     // ---- 248 presets (12 memories, kept with the plugin state) ----
     void marfSave (int slot);
     void marfLoad (int slot);

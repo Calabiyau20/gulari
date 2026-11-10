@@ -265,9 +265,9 @@ endif()
 # Self-contained: its own small asset bundle (official isologo + fonts).
 # =============================================================================
 set(WC_PRODUCT_NAME "Calabi Yau West Coast Modular")
-set(WC_VERSION      "0.9.0")
+set(WC_VERSION      "0.9.1")
 juce_add_binary_data(WcAssets NAMESPACE WcData HEADER_NAME WcData.h SOURCES
-    Resources/brand/isologo.png Resources/fonts/Montserrat-SemiBold.ttf Resources/fonts/Montserrat-Bold.ttf Resources/fonts/Syncopate-Bold.ttf)
+    Resources/brand/isologo.png Resources/fonts/Montserrat-SemiBold.ttf Resources/fonts/Montserrat-Bold.ttf Resources/fonts/Syncopate-Bold.ttf Modular/Presets/factory.xml)
 set_target_properties(WcAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 juce_add_plugin(WestCoastModular
@@ -307,6 +307,12 @@ if(PG_BUILD_TESTS)
     target_include_directories(WcRenderTest PRIVATE Modular/Source)
     target_compile_definitions(WcRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
     target_link_libraries(WcRenderTest PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
+
+    juce_add_console_app(WcPresetGen PRODUCT_NAME "WcPresetGen")
+    target_sources(WcPresetGen PRIVATE Modular/tests/WcPresetGen.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp ${WC_DSP})
+    target_include_directories(WcPresetGen PRIVATE Modular/Source)
+    target_compile_definitions(WcPresetGen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
+    target_link_libraries(WcPresetGen PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
 
     juce_add_console_app(WcUiSnapshot PRODUCT_NAME "WcUiSnapshot")
     target_sources(WcUiSnapshot PRIVATE Modular/tests/WcUiSnapshot.cpp ${WC_SOURCES})

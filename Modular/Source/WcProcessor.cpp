@@ -643,6 +643,60 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
     commit();
 }
 
+juce::ValueTree WcProcessor::presetToTree (const juce::String& name, const juce::String& category) const
+{
+    juce::ValueTree t ("P");
+    t.setProperty ("name", name, nullptr);
+    t.setProperty ("cat", category, nullptr);
+    juce::ValueTree pv ("V");
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (std::fabs (rp->getValue() - rp->getDefaultValue()) > 1.0e-5f)
+                pv.setProperty (rp->getParameterID(), juce::String (rp->convertFrom0to1 (rp->getValue()), 5), nullptr);
+    t.addChild (pv, -1, nullptr);
+    auto pt = patchToTree();
+    pt.setProperty ("name", name, nullptr);
+    t.addChild (pt, -1, nullptr);
+    if (present[(size_t) wc::kInst252]) t.addChild (rack.m252()->toTree(), -1, nullptr);
+    return t;
+}
+
+void WcProcessor::resetAll()
+{
+    resetParams();
+    rack.m252()->clearAll();
+    cables.clear();
+    present.fill (false);
+    present[(size_t) wc::kInstMidi] = present[(size_t) wc::kInstOutput] = true;
+    colourCounter = 0;
+    commit();
+}
+
+void WcProcessor::loadPresetTree (const juce::ValueTree& t)
+{
+    if (! t.isValid()) return;
+    resetParams();
+    rack.m252()->clearAll();
+    auto pv = t.getChildWithName ("V");
+    for (int i = 0; i < pv.getNumProperties(); ++i)
+    {
+        const auto id = pv.getPropertyName (i).toString();
+        if (auto* p = apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 ((float) pv[pv.getPropertyName (i)]));
+    }
+    patchFromTree (t.getChildWithName ("WCPATCH"));
+    auto rg = t.getChildWithName ("RG252");
+    if (rg.isValid()) rack.m252()->fromTree (rg);
+    patchName = t["name"].toString();
+    sendChangeMessage();
+}
+
+void WcProcessor::setFactoryData (const void* data, int size)
+{
+    if (factory.getNumChildren() > 0) return;
+    if (auto xml = juce::parseXML (juce::String::fromUTF8 ((const char*) data, size)))
+        factory = juce::ValueTree::fromXml (*xml);
+}
+
 static bool isMarfStageParam (const juce::String& id)
 {
     if (! id.startsWith ("mf_")) return false;
