@@ -132,9 +132,12 @@ void WcEditor::addModuleMenu()
             if (! proc.isPresent (first + i)) { m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")"); any = true; }
         if (! any) m.addItem (999, title + "  - all slots in use", false);
     };
+    addType (kInst218, kMax218, "KB-218 Touch Activated Voltage Source");
     addType (kInst242, kMax242, "PP-242 Programmable Pulser");
     addType (kInst245, kMax245, "SV-245 Sequential Voltage Source");
     addType (kInst248, kMax248, "MF-248 Multiple Arbitrary Function Generator");
+    addType (kInst250, kMax250, "AF-250 Dual Arbitrary Function Generator");
+    addType (kInst252, kMax252, "RG-252 Polyphonic Rhythm Generator");
     addType (kInst266, kMax266, "SU-266 Source of Uncertainty");
     addType (kInst230, kMax230, "EF-230 Triple Envelope Follower");
     addType (kInst264, kMax264, "QS-264 Quad Sample & Hold");
@@ -147,10 +150,6 @@ void WcEditor::addModuleMenu()
     addType (kInst277, kMax277, "SD-277 Signal Delay Unit");
     addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
     addType (kInst207, kMax207, "MX-207 Mixer / Preamplifier");
-    m.addSeparator();
-    m.addSectionHeader ("Coming next");
-    for (auto* s : { "250 Dual Arbitrary Function Generator", "252 Polyphonic Rhythm Generator", "218 Keyboard" })
-        m.addItem (998, s, false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {
         if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) proc.setPresent (r - 1, true);

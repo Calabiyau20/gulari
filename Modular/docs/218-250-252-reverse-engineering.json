@@ -1,0 +1,23 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla 218e Touch Activated Voltage Source, 250e Dual Arbitrary Function Generator, 252e Polyphonic Rhythm Generator",
+    "clone_name": "KB-218 / AF-250 / RG-252",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla y los numeros de modelo se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [
+    { "id": "S1", "title": "Buchla 218e v3 documentation", "url": "https://buchlausa.github.io/buchla_doc/docs/easel-family/218e-v3", "used_for": "29 teclas, pulse / pressure / pitch 1.2 V/oct, portamento, arpegiador, strip, preset voltage source, add to pitch" },
+    { "id": "S2", "title": "Buchla 250e documentation", "url": "https://buchlausa.github.io/buchla_doc/docs/200e/250e-md", "used_for": "16 etapas, dos sets de voltaje, quant / interp, rangos, pulsos, modos adv / sust / enble / stop, time / vltg / fix, jump & loop, stage addressing" },
+    { "id": "S3", "title": "Buchla 252e documentation", "url": "https://buchlausa.github.io/buchla_doc/docs/200e/252e", "used_for": "11 anillos, celdas con pulsos R/G/B, subdivision, behind / ahead, 6 c.v., 3 relojes, sync on 1 / on cycl, euclideo, copy / paste / clear, display" },
+    { "id": "S4", "title": "Fotos del 218e, 250e y 252e (buchla.com), enviadas por Martin", "used_for": "disposicion del panel" }
+  ],
+  "stages": [
+    { "stage_id": "218_01", "name": "Touch keyboard", "fidelity": "behavioral", "description": "29 placas (clic; mas abajo en la placa = mas presion) o MIDI. Pitch 1.2 V/oct desde C = 1.2 V, pulso de 5 ms por toque, presion 0-10 V. Portamento 0-3 s (+ c.v.). Arpegiador ascending / random sobre las notas sostenidas, .5-30 pasos/s o por pulsos. Strip 0-10 V que mantiene el valor + pulso. Preset voltage: 4 pads eligen 4 perillas 0-10 V + pulso. Add to pitch: octaves (pad = +0..+3 oct) / preset / none.", "cpp": "Modular/Source/modules/M218.cpp" },
+    { "stage_id": "250_01", "name": "Dual arbitrary function generator", "fidelity": "behavioral", "description": "16 etapas en anillo; set 1 -> cv out 1, set 2 -> cv out 2 (el boton 1/2 cambia que set editan las perillas externas). Tiempo por etapa en .01-.1 / .08-.8 / .6-6 s, x .25-4 (+ c.v.). Quant (semitonos / tiempo en 9 pasos), interp (rampa). Rango de voltaje 0-2 .. 8-10 / all. Pulsos 1 / 2 (5 ms) y all. Modos: adv, sust (gate en stop pausa), enble (corre mientras start esta alto), stop. Time / vltg externos desde A-D (la perilla elige la entrada), fix = muestrea al entrar. Jump & loop con set (etapa final, destino, cantidad). Addressing strobed / continuous con offset + c.v.", "cpp": "Modular/Source/modules/M250.cpp" },
+    { "stage_id": "252_01", "name": "Polyphonic rhythm generator", "fidelity": "behavioral", "description": "Anillos de 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 y 16 celdas (91). Celda: pulsos R/G/B, subdivision 0-7 con curva, behind / ahead (+-media celda), 6 c.v. ('--' = no cambia). 3 relojes asignables; sync on 1 (todos los anillos coinciden en la celda 1 del ciclo maestro), on cycl (todas las celdas al ritmo maestro), libre (con delta-t x.5-3). Duracion de pulso de transiente a una celda. Euclideo: k pulsos rojos en n. Edicion: clic en el display o encoders cell / beats-cycl; copy / paste / clear por capa; phase rota la capa del anillo. Datos guardados con el estado del plugin y en los patches.", "cpp": "Modular/Source/modules/M252.cpp" }
+  ],
+  "panel_note": "218e en panel azul marino con perillas rojas, placas dibujadas y clicables. 250e con el anillo eliptico de 16 etapas. 252e con el display circular de 11 anillos dibujado por el plugin."
+}

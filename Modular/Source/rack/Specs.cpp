@@ -14,6 +14,8 @@
 #include "../modules/M207.h"
 #include "../modules/M296.h"
 #include "../modules/M248.h"
+#include "../modules/M218.h"
+#include "../modules/M250.h"
 
 namespace wc
 {
@@ -1140,6 +1142,265 @@ static ModuleSpec make248()
 }
 
 // ---------------------------------------------------------------------------------------------
+// KB-218 Touch Activated Voltage Source - layout of the 218e front (photo, 714 x 307 px): navy panel, red knobs,
+// strip and preset pads on the red band, 29 touch plates
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make218()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_218; s.name = "TOUCH ACTIVATED VOLTAGE SOURCE"; s.model = "KB-218"; s.after = "after Buchla 218e";
+    s.width = 714.0f; s.height = 307.0f;
+    s.bg = 0xff1f2c6c; s.ink = 0xfff2f2f2;
+    constexpr juce::uint32 kRed = 0xffd23a2a;
+    s.jacks = {
+        J ("", K::Banana, false, 187, 42),                               // portamento c.v.
+        JT ("", K::Banana, false, 272, 42, kTintOrange, true),           // arpeggiator pulse input
+        J ("", K::Banana, true, 28, 36, true),                           // pulse
+        JT ("", K::Banana, true, 62, 36, kTintPurple),                   // pressure
+        J ("", K::Banana, true, 96, 36),                                 // pitch
+        J ("", K::Banana, true, 62, 62),                                 // strip
+        J ("", K::Banana, true, 28, 62, true),                           // strip pulse
+        J ("", K::Banana, true, 432, 55),                                // preset output
+        J ("", K::Banana, true, 432, 30, true),                          // preset pulse
+    };
+    s.controls = {
+        C ("porta", "", CtrlStyle::Knob, 145, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+        C ("rate", "", CtrlStyle::Knob, 232, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+        C ("arp", "ascending|random|none", CtrlStyle::Switch3, 300, 42, kWhite),
+        C ("add", "octaves|preset|none", CtrlStyle::Switch3, 372, 42, kWhite),
+        C ("preset1", "", CtrlStyle::Knob, 478, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+        C ("preset2", "", CtrlStyle::Knob, 537, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+        C ("preset3", "", CtrlStyle::Knob, 597, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+        C ("preset4", "", CtrlStyle::Knob, 657, 42, kRed, "0|*|2|*|4|*|6|*|8|*|10"),
+    };
+    // touch surfaces (hit areas, drawn by the panel): strip, four preset pads, the plates
+    s.sections = { { "strip", 26, 83, 200, 17 }, { "pad", 470, 84, 36, 15 }, { "pad", 530, 84, 36, 15 }, { "pad", 590, 84, 36, 15 }, { "pad", 650, 84, 36, 15 },
+                   { "keys", 22, 108, 672, 186 } };
+    s.leds.push_back (D (46, 24, M218::Led_Pulse));
+    for (int i = 0; i < 4; ++i) s.leds.push_back (D (461 + 60.0f * (float) i, 92, M218::Led_Pad0 + i, 0xfff6e25a));
+    for (int i = 0; i < 10; ++i) s.leds.push_back (D (40 + 19.5f * (float) i, 104, M218::Led_Strip0 + i, 0xff4aa0ff));
+    for (int i = 0; i < M218::kKeys; ++i) s.leds.push_back (D (22.0f + 672.0f * ((float) i + 0.5f) / (float) M218::kKeys, 298, M218::Led_Key0 + i, 0xff4aa0ff));
+    s.texts = {
+        T ("TOUCH ACTIVATED VOLTAGE SOURCE  MODEL KB-218", 430, 9, 9.0f, 1),
+        T ("pulse", 28, 52, 7.5f), T ("pressure", 62, 52, 7.5f), T ("pitch", 96, 52, 7.5f), T ("strip", 84, 70, 7.5f, 0, 1),
+        T ("input", 187, 58, 7.5f), T ("input", 272, 58, 7.5f), T ("output", 432, 72, 7.5f),
+        T ("PORTAMENTO SLOPE", 165, 74, 8.0f, 1), T ("ARPEGGIATION RATE / PATTERN", 262, 74, 8.0f, 1),
+        T ("ADD TO PITCH", 392, 74, 8.0f, 1), T ("PRESET VOLTAGE SOURCE", 568, 74, 8.0f, 1),
+        T ("CALABI YAU", 330, 92, 12.0f, 1),
+    };
+    s.lines = { L (4, 18, 710, 18), L (452, 70, 452, 80, 1.0f), L (355, 42, 345, 42, 1.2f, false, true) };
+    scaleSpec (s, 430.0f / 307.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// AF-250 Dual Arbitrary Function Generator - layout of the 250e front (buchla.com photo, 1097 x 902 px):
+// sixteen stages on an elliptical ring, voltage knobs outside, time knobs inside, the edit centre
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make250()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_250; s.name = "DUAL ARBITRARY FUNCTION GENERATOR"; s.model = "AF-250"; s.after = "after Buchla 250e";
+    s.width = 1097.0f; s.height = 902.0f;
+    constexpr float cx = 555, cy = 447;
+    constexpr juce::uint32 kOr = 0xffff9a2a, kRedL = 0xffe8241c;
+    auto ang = [] (int n) { return juce::MathConstants<float>::twoPi * (float) n / 16.0f; };
+    s.jacks = {
+        J ("", K::Banana, false, 93, 825), J ("", K::Banana, false, 173, 825), J ("", K::Banana, false, 253, 825), J ("", K::Banana, false, 330, 825),
+        J ("", K::Banana, false, 50, 180),                                       // time mult c.v.
+        JT ("", K::Banana, false, 45, 365, kTintOrange, true),                   // start / adv
+        JT ("", K::Banana, false, 45, 580, kTintOrange, true),                   // stop
+        JT ("", K::Banana, false, 825, 825, kTintOrange, true),                  // address pulse
+        J ("", K::Banana, false, 895, 825),                                      // address c.v.
+        J ("", K::Banana, true, 60, 95),                                         // cv out (time)
+        J ("", K::Banana, true, 980, 98), J ("", K::Banana, true, 1053, 98),     // cv outputs 1, 2
+        J ("", K::Banana, true, 1050, 285, true), J ("", K::Banana, true, 1050, 358, true), J ("", K::Banana, true, 1050, 525, true),
+    };
+    static const char* vk[16] = { "v1_1", "v1_2", "v1_3", "v1_4", "v1_5", "v1_6", "v1_7", "v1_8", "v1_9", "v1_10", "v1_11", "v1_12", "v1_13", "v1_14", "v1_15", "v1_16" };
+    static const char* tk[16] = { "t_1", "t_2", "t_3", "t_4", "t_5", "t_6", "t_7", "t_8", "t_9", "t_10", "t_11", "t_12", "t_13", "t_14", "t_15", "t_16" };
+    static const char* num[16] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" };
+    for (int i = 0; i < 16; ++i)
+    {
+        const float a = ang (i), sn = std::sin (a), cs = std::cos (a);
+        s.controls.push_back (C (vk[i], "", CtrlStyle::Knob, cx + 385 * sn, cy - 318 * cs, 0xff2a2c33));
+        s.controls.push_back (C (tk[i], "", CtrlStyle::SmallKnob, cx + 262 * sn, cy - 205 * cs, 0xff2a2c33));
+        const float la = a - 0.17f;
+        s.leds.push_back (D (cx + 318 * std::sin (la), cy - 258 * std::cos (la), i, 0xfff4f4f0));
+        s.texts.push_back (T (num[i], cx + 340 * std::sin (la - 0.05f), cy - 280 * std::cos (la - 0.05f), 8.5f, 1));
+        s.leds.push_back (D (cx + 212 * std::sin (a + 0.2f), cy - 150 * std::cos (a + 0.2f), 20 + i, kOr));
+        // ring spokes
+        const float sa = a + juce::MathConstants<float>::pi / 16.0f;
+        s.lines.push_back (L (cx + 230 * std::sin (sa), cy - 165 * std::cos (sa), cx + 455 * std::sin (sa), cy - 375 * std::cos (sa), 0.9f));
+    }
+    for (int k = 0; k < 64; ++k)   // the two ellipses
+    {
+        const float a0 = juce::MathConstants<float>::twoPi * (float) k / 64.0f, a1 = juce::MathConstants<float>::twoPi * (float) (k + 1) / 64.0f;
+        s.lines.push_back (L (cx + 230 * std::sin (a0), cy - 165 * std::cos (a0), cx + 230 * std::sin (a1), cy - 165 * std::cos (a1), 1.0f));
+        s.lines.push_back (L (cx + 455 * std::sin (a0), cy - 375 * std::cos (a0), cx + 455 * std::sin (a1), cy - 375 * std::cos (a1), 1.0f));
+        s.lines.push_back (L (cx + 190 * std::sin (a0), cy - 125 * std::cos (a0), cx + 190 * std::sin (a1), cy - 125 * std::cos (a1), 1.0f));
+    }
+    s.lines.push_back (L (cx - 190, cy + 5, cx + 190, cy + 5, 1.0f)); s.lines.push_back (L (cx, cy + 5, cx, cy + 125, 1.0f));
+    // centre: edit knob, set, remote enable, edit; displays "jump to" / "& loop" are drawn by the panel
+    s.controls.push_back (C ("edit", "", CtrlStyle::Knob, 555, 440, 0xff2a2c33));
+    s.controls.push_back (C ("set", "", CtrlStyle::Push, 458, 415));
+    s.controls.push_back (C ("remote", "", CtrlStyle::Push, 497, 515));
+    s.controls.push_back (C ("editbtn", "", CtrlStyle::Push, 612, 515));
+    s.sections = { { "jump", 528, 352, 58, 44 }, { "loop", 618, 388, 64, 48 } };
+    s.leds.push_back (D (450, 490, 67, kRedL)); s.leds.push_back (D (657, 490, 68, kRedL));
+    // left: time
+    s.controls.push_back (C ("tq", "", CtrlStyle::Push, 133, 108)); s.controls.push_back (C ("ti", "", CtrlStyle::Push, 205, 108));
+    s.controls.push_back (C ("trng", "", CtrlStyle::Push, 345, 75));
+    s.controls.push_back (C ("mcv", "", CtrlStyle::SmallKnob, 145, 185, 0xff2a2c33));
+    s.controls.push_back (C ("mult", "", CtrlStyle::Knob, 70, 265, 0xff2a2c33, ".25|.5|1|2|4"));
+    s.leds.push_back (D (110, 80, 41, kOr)); s.leds.push_back (D (180, 80, 42, kOr));
+    s.leds.push_back (D (300, 58, 43, kOr)); s.leds.push_back (D (300, 80, 44, kOr)); s.leds.push_back (D (300, 101, 45, kOr));
+    // left: start / stop / mode / sources
+    s.controls.push_back (C ("start", "", CtrlStyle::Push, 50, 445, 0xff35b48a)); s.controls.push_back (C ("stop", "", CtrlStyle::Push, 50, 505, 0xffe05a5a));
+    s.controls.push_back (C ("mode", "", CtrlStyle::Push, 127, 676));
+    s.controls.push_back (C ("text", "", CtrlStyle::Push, 50, 767)); s.controls.push_back (C ("vext", "", CtrlStyle::Push, 130, 767)); s.controls.push_back (C ("fix", "", CtrlStyle::Push, 212, 767));
+    s.leds.push_back (D (95, 355, 40, 0xff3ad05a));
+    s.leds.push_back (D (25, 637, 58, kOr)); s.leds.push_back (D (25, 662, 59, kOr)); s.leds.push_back (D (25, 688, 60, kOr)); s.leds.push_back (D (95, 637, 61, kRedL));
+    s.leds.push_back (D (25, 727, 62, kOr)); s.leds.push_back (D (105, 727, 63, kOr)); s.leds.push_back (D (185, 727, 64, kOr));
+    // right: voltage
+    s.controls.push_back (C ("vset", "", CtrlStyle::Push, 757, 75));
+    s.controls.push_back (C ("vq", "", CtrlStyle::Push, 835, 108)); s.controls.push_back (C ("vi", "", CtrlStyle::Push, 905, 108));
+    s.controls.push_back (C ("vrng", "", CtrlStyle::Push, 1050, 200));
+    s.leds.push_back (D (680, 58, 46, kOr)); s.leds.push_back (D (708, 58, 47, kOr));
+    s.leds.push_back (D (815, 80, 48, kOr)); s.leds.push_back (D (880, 80, 49, kOr));
+    s.leds.push_back (D (880, 153, 50, kOr)); s.leds.push_back (D (907, 173, 51, kOr)); s.leds.push_back (D (935, 195, 52, kOr));
+    s.leds.push_back (D (960, 220, 53, kOr)); s.leds.push_back (D (975, 153, 54, kOr)); s.leds.push_back (D (975, 173, 55, kOr));
+    // right: pulses, addressing
+    s.controls.push_back (C ("p1", "", CtrlStyle::Push, 1050, 447)); s.controls.push_back (C ("p2", "", CtrlStyle::Push, 1050, 608));
+    s.leds.push_back (D (1072, 408, 56, kRedL)); s.leds.push_back (D (1072, 568, 57, kRedL));
+    s.controls.push_back (C ("addrbtn", "", CtrlStyle::Push, 1050, 705));
+    s.leds.push_back (D (1015, 690, 65, kOr)); s.leds.push_back (D (1015, 717, 66, kOr));
+    s.controls.push_back (C ("offset", "", CtrlStyle::Knob, 1010, 800, 0xff2a2c33, "1|4|7|10|13|16"));
+    for (auto t : { T ("DUAL ARBITRARY FUNCTION GENERATOR  MODEL AF-250", 548, 18, 10.0f, 4),
+                    T ("cv out", 60, 55, 9.0f), T ("quant", 133, 55, 9.0f), T ("interp", 205, 55, 9.0f),
+                    T (".01-.1", 268, 58, 8.5f, 0, 2), T (".08-.8", 268, 80, 8.5f, 0, 2), T (".6-6", 268, 101, 8.5f, 0, 2),
+                    T ("time", 385, 62, 9.0f, 0, 1), T ("range", 385, 76, 9.0f, 0, 1), T ("TIME", 495, 55, 10.0f, 1), T ("VOLTAGE", 612, 55, 10.0f, 1),
+                    T ("1", 688, 76, 8.5f), T ("2", 716, 76, 8.5f), T ("quant", 835, 55, 9.0f), T ("interp", 905, 55, 9.0f),
+                    T ("1", 968, 72, 8.5f), T ("outputs", 1030, 55, 8.5f), T ("2", 1066, 72, 8.5f),
+                    T ("0-2", 895, 153, 8.0f, 0, 1), T ("2-4", 922, 173, 8.0f, 0, 1), T ("4-6", 950, 195, 8.0f, 0, 1), T ("6-8", 975, 220, 8.0f, 0, 1),
+                    T ("8-10", 990, 153, 8.0f, 0, 1), T ("all", 990, 173, 8.0f, 0, 1), T ("voltge", 1050, 155, 8.5f), T ("range", 1050, 168, 8.5f),
+                    T ("time", 190, 155, 8.5f, 0, 1), T ("mult", 190, 168, 8.5f, 0, 1),                     T ("start/adv", 50, 410, 8.5f), T ("stop", 45, 542, 8.5f), T ("M", 98, 595, 8.5f, 1), T ("O", 104, 610, 8.5f, 1), T ("D", 110, 625, 8.5f, 1), T ("E", 116, 640, 8.5f, 1),
+                    T ("adv", 40, 637, 8.5f, 0, 1), T ("sust", 40, 662, 8.5f, 0, 1), T ("enble", 40, 688, 8.5f, 0, 1), T ("stop", 110, 637, 8.5f, 0, 1),
+                    T ("time", 40, 727, 8.5f, 0, 1), T ("vltg", 120, 727, 8.5f, 0, 1), T ("fix", 200, 727, 8.5f, 0, 1),
+                    T ("A", 68, 840, 8.5f), T ("B", 150, 840, 8.5f), T ("C", 230, 840, 8.5f), T ("D", 305, 840, 8.5f),
+                    T ("EXTERNAL INPUTS", 455, 845, 9.5f, 1), T ("STAGE ADDRESSING", 680, 845, 9.5f, 1),
+                    T ("jump to", 483, 372, 9.0f), T ("& loop", 650, 375, 9.0f), T ("set", 425, 420, 9.0f),
+                    T ("remote", 460, 458, 8.5f), T ("enable", 460, 472, 8.5f), T ("edit", 612, 472, 8.5f),
+                    T ("all", 1050, 255, 9.0f), T ("1", 1050, 408, 8.5f), T ("2", 1050, 568, 8.5f), T ("PULSE", 1030, 640, 9.0f, 1), T ("OUTPUTS", 1035, 655, 9.0f, 1),
+                    T ("strobed", 955, 690, 8.5f), T ("continuous", 955, 717, 8.5f), T ("offset", 945, 745, 8.5f),
+                    T ("pulse", 825, 783, 8.5f), T ("cv in", 895, 783, 8.5f),
+                    T ("CALABI YAU  -  after Buchla 250e", 548, 885, 9.0f, 1) })
+        s.texts.push_back (t);
+    for (auto l : { L (4, 36, 1093, 36), L (4, 868, 1093, 868), L (4, 340, 110, 340), L (4, 705, 270, 705), L (990, 665, 1093, 665), L (990, 245, 1093, 245),
+                    L (50, 150, 50, 140), L (50, 140, 145, 140), L (145, 140, 145, 160) })
+        s.lines.push_back (l);
+    scaleSpec (s, 430.0f / 902.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// RG-252 Polyphonic Rhythm Generator - layout of the 252e front (buchla.com photo, 1128 x 921 px): the round display
+// of eleven rings in the middle (drawn and clicked by the panel), cell edit on the left, clocks on the right
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make252()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_252; s.name = "POLYPHONIC RHYTHM GENERATOR"; s.model = "RG-252"; s.after = "after Buchla 252e";
+    s.width = 1128.0f; s.height = 921.0f;
+    constexpr juce::uint32 kOr = 0xffff9a2a, kRedL = 0xffe8241c, kGrnL = 0xff3ad05a, kBluL = 0xff3a8ae8, kKnob = 0xff23252b;
+    const float cy3[3] = { 390, 568, 748 };
+    s.jacks = {
+        J ("", K::Banana, false, 1085, 383), JT ("", K::Banana, false, 1085, 465, kTintOrange, true),
+        J ("", K::Banana, false, 1085, 568), JT ("", K::Banana, false, 1085, 655, kTintOrange, true),
+        J ("", K::Banana, false, 1085, 745), JT ("", K::Banana, false, 1085, 830, kTintOrange, true),
+        J ("", K::Banana, true, 62, 100, true), J ("", K::Banana, true, 150, 100, true), J ("", K::Banana, true, 235, 100, true),
+        JT ("", K::Banana, true, 312, 100, 0xfff4f4f0), JT ("", K::Banana, true, 390, 100, 0xfff4f4f0),
+        JT ("", K::Banana, true, 495, 100, 0xff3fb6e0), JT ("", K::Banana, true, 585, 100, 0xff3fb6e0), JT ("", K::Banana, true, 683, 100, 0xff3fb6e0),
+        JT ("", K::Banana, true, 775, 100, kTintPurple), JT ("", K::Banana, true, 870, 100, kTintPurple), JT ("", K::Banana, true, 962, 100, kTintPurple),
+    };
+    s.leds = { D (20, 78, 0, kRedL), D (108, 78, 1, kGrnL), D (190, 78, 2, kBluL), D (275, 60, 3, 0xfff6e25a), D (350, 60, 4, 0xfff6e25a) };
+    const float cvx[6] = { 495, 585, 683, 775, 870, 962 };
+    for (int o = 0; o < 6; ++o) s.leds.push_back (D (cvx[o] - 38, 78, 80 + o, o % 3 == 0 ? kRedL : (o % 3 == 1 ? kGrnL : kBluL)));
+    s.controls = {
+        C ("remote", "", CtrlStyle::Push, 1055, 100),
+        C ("red", "", CtrlStyle::Push, 50, 215), C ("green", "", CtrlStyle::Push, 120, 215), C ("blue", "", CtrlStyle::Push, 185, 215),
+        C ("play", "", CtrlStyle::Push, 268, 220),
+        C ("display", "", CtrlStyle::Push, 905, 290),
+        C ("cvselect", "", CtrlStyle::Push, 1088, 205),
+        C ("@cv", "", CtrlStyle::Knob, 1043, 275, kKnob),
+        C ("pdur", "", CtrlStyle::Knob, 80, 315, kKnob),
+        C ("@phase", "", CtrlStyle::Knob, 210, 315, kKnob),
+        C ("@offset", "", CtrlStyle::Knob, 80, 440, kKnob),
+        C ("editbtn", "", CtrlStyle::Push, 195, 422),
+        C ("clear", "", CtrlStyle::Push, 195, 500),
+        C ("@subc", "", CtrlStyle::Knob, 72, 565, kKnob),
+        C ("subcount", "", CtrlStyle::Push, 213, 565),
+        C ("copy", "", CtrlStyle::Push, 50, 665), C ("paste", "", CtrlStyle::Push, 245, 665),
+        C ("rhythm", "", CtrlStyle::Push, 350, 750),
+        C ("cell", "", CtrlStyle::Knob, 72, 825, kKnob),
+        C ("ring", "", CtrlStyle::Knob, 285, 825, kKnob),
+        C ("pattern", "", CtrlStyle::Knob, 495, 825, kKnob),
+        C ("bpm", "", CtrlStyle::Knob, 770, 825, kKnob),
+        C ("sync", "", CtrlStyle::Push, 848, 742), C ("reset", "", CtrlStyle::Push, 848, 828),
+    };
+    static const char* ck[3] = { "clk1", "clk2", "clk3" }; static const char* ab[3] = { "assign1", "assign2", "assign3" };
+    const char* ringLab[11] = { "3", "", "5", "", "7", "", "9", "", "11", "", "16" };
+    for (int k = 0; k < 3; ++k)
+    {
+        s.controls.push_back (C (ck[k], "", CtrlStyle::Knob, 1003, cy3[k], kKnob));
+        s.controls.push_back (C (ab[k], "", CtrlStyle::Push, 1003, cy3[k] + 77));
+        s.leds.push_back (D (965, cy3[k] + 50, 50 + k, kGrnL));
+        for (int r = 0; r < 11; ++r)
+        {
+            const float y = cy3[k] - 12 + 115.0f * (1.0f - (float) r / 10.0f);
+            const float x = (r % 2 == 0) ? 920.0f : 945.0f;
+            s.leds.push_back (D (x, y, 10 + k * 11 + r, 0xfff6e25a));
+            if (ringLab[r][0] != 0) s.texts.push_back (T (ringLab[r], 900, y + 4, 8.0f, 0, 2));
+        }
+        s.lines.push_back (L (1035, cy3[k], 1060, cy3[k], 1.2f)); s.lines.push_back (L (1035, cy3[k] + 77, 1060, cy3[k] + 77, 1.2f));
+    }
+    s.leds.push_back (D (905, 162, 60, kOr)); s.leds.push_back (D (905, 190, 61, kOr)); s.leds.push_back (D (905, 217, 62, kOr)); s.leds.push_back (D (905, 243, 63, kOr));
+    s.leds.push_back (D (800, 730, 64, kOr)); s.leds.push_back (D (800, 755, 65, kOr));
+    s.leds.push_back (D (300, 743, 66, kOr)); s.leds.push_back (D (300, 770, 67, kOr));
+    s.leds.push_back (D (228, 388, 68, kOr)); s.leds.push_back (D (303, 190, 69, 0xfff4f4f0)); s.leds.push_back (D (1100, 105, 70, kRedL));
+    // display (circle) and the seven-segment windows
+    s.sections = { { "display", 255, 145, 620, 620 }, { "cvedit", 965, 185, 76, 40 }, { "subdiv", 135, 545, 36, 40 },
+                   { "beats", 152, 808, 66, 40 }, { "patt", 365, 808, 80, 40 }, { "bpm", 592, 808, 105, 40 } };
+    s.texts = {
+        T ("MODEL RG-252 POLYPHONIC RHYTHM GENERATOR", 564, 20, 10.0f, 4),
+        T ("PULSE OUTPUTS", 105, 55, 9.5f, 1), T ("sub-div", 312, 55, 8.5f), T ("cell 1", 390, 55, 8.5f),
+        T ("CV OUTPUTS", 525, 55, 9.5f, 1), T ("1", 455, 105, 8.5f), T ("2", 548, 105, 8.5f), T ("3", 645, 105, 8.5f), T ("4", 738, 105, 8.5f), T ("5", 832, 105, 8.5f), T ("6", 925, 105, 8.5f),
+        T ("remote", 1055, 58, 8.5f), T ("enable", 1055, 72, 8.5f),
+        T ("CELL EDIT", 80, 160, 9.5f, 1), T ("red", 50, 182, 8.5f), T ("green", 120, 182, 8.5f), T ("blue", 185, 182, 8.5f),
+        T ("play/stop", 268, 160, 8.5f), T ("DISPLAY", 755, 160, 9.5f, 1),
+        T ("pulses", 860, 162, 8.5f, 0, 2), T ("cv 1-3", 860, 190, 8.5f, 0, 2), T ("cv 4-6", 860, 217, 8.5f, 0, 2), T ("subdiv", 860, 243, 8.5f, 0, 2),
+        T ("CV EDIT", 1000, 160, 9.5f, 1), T ("select", 1088, 168, 8.5f), T ("press", 980, 248, 8.0f), T ("for", 980, 262, 8.0f), T ("fine", 980, 276, 8.0f), T ("tune", 980, 290, 8.0f),
+        T ("pulse duration", 80, 265, 8.5f), T ("phase", 210, 265, 8.5f), T ("trans", 35, 352, 8.0f), T ("1 cell", 130, 352, 8.0f),
+        T ("behind / ahead", 80, 382, 8.5f), T ("edit", 195, 385, 8.5f), T ("clear", 195, 465, 8.5f),
+        T ("cell subdivide", 80, 512, 8.5f), T ("1/3", 35, 525, 8.0f), T ("2/3", 120, 525, 8.0f), T ("0", 35, 600, 8.0f), T ("1", 115, 600, 8.0f),
+        T ("copy", 50, 628, 8.5f), T ("paste", 245, 628, 8.5f), T ("copy rhythm", 148, 650, 8.0f), T ("variables for", 148, 665, 8.0f), T ("selected stages", 148, 680, 8.0f),
+        T ("RHYTHM SELECT", 95, 727, 9.5f, 1), T ("user defined", 290, 743, 8.5f, 0, 2), T ("Euclidean", 290, 770, 8.5f, 0, 2),
+        T ("cell", 92, 790, 8.5f), T ("beats/cycl", 185, 790, 8.5f), T ("pattern #", 412, 790, 8.5f), T ("MASTER BPM", 643, 790, 9.5f, 1),
+        T ("on 1", 790, 730, 8.5f, 0, 2), T ("on cycl", 790, 755, 8.5f, 0, 2), T ("sync", 848, 708, 8.5f), T ("reset", 848, 795, 8.5f),
+        T ("master", 965, 340, 8.5f), T ("CLOCKS", 1085, 340, 9.5f, 1), T ("assign / dt", 1010, 500, 8.0f),
+        T ("clock 2", 985, 530, 8.5f), T ("clock 3", 985, 710, 8.5f),
+        T ("CALABI YAU  -  after Buchla 252e", 564, 902, 9.0f, 1),
+    };
+    s.lines = { L (4, 36, 1124, 36), L (4, 140, 1124, 140), L (4, 880, 1124, 880), L (435, 36, 435, 140), L (1010, 36, 1010, 140),
+                L (225, 140, 225, 245), L (225, 245, 330, 245), L (950, 140, 950, 325), L (950, 325, 1124, 325),
+                L (4, 705, 255, 705), L (565, 780, 565, 880), L (875, 705, 875, 880) };
+    scaleSpec (s, 430.0f / 921.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
 // KB-225 MIDI Interface and OUT-2 Output (in the same visual language)
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec makeMidi()
@@ -1198,7 +1459,7 @@ static ModuleSpec makeOutput()
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230(), make285(), make207(), make277(), make296(), make248() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230(), make285(), make207(), make277(), make296(), make248(), make218(), make250(), make252() };
     return specs[t];
 }
 } // namespace wc

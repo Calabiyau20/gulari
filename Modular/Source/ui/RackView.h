@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "../WcProcessor.h"
@@ -100,7 +101,10 @@ public:
     void paintOverChildren (juce::Graphics&) override;
     void resized() override {}
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void updateLeds();
+    void touch218 (juce::Point<float> p, bool down);
     void toggleMatrixCell (int row, int col);   // 242: row 0 = stages, rows 1..3 = A B C
     const int inst;
     std::vector<std::unique_ptr<JackComp>> jacks;
@@ -110,6 +114,18 @@ private:
     const ModuleSpec& spec;
     juce::String prefix;
     std::vector<std::unique_ptr<juce::Slider>> sliders;
+    std::vector<juce::String> sliderIds;
+    int set250 = -1;
+    // 252: knobs that edit the cursor cell (not host parameters), copy buffer, cached cursor
+    std::map<juce::String, std::unique_ptr<juce::Slider>> freeKnobs;
+    struct Cell252 { int rgb = 0, sub = 0; float subc = 0, off = 0, cv[6] { -1, -1, -1, -1, -1, -1 }; bool valid = false; } clip252;
+    int cur252 = -1, phaseStep252 = 8, patt252 = -1;
+    bool euclid252 = false;
+    int cursor252() const;
+    void sync252Knobs();
+    void free252 (const juce::String& name, double v);
+    void action252 (const juce::String& id);
+    void paint252 (juce::Graphics&);
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::vector<std::unique_ptr<ParamSwitch>> switches;
     std::vector<std::unique_ptr<PushButton>> pushes;

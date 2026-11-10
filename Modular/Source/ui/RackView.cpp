@@ -8,9 +8,14 @@
 #include "../modules/M245.h"
 #include "../modules/M242.h"
 #include "../modules/M248.h"
+#include "../modules/M218.h"
+#include "../modules/M250.h"
+#include "../modules/M252.h"
 
 namespace wc::ui
 {
+static juce::Colour gInk { 0xff2146a8 };   // silkscreen colour of the panel being painted (set by ModulePanel::paint)
+
 static juce::String jackTip (const JackSpec& j)
 {
     juce::String t = juce::String (j.label).isEmpty() ? juce::String (j.output ? "output" : "input") : juce::String (j.label);
@@ -153,7 +158,7 @@ void ParamSwitch::paint (juce::Graphics& g)
     if (labels.isEmpty()) return;
     if (labels.size() == 1)
     {
-        drawItalic (g, labels[0], { 0.0f, 0.0f, 24.0f + 30.0f, 10.0f }, juce::Justification::centredLeft, WcLook::label (9.0f), col::ink);
+        drawItalic (g, labels[0], { 0.0f, 0.0f, 24.0f + 30.0f, 10.0f }, juce::Justification::centredLeft, WcLook::label (9.0f), gInk);
         return;
     }
     // position labels
@@ -161,7 +166,7 @@ void ParamSwitch::paint (juce::Graphics& g)
     {
         const float y = positions == 3 ? cy + (float) (i - 1) * span : (i == 0 ? cy - span : cy + span);
         drawItalic (g, labels[i], { 24.0f, y - 6.0f, (float) getWidth() - 24.0f, 12.0f }, juce::Justification::centredLeft,
-                    WcLook::label (9.5f), i == pos ? col::ink : col::ink.withAlpha (0.55f));
+                    WcLook::label (9.5f), i == pos ? gInk : gInk.withAlpha (0.55f));
     }
 }
 
@@ -369,12 +374,80 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                     };
                 }
             }
+            else if (type == MT_250)
+            {
+                auto* m = proc.rack.m250();
+                if (id == "start") b = std::make_unique<PushButton> (&m->btnStart, "Start");
+                else if (id == "stop") b = std::make_unique<PushButton> (&m->btnStop, "Stop");
+                else
+                {
+                    b = std::make_unique<PushButton> (nullptr, id == "set" ? "Jump & loop: set the loop stage, then the jump-to stage, then the count (centre knob)"
+                                                                 : id == "vset" ? "Voltage set 1 / 2 (the outer knobs edit the selected set)"
+                                                                 : "Programs the stage selected with the centre knob");
+                    b->onPress = [this, id]
+                    {
+                        auto raw = [this] (const juce::String& pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+                        auto put = [this] (const juce::String& pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                        const juce::String st = "_" + juce::String ((int) std::lround (raw ("edit")));
+                        auto cycle = [&] (const juce::String& pid, int n) { put (pid, (float) (((int) std::lround (raw (pid)) + 1) % n)); };
+                        if (id == "tq" || id == "ti" || id == "vq" || id == "vi" || id == "p1" || id == "p2" || id == "text" || id == "vext" || id == "fix")
+                            put (id + st, raw (id + st) > 0.5f ? 0.0f : 1.0f);
+                        else if (id == "trng") cycle ("trng" + st, 3);
+                        else if (id == "vrng") cycle ("vrng" + st, 6);
+                        else if (id == "mode") cycle ("mode" + st, 4);
+                        else if (id == "vset") put ("set", raw ("set") > 0.5f ? 0.0f : 1.0f);
+                        else if (id == "addrbtn") cycle ("addr", 3);
+                        else if (id == "remote") put ("remote", raw ("remote") > 0.5f ? 0.0f : 1.0f);
+                        else if (id == "set")
+                        {
+                            const int step = (int) std::lround (raw ("setstep")), e = (int) std::lround (raw ("edit"));
+                            if (step == 0) { put ("loopend", (float) e); put ("setstep", 1.0f); }
+                            else if (step == 1) { put ("loopto", (float) e); put ("setstep", 2.0f); }
+                            else { put ("loops", e >= 16 ? 0.0f : (float) e); put ("setstep", 0.0f); }
+                        }
+                        repaint();
+                    };
+                }
+            }
+            else if (type == MT_252)
+            {
+                auto* m = proc.rack.m252();
+                if (id == "reset") b = std::make_unique<PushButton> (&m->btnReset, "Reset: all rings back to cell 1");
+                else
+                {
+                    b = std::make_unique<PushButton> (nullptr, id == "red" || id == "green" || id == "blue" ? "Adds / removes this colour's pulse in the cursor cell"
+                                                                 : id == "rhythm" ? "Rhythm select: user defined / Euclidean (pattern # sets the pulses of the edited ring)"
+                                                                 : id.startsWith ("assign") ? "Assign / delta-t: in free sync, this clock runs at its own rate (host parameter Delta-t Scale)"
+                                                                 : id == "display" ? "Display layer: pulses / cv 1-3 / cv 4-6 + subdiv / all" : "");
+                    b->onPress = [this, id] { action252 (id); };
+                }
+            }
             else if (type == MT_264)
                 b = std::make_unique<PushButton> (nullptr, "press to auto tune / hold to initial tune (the plugin's oscillators never drift)");
             if (b == nullptr) continue;
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
             pushes.push_back (std::move (b));
+            continue;
+        }
+        if (c.suffix[0] == '@')
+        {
+            auto fk = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+            const int size = c.style == CtrlStyle::BigKnob ? 74 : (c.style == CtrlStyle::Knob ? 54 : 38);
+            fk->getProperties().set ("style", c.style == CtrlStyle::BigKnob ? 0 : (c.style == CtrlStyle::Knob ? 1 : 2));
+            fk->getProperties().set ("cap", (juce::int64) c.colour);
+            fk->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
+            fk->setRange (0.0, 1.0);
+            fk->setValue (juce::String (c.suffix) == "@phase" ? 0.5 : 0.0, juce::dontSendNotification);
+            fk->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
+            const juce::String nm (c.suffix);
+            fk->setTooltip (nm == "@cv" ? "C.V. value of the selected output for the cursor cell (fully left = --, no change)"
+                            : nm == "@offset" ? "Behind / ahead: moves the cursor cell earlier (left) or later (right)"
+                            : nm == "@subc" ? "Cell subdivide: spacing of the subdivided pulses (0 even .. 1 bunched late)"
+                            : "Phase: turn to rotate the cells of the edited ring (active display layer)");
+            fk->onValueChange = [this, nm] { free252 (nm, freeKnobs[nm]->getValue()); };
+            addAndMakeVisible (*fk);
+            freeKnobs[nm] = std::move (fk);
             continue;
         }
         auto* param = proc.apvts.getParameter (prefix + c.suffix);
@@ -411,6 +484,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             addAndMakeVisible (*f);
             attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, prefix + c.suffix, *f));
             sliders.push_back (std::move (f));
+            sliderIds.push_back (c.suffix);
             continue;
         }
         auto s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
@@ -425,6 +499,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         addAndMakeVisible (*s);
         attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, prefix + c.suffix, *s));
         sliders.push_back (std::move (s));
+        sliderIds.push_back (c.suffix);
     }
     int nIn = 0, nOut = 0;
     for (auto& j : spec.jacks)
@@ -457,8 +532,8 @@ static void drawScale (juce::Graphics& g, const ControlSpec& c)
             const float t = marks.size() == 1 ? 0.5f : (float) i / (float) (marks.size() - 1);
             const float a = a0 + (a1 - a0) * t;
             const float x = c.x + tr * std::sin (a), y = c.y - tr * std::cos (a);
-            if (marks[i] == "*") { g.setColour (col::ink); g.fillEllipse (x - 1.8f, y - 1.8f, 3.6f, 3.6f); }
-            else drawItalic (g, marks[i], { x - 18.0f, y - 6.0f, 36.0f, 12.0f }, juce::Justification::centred, WcLook::label (size), col::ink);
+            if (marks[i] == "*") { g.setColour (gInk); g.fillEllipse (x - 1.8f, y - 1.8f, 3.6f, 3.6f); }
+            else drawItalic (g, marks[i], { x - 18.0f, y - 6.0f, 36.0f, 12.0f }, juce::Justification::centred, WcLook::label (size), gInk);
         }
     };
     if (c.scale2 != nullptr) { ring (c.scale, r + 26.0f, 8.5f); ring (c.scale2, r + 13.0f, 7.5f); }
@@ -468,7 +543,7 @@ static void drawScale (juce::Graphics& g, const ControlSpec& c)
 static void drawArrowLine (juce::Graphics& g, const LineSpec& l)
 {
     juce::Line<float> line (l.x1, l.y1, l.x2, l.y2);
-    g.setColour (col::ink);
+    g.setColour (gInk);
     if (l.dashed)
     {
         const float dashes[] = { 4.0f, 3.0f };
@@ -483,13 +558,222 @@ static void drawArrowLine (juce::Graphics& g, const LineSpec& l)
     }
 }
 
+int ModulePanel::cursor252() const
+{
+    const int ring = juce::jlimit (0, wc::M252::kRings - 1, (int) std::lround (proc.apvts.getRawParameterValue (prefix + "ring")->load()));
+    const int cell = juce::jlimit (0, wc::M252::kSize[ring] - 1, (int) std::lround (proc.apvts.getRawParameterValue (prefix + "cell")->load()));
+    return wc::M252::base (ring) + cell;
+}
+
+void ModulePanel::sync252Knobs()
+{
+    auto* m = proc.rack.m252();
+    const int c = cursor252();
+    const int sel = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "cvsel")->load());
+    const float v = m->cv[c][juce::jlimit (0, 5, sel)].load();
+    freeKnobs["@cv"]->setValue (v < 0.0f ? 0.0 : 0.02 + 0.98 * v / 10.0, juce::dontSendNotification);
+    freeKnobs["@offset"]->setValue (0.5 + 0.5 * m->offset[c].load(), juce::dontSendNotification);
+    freeKnobs["@subc"]->setValue (m->subCurve[c].load(), juce::dontSendNotification);
+}
+
+void ModulePanel::free252 (const juce::String& name, double v)
+{
+    auto* m = proc.rack.m252();
+    const int c = cursor252();
+    if (name == "@cv")
+    {
+        const int sel = juce::jlimit (0, 5, (int) std::lround (proc.apvts.getRawParameterValue (prefix + "cvsel")->load()));
+        m->cv[c][sel].store (v < 0.02 ? -1.0f : (float) ((v - 0.02) / 0.98 * 10.0));
+    }
+    else if (name == "@offset") m->offset[c].store ((float) (v * 2.0 - 1.0));
+    else if (name == "@subc") m->subCurve[c].store ((float) v);
+    else if (name == "@phase")
+    {
+        const int step = (int) std::lround (v * 16.0);
+        int d = step - phaseStep252;
+        phaseStep252 = step;
+        const int ring = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "ring")->load());
+        const int n = wc::M252::kSize[ring], b0 = wc::M252::base (ring);
+        const int layer = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "layer")->load());
+        while (d != 0)
+        {
+            const int dir = d > 0 ? 1 : -1;
+            // rotate the active layer of the ring by one cell
+            auto rot = [&] (auto get, auto set)
+            {
+                std::vector<float> tmp ((size_t) n);
+                for (int i = 0; i < n; ++i) tmp[(size_t) i] = get (b0 + i);
+                for (int i = 0; i < n; ++i) set (b0 + ((i + dir) % n + n) % n, tmp[(size_t) i]);
+            };
+            if (layer == 0 || layer == 3) { rot ([m] (int i) { return (float) m->rgb[i].load(); }, [m] (int i, float x) { m->rgb[i].store ((int) x); });
+                                            rot ([m] (int i) { return m->offset[i].load(); }, [m] (int i, float x) { m->offset[i].store (x); }); }
+            if (layer == 1 || layer == 3) for (int o = 0; o < 3; ++o) rot ([m, o] (int i) { return m->cv[i][o].load(); }, [m, o] (int i, float x) { m->cv[i][o].store (x); });
+            if (layer == 2 || layer == 3)
+            {
+                for (int o = 3; o < 6; ++o) rot ([m, o] (int i) { return m->cv[i][o].load(); }, [m, o] (int i, float x) { m->cv[i][o].store (x); });
+                rot ([m] (int i) { return (float) m->sub[i].load(); }, [m] (int i, float x) { m->sub[i].store ((int) x); });
+                rot ([m] (int i) { return m->subCurve[i].load(); }, [m] (int i, float x) { m->subCurve[i].store (x); });
+            }
+            d -= dir;
+        }
+    }
+    repaint();
+}
+
+void ModulePanel::action252 (const juce::String& id)
+{
+    auto* m = proc.rack.m252();
+    const int c = cursor252();
+    auto raw = [this] (const char* pid) { return proc.apvts.getRawParameterValue (prefix + pid)->load(); };
+    auto put = [this] (const char* pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+    if (id == "red" || id == "green" || id == "blue") m->rgb[c].store (m->rgb[c].load() ^ (id == "red" ? 1 : (id == "green" ? 2 : 4)));
+    else if (id == "play") put ("play", raw ("play") > 0.5f ? 0.0f : 1.0f);
+    else if (id == "display") put ("layer", (float) (((int) std::lround (raw ("layer")) + 1) % 4));
+    else if (id == "cvselect") { put ("cvsel", (float) (((int) std::lround (raw ("cvsel")) + 1) % 6)); }
+    else if (id == "editbtn") put ("edit", raw ("edit") > 0.5f ? 0.0f : 1.0f);
+    else if (id == "clear") m->clearCell (c, (int) std::lround (raw ("layer")));
+    else if (id == "subcount") m->sub[c].store ((m->sub[c].load() + 1) % 8);
+    else if (id == "copy")
+    {
+        clip252.rgb = m->rgb[c].load(); clip252.sub = m->sub[c].load(); clip252.subc = m->subCurve[c].load(); clip252.off = m->offset[c].load();
+        for (int o = 0; o < 6; ++o) clip252.cv[o] = m->cv[c][o].load();
+        clip252.valid = true;
+    }
+    else if (id == "paste" && clip252.valid)
+    {
+        const int layer = (int) std::lround (raw ("layer"));
+        if (layer == 0 || layer == 3) { m->rgb[c].store (clip252.rgb); m->offset[c].store (clip252.off); }
+        if (layer == 1 || layer == 3) for (int o = 0; o < 3; ++o) m->cv[c][o].store (clip252.cv[o]);
+        if (layer == 2 || layer == 3) { for (int o = 3; o < 6; ++o) m->cv[c][o].store (clip252.cv[o]); m->sub[c].store (clip252.sub); m->subCurve[c].store (clip252.subc); }
+    }
+    else if (id == "rhythm") { put ("euclid", raw ("euclid") > 0.5f ? 0.0f : 1.0f); patt252 = -1; }
+    else if (id == "sync") put ("sync", (float) (((int) std::lround (raw ("sync")) + 1) % 3));
+    else if (id == "remote") put ("remote", raw ("remote") > 0.5f ? 0.0f : 1.0f);
+    else if (id.startsWith ("assign"))
+    {
+        const juce::String pid = "dt" + juce::String (id.getTrailingIntValue());
+        if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    sync252Knobs();
+    repaint();
+}
+
+void ModulePanel::paint252 (juce::Graphics& g)
+{
+    auto* m = proc.rack.m252();
+    const auto& d = spec.sections[0];
+    const auto ctr = juce::Point<float> (d.x + d.w * 0.5f, d.y + d.h * 0.5f);
+    const float rOut = d.w * 0.5f * 0.94f, rIn = rOut * 0.16f;
+    const int layer = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "layer")->load());
+    const int editRing = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "ring")->load());
+    const int cur = cursor252();
+    const bool edit = proc.apvts.getRawParameterValue (prefix + "edit")->load() > 0.5f;
+    const bool blink = (juce::Time::getMillisecondCounter() / 250) % 2 == 0;
+    for (int r = 0; r < wc::M252::kRings; ++r)
+    {
+        const int n = wc::M252::kSize[r];
+        const float r0 = rIn + (rOut - rIn) * (float) r / (float) wc::M252::kRings, r1 = rIn + (rOut - rIn) * (float) (r + 1) / (float) wc::M252::kRings;
+        bool playing[3] {}; int pc[3];
+        for (int k = 0; k < 3; ++k) { pc[k] = m->playCell[k].load(); playing[k] = m->playRing[k].load() == r; }
+        for (int i = 0; i < n; ++i)
+        {
+            const int ci = wc::M252::base (r) + i;
+            const float a0 = juce::MathConstants<float>::twoPi * (float) i / (float) n + 0.02f, a1 = juce::MathConstants<float>::twoPi * (float) (i + 1) / (float) n - 0.02f;
+            juce::Path seg;
+            seg.addPieSegment (juce::Rectangle<float> (ctr.x - r1 + 1.0f, ctr.y - r1 + 1.0f, 2.0f * r1 - 2.0f, 2.0f * r1 - 2.0f), a0, a1, (r0 + 1.0f) / (r1 - 1.0f));
+            const int bits = m->rgb[ci].load();
+            float rr = 0, gg = 0, bb = 0;
+            auto has = [&] (int o) { return m->cv[ci][o].load() >= 0.0f; };
+            if (layer == 0) { rr = (bits & 1) ? 1.0f : 0; gg = (bits & 2) ? 0.85f : 0; bb = (bits & 4) ? 1.0f : 0; }
+            else if (layer == 1) { rr = has (0) ? 1.0f : 0; gg = has (1) ? 0.85f : 0; bb = has (2) ? 1.0f : 0; }
+            else if (layer == 2) { rr = (has (3) || m->sub[ci].load() > 0) ? 1.0f : 0; gg = has (4) ? 0.85f : 0; bb = has (5) ? 1.0f : 0; }
+            else { const bool any = bits != 0 || m->sub[ci].load() > 0 || has (0) || has (1) || has (2) || has (3) || has (4) || has (5); rr = gg = bb = any ? 0.85f : 0.0f; }
+            const bool lit = rr + gg + bb > 0.0f;
+            bool head = false;
+            for (int k = 0; k < 3; ++k) head = head || (playing[k] && pc[k] == i);
+            juce::Colour c = lit ? juce::Colour::fromFloatRGBA (juce::jmax (rr, 0.12f), juce::jmax (gg, 0.12f), juce::jmax (bb, 0.12f), 1.0f) : juce::Colour (0xff1c1d22);
+            if (head) c = lit ? c.brighter (0.6f) : juce::Colour (0xff5a5c66);
+            g.setColour (c);
+            g.fillPath (seg);
+            if (edit && ci == cur && blink) { g.setColour (juce::Colours::white); g.strokePath (seg, juce::PathStrokeType (2.0f)); }
+            else if (r == editRing) { g.setColour (juce::Colour (0xff6a7aa8)); g.strokePath (seg, juce::PathStrokeType (0.8f)); }
+        }
+    }
+    // the seven-segment windows
+    auto seg7 = [&] (const wc::SectionSpec& sc, const juce::String& txt)
+    {
+        auto rr = juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h);
+        g.setColour (juce::Colour (0xff062a12)); g.fillRoundedRectangle (rr, 2.0f);
+        g.setColour (juce::Colour (0xff35e06a)); g.setFont (juce::FontOptions (rr.getHeight() * 0.62f, juce::Font::bold));
+        g.drawText (txt, rr, juce::Justification::centred);
+    };
+    const int sel = juce::jlimit (0, 5, (int) std::lround (proc.apvts.getRawParameterValue (prefix + "cvsel")->load()));
+    const float cvv = m->cv[cur][sel].load();
+    seg7 (spec.sections[1], juce::String (sel + 1) + (cvv < 0.0f ? juce::String (":--") : ":" + juce::String (cvv, 1)));
+    seg7 (spec.sections[2], juce::String (m->sub[cur].load()));
+    seg7 (spec.sections[3], juce::String (wc::M252::kSize[juce::jlimit (0, 10, editRing)]));
+    seg7 (spec.sections[4], juce::String ((int) std::lround (proc.apvts.getRawParameterValue (prefix + "pattern")->load())));
+    seg7 (spec.sections[5], juce::String ((int) std::lround (proc.apvts.getRawParameterValue (prefix + "bpm")->load())));
+}
+
 void ModulePanel::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     const bool silk = ! spec.lines.empty();        // modules drawn from a photo layout
-    // anodised aluminium
-    g.setGradientFill (juce::ColourGradient (silk ? juce::Colour (0xffe3e5e8) : col::panelHi, 0, 0, silk ? juce::Colour (0xffc7cad0) : col::panelLo, 0, r.getHeight(), false));
+    gInk = spec.ink != 0 ? juce::Colour (spec.ink) : col::ink;
+    if (spec.bg != 0)
+    {
+        const juce::Colour b (spec.bg);
+        g.setGradientFill (juce::ColourGradient (b.brighter (0.15f), 0, 0, b.darker (0.25f), 0, r.getHeight(), false));
+    }
+    else   // anodised aluminium
+        g.setGradientFill (juce::ColourGradient (silk ? juce::Colour (0xffe3e5e8) : col::panelHi, 0, 0, silk ? juce::Colour (0xffc7cad0) : col::panelLo, 0, r.getHeight(), false));
     g.fillRect (r);
+    if (typeOfInst (inst) == MT_252)
+    {
+        const auto& d = spec.sections[0];
+        g.setColour (juce::Colour (0xff1f56c8)); g.fillEllipse (d.x - 6.0f, d.y - 6.0f, d.w + 12.0f, d.h + 12.0f);
+        g.setColour (juce::Colour (0xff050507)); g.fillEllipse (d.x, d.y, d.w, d.h);
+    }
+    if (typeOfInst (inst) == MT_218)
+    {
+        // the red band with the strip and the preset pads, and the 29 touch plates
+        const auto& strip = spec.sections[0];
+        g.setColour (juce::Colour (0xffc8302a));
+        g.fillRect (juce::Rectangle<float> (6.0f, strip.y - 4.0f, r.getWidth() - 12.0f, strip.h + 8.0f));
+        g.setColour (juce::Colour (0xfff4f4f0));
+        g.fillRoundedRectangle (strip.x, strip.y, strip.w, strip.h, 3.0f);
+        g.setColour (juce::Colour (0xffd8a0a0));
+        for (int i = 0; i < 4; ++i)
+        {
+            const float x0 = strip.x + 10.0f + (float) i * strip.w / 4.0f;
+            juce::Path chev; chev.startNewSubPath (x0, strip.y + 3.0f); chev.lineTo (x0 + strip.w / 4.0f - 14.0f, strip.y + 0.5f * strip.h); chev.lineTo (x0, strip.y + strip.h - 3.0f);
+            g.strokePath (chev, juce::PathStrokeType (1.6f));
+        }
+        for (size_t i = 1; i < 5; ++i)
+        {
+            const auto& pd = spec.sections[i];
+            g.setColour (juce::Colour (0xfff4f4f0));
+            g.fillRoundedRectangle (pd.x, pd.y, pd.w, pd.h, 2.0f);
+        }
+        const auto& kb = spec.sections[5];
+        const int n = wc::M218::kKeys;
+        const float kw = kb.w / (float) n;
+        for (int i = 0; i < n; ++i)
+        {
+            const int pc = i % 12;
+            const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+            const float x = kb.x + kw * (float) i;
+            auto pr = juce::Rectangle<float> (x + (black ? kw * 0.22f : kw * 0.08f), kb.y, black ? kw * 0.56f : kw * 0.84f, kb.h);
+            g.setColour (black ? juce::Colour (0xffd23a2a) : juce::Colour (0xfff6f6f2));
+            g.fillRoundedRectangle (pr, 3.0f);
+            g.setColour (black ? juce::Colour (0xff8e1c16) : juce::Colour (0xffc9cfdc));
+            g.drawRoundedRectangle (pr, 3.0f, 1.0f);
+            if (! black)
+                for (float y = pr.getY() + 8.0f; y < pr.getBottom() - 4.0f; y += 6.0f)
+                    g.drawHorizontalLine ((int) y, pr.getX() + 3.0f, pr.getRight() - 3.0f);
+        }
+    }
     juce::Random rnd (inst * 977 + 3);
     for (int y = 0; y < getHeight(); y += 2)
     {
@@ -510,13 +794,13 @@ void ModulePanel::paint (juce::Graphics& g)
     if (! silk)
     {
         // our own modules (MIDI, Output): title, footer and rounded section frames
-        drawItalic (g, spec.name, { 20.0f, 6.0f, r.getWidth() - 50.0f, 22.0f }, juce::Justification::centred, WcLook::title (15.0f), col::ink);
+        drawItalic (g, spec.name, { 20.0f, 6.0f, r.getWidth() - 50.0f, 22.0f }, juce::Justification::centred, WcLook::title (15.0f), gInk);
         drawItalic (g, juce::String ("CALABI YAU   ") + spec.model, { 20.0f, r.getHeight() - 20.0f, r.getWidth() - 40.0f, 14.0f },
-                    juce::Justification::centred, WcLook::title (9.5f), col::ink);
+                    juce::Justification::centred, WcLook::title (9.5f), gInk);
         for (auto& sct : spec.sections)
         {
             auto sr = juce::Rectangle<float> (sct.x, sct.y, sct.w, sct.h);
-            g.setColour (col::ink);
+            g.setColour (gInk);
             g.drawRoundedRectangle (sr, 5.0f, 1.4f);
             if (juce::String (sct.title).isNotEmpty())
             {
@@ -525,7 +809,7 @@ void ModulePanel::paint (juce::Graphics& g)
                 auto tr = juce::Rectangle<float> (tw, 13.0f).withCentre ({ sr.getCentreX(), sr.getY() });
                 g.setGradientFill (juce::ColourGradient (col::panelHi, 0, 0, col::panelLo, 0, r.getHeight(), false));
                 g.fillRect (tr);
-                drawItalic (g, sct.title, tr, juce::Justification::centred, f, col::ink);
+                drawItalic (g, sct.title, tr, juce::Justification::centred, f, gInk);
             }
         }
     }
@@ -545,7 +829,7 @@ void ModulePanel::paint (juce::Graphics& g)
         else box = { t.x - w * 0.5f, t.y - t.size, w, t.size * 2.0f };
         if (t.style == 3)
         {
-            g.setColour (col::ink);
+            g.setColour (gInk);
             g.drawEllipse (t.x - 8.0f, t.y - 8.0f, 16.0f, 16.0f, 1.2f);
         }
         if (t.style == 4)   // title strip: white band with blue lettering
@@ -553,7 +837,7 @@ void ModulePanel::paint (juce::Graphics& g)
             g.setColour (juce::Colour (0xfff2f3f5));
             g.fillRect (juce::Rectangle<float> (4.0f, t.y - 8.0f, r.getWidth() - 8.0f, 16.0f));
         }
-        drawItalic (g, txt, box, j, f, col::ink);
+        drawItalic (g, txt, box, j, f, gInk);
     }
 
     // printed scales and knob captions
@@ -567,13 +851,13 @@ void ModulePanel::paint (juce::Graphics& g)
                 const float half = c.style == CtrlStyle::BigKnob ? 37.0f : (c.style == CtrlStyle::Knob ? 28.0f : 20.0f);
                 const float extra = c.scale != nullptr && c.style != CtrlStyle::SmallKnob ? 6.0f : 0.0f;
                 drawItalic (g, c.label, { c.x - 46.0f, c.y + half + extra - 2.0f, 92.0f, 13.0f }, juce::Justification::centred,
-                            WcLook::label (c.style == CtrlStyle::SmallKnob ? 9.0f : 10.5f), col::ink);
+                            WcLook::label (c.style == CtrlStyle::SmallKnob ? 9.0f : 10.5f), gInk);
             }
         }
     }
     for (auto& j : spec.jacks)
         if (juce::String (j.label).isNotEmpty())
-            drawItalic (g, j.label, { j.x - 30.0f, j.y + 11.0f, 60.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), col::ink);
+            drawItalic (g, j.label, { j.x - 30.0f, j.y + 11.0f, 60.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), gInk);
 }
 
 void ModulePanel::paintOverChildren (juce::Graphics& g)
@@ -594,6 +878,26 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
     };
     for (size_t i = 0; i < spec.leds.size(); ++i)
         led (spec.leds[i].x, spec.leds[i].y, juce::Colour (spec.leds[i].colour), i < ledCache.size() ? ledCache[i] : 0.0f);
+    if (typeOfInst (inst) == MT_252) paint252 (g);
+    if (typeOfInst (inst) == MT_250 && spec.sections.size() >= 2)
+    {
+        auto raw = [this] (const char* pid) { return (int) std::lround (proc.apvts.getRawParameterValue (prefix + pid)->load()); };
+        const int le = raw ("loopend"), lt = raw ("loopto"), lc = raw ("loops"), step = raw ("setstep");
+        for (int k = 0; k < 2; ++k)
+        {
+            const auto& sc = spec.sections[(size_t) k];
+            auto rr = juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h);
+            g.setColour (juce::Colour (0xff9fc4e8)); g.fillRoundedRectangle (rr, 2.0f);
+            g.setColour (juce::Colour (0xff3a5a80)); g.drawRoundedRectangle (rr, 2.0f, 1.0f);
+            juce::String txt = k == 0 ? (le > 0 ? juce::String (le) + ">" + juce::String (lt) : juce::String ("--"))
+                                      : (le > 0 ? (lc == 0 ? juce::String ("oo") : juce::String (lc) + "x") : juce::String ("--"));
+            if (step == 1 && k == 0) txt = "to?";
+            if (step == 2 && k == 1) txt = "n?";
+            g.setColour (juce::Colour (0xff0d1f3a));
+            g.setFont (WcLook::title (12.0f));
+            g.drawText (txt, rr, juce::Justification::centred);
+        }
+    }
     const auto type = typeOfInst (inst);
     if (type == MT_Midi)
         led (150.0f, 56.0f, col::ledRed, ledOn ? 1.0f : 0.0f);
@@ -615,6 +919,39 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
 
 void ModulePanel::updateLeds()
 {
+    if (typeOfInst (inst) == MT_252)
+    {
+        const int c = cursor252();
+        if (c != cur252) { cur252 = c; sync252Knobs(); }
+        const bool eu = proc.apvts.getRawParameterValue (prefix + "euclid")->load() > 0.5f;
+        const int pt = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "pattern")->load());
+        if (eu && (pt != patt252 || ! euclid252))
+        {
+            auto* m = proc.rack.m252();
+            const int ring = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "ring")->load());
+            const int n = wc::M252::kSize[ring], k = juce::jlimit (0, n, pt);
+            for (int i = 0; i < n; ++i) m->rgb[wc::M252::base (ring) + i].store (((i * k) % n) < k ? 1 : 0);
+        }
+        euclid252 = eu; patt252 = pt;
+        for (auto& sc : spec.sections) repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (3.0f).toNearestInt());
+    }
+    if (typeOfInst (inst) == MT_250)
+    {
+        const int set = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "set")->load());
+        if (set != set250)
+        {
+            set250 = set;
+            for (size_t i = 0; i < sliders.size(); ++i)
+                if (sliderIds[i].startsWith ("v1_"))
+                {
+                    const juce::String id = prefix + (set == 0 ? "v1_" : "v2_") + sliderIds[i].fromFirstOccurrenceOf ("_", false, false);
+                    attachments[i].reset();
+                    attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *sliders[i]);
+                    if (auto* p = proc.apvts.getParameter (id)) sliders[i]->setTooltip (p->getName (64));
+                }
+        }
+        for (auto& sc : spec.sections) repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (2.0f).toNearestInt());
+    }
     const auto type = typeOfInst (inst);
     if (! spec.leds.empty())
     {
@@ -657,8 +994,61 @@ void ModulePanel::toggleMatrixCell (int row, int col)
     if (auto* p = proc.apvts.getParameter (prefix + "col")) p->setValueNotifyingHost (p->convertTo0to1 ((float) (col + 1)));
 }
 
+void ModulePanel::touch218 (juce::Point<float> p, bool down)
+{
+    auto* m = proc.rack.m218();
+    if (! down) { m->touchKey.store (-1); m->stripTouch.store (false); m->padTouch.store (-1); return; }
+    const auto& st = spec.sections[0];
+    if (juce::Rectangle<float> (st.x, st.y, st.w, st.h).expanded (2.0f).contains (p))
+    {
+        m->stripPos.store (juce::jlimit (0.0f, 1.0f, (p.x - st.x) / st.w));
+        m->stripTouch.store (true);
+        return;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto& pd = spec.sections[(size_t) (1 + i)];
+        if (juce::Rectangle<float> (pd.x, pd.y, pd.w, pd.h).expanded (2.0f).contains (p))
+        {
+            m->padTouch.store (i);
+            if (auto* sp = proc.apvts.getParameter (prefix + "sel")) sp->setValueNotifyingHost (sp->convertTo0to1 ((float) i));
+            return;
+        }
+    }
+    const auto& kb = spec.sections[5];
+    if (juce::Rectangle<float> (kb.x, kb.y, kb.w, kb.h).contains (p))
+    {
+        const int k = juce::jlimit (0, wc::M218::kKeys - 1, (int) ((p.x - kb.x) / kb.w * (float) wc::M218::kKeys));
+        m->touchPressure.store (juce::jlimit (0.2f, 1.0f, 0.2f + 0.8f * (p.y - kb.y) / kb.h));   // further down the plate = more pressure
+        m->touchKey.store (k);
+    }
+    else m->touchKey.store (-1);
+}
+
+void ModulePanel::mouseDrag (const juce::MouseEvent& e) { if (typeOfInst (inst) == MT_218 && ! e.mods.isPopupMenu()) touch218 (e.position, true); }
+void ModulePanel::mouseUp (const juce::MouseEvent& e) { if (typeOfInst (inst) == MT_218) touch218 (e.position, false); }
+
 void ModulePanel::mouseDown (const juce::MouseEvent& e)
 {
+    if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_218) { touch218 (e.position, true); return; }
+    if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_252)
+    {
+        const auto& d = spec.sections[0];
+        const auto ctr = juce::Point<float> (d.x + d.w * 0.5f, d.y + d.h * 0.5f);
+        const float rOut = d.w * 0.5f * 0.94f, rIn = rOut * 0.16f, dist = e.position.getDistanceFrom (ctr);
+        if (dist > rIn && dist < rOut)
+        {
+            const int ring = juce::jlimit (0, 10, (int) ((dist - rIn) / (rOut - rIn) * 11.0f));
+            float a = std::atan2 (e.position.x - ctr.x, ctr.y - e.position.y);
+            if (a < 0.0f) a += juce::MathConstants<float>::twoPi;
+            const int n = wc::M252::kSize[ring];
+            const int cell = juce::jlimit (0, n - 1, (int) (a / juce::MathConstants<float>::twoPi * (float) n));
+            auto put = [this] (const char* pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            put ("ring", (float) ring); put ("cell", (float) cell);
+            repaint();
+        }
+        return;
+    }
     if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_242)
     {
         for (auto& d : spec.leds)

@@ -16,6 +16,9 @@
 #include "modules/M207.h"
 #include "modules/M296.h"
 #include "modules/M248.h"
+#include "modules/M218.h"
+#include "modules/M250.h"
+#include "modules/M252.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -137,12 +140,13 @@ juce::StringArray WcProcessor::builtinPatchNames()
              "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)",
              "245 Sequence (LPG)", "242 Programmed Rhythm",
              "258 Morphing Duo", "264 Poly Round Robin",
-             "285 Shifted Bells", "277 Delay Taps (207 mix)", "296 Spectral Sweep", "248 MARF Melody" };
+             "285 Shifted Bells", "277 Delay Taps (207 mix)", "296 Spectral Sweep", "248 MARF Melody", "218 Touch Arpeggio", "250 Ring Sequence", "252 Polyrhythm 16:5:3" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
 {
     resetParams();
+    rack.m252()->clearAll();
     cables.clear();
     present.fill (false);
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
@@ -477,6 +481,83 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
             break;
         }
+        case 20:  // 218 Touch Arpeggio: hold keys on the 218 (or MIDI): the ascending arpeggiator plays a 259 through a 292;
+                  // pressure opens the timbre, the strip sweeps the modulation index
+        {
+            present[(size_t) A] = present[(size_t) kInst218] = present[(size_t) kInst292] = true;
+            const juce::String l (prefix292 (0));
+            setParam ("kb_arp", 0.0f); setParam ("kb_rate", 0.55f); setParam ("kb_porta", 0.1f); setParam ("kb_add", 0.0f);
+            cables.push_back ({ kInst218, M218::Out_Pitch, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst218, M218::Out_Pitch, A, M259::In_MoPitch, nextColour (true) });
+            cables.push_back ({ kInst218, M218::Out_Pulse, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst218, M218::Out_Pressure, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst218, M218::Out_Strip, A, M259::In_IndexCv, nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "po_freq", hz (65.406f)); setParam (a + "mo_freq", hz (130.81f)); setParam (a + "mod_pitch", 1.0f); setParam (a + "idx", 0.1f);
+            setParam (a + "timbre", 0.05f); setParam (a + "timbre_cv", 0.4f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 21:  // 250 Ring Sequence: a key starts the 250; sixteen quantized stages (set 1 = pitch, set 2 = timbre), every stage
+                  // pings the 292, stages 4, 8, 12 and 16 glide (interp); stages 1-8 loop twice before the second half plays
+        {
+            present[(size_t) A] = present[(size_t) kInst250] = present[(size_t) kInst292] = true;
+            const juce::String l (prefix292 (0));
+            const int notes[16] = { 0, 7, 12, 10, 3, 7, 5, 15, 0, 12, 10, 7, 17, 15, 12, 19 };
+            for (int k = 0; k < 16; ++k)
+            {
+                const juce::String n (k + 1);
+                setParam ("sq_v1_" + n, (float) notes[k] * 0.01f); setParam ("sq_v2_" + n, 0.2f + 0.05f * (float) (k % 8));
+                setParam ("sq_t_" + n, (k % 4 == 3) ? 0.7f : 0.45f); setParam ("sq_p1_" + n, 1.0f); setParam ("sq_vq_" + n, 1.0f);
+                if (k % 4 == 3) setParam ("sq_vi_" + n, 1.0f);
+            }
+            setParam ("sq_loopend", 8.0f); setParam ("sq_loopto", 1.0f); setParam ("sq_loops", 2.0f);
+            cables.push_back ({ kInstMidi, MI::Out_Pulse, kInst250, M250::In_Start, nextColour (true) });
+            cables.push_back ({ kInst250, M250::Out_Cv1, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst250, M250::Out_Cv2, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst250, M250::Out_P1, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "po_freq", hz (110.0f)); setParam (a + "mo_freq", hz (220.0f)); setParam (a + "idx", 0.15f); setParam (a + "mod_pitch", 1.0f);
+            setParam (a + "timbre", 0.0f); setParam (a + "timbre_cv", 0.5f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 22:  // 252 Polyrhythm 16:5:3: three rings meet on cell 1 every bar. Ring 16 (master): red Euclidean 7/16 with a
+                  // melody on c.v. 1; ring 5 (clock 2): green pings a high voice; ring 3 (clock 3): blue fires a 281 on the timbre.
+        {
+            present[(size_t) A] = present[(size_t) B] = present[(size_t) kInst252] = present[(size_t) kInst292] = present[(size_t) kInst281] = true;
+            const juce::String l (prefix292 (0)), f (prefix281 (0));
+            auto* g = rack.m252();
+            const int r16 = 10, r5 = 2, r3 = 0;
+            const int notes[16] = { 0, 3, 7, 10, 12, 10, 7, 5, 0, 3, 7, 12, 15, 12, 10, 7 };
+            for (int i = 0; i < 16; ++i)
+            {
+                const int c = M252::base (r16) + i;
+                g->rgb[c].store (((i * 7) % 16) < 7 ? 1 : 0);
+                g->cv[c][0].store (0.1f * (float) notes[i]);
+            }
+            for (int i = 0; i < 5; ++i) { const int c = M252::base (r5) + i; g->rgb[c].store (2); g->cv[c][1].store (i == 0 ? 2.4f : 1.9f + 0.1f * (float) i); }
+            g->rgb[M252::base (r3)].store (4);
+            setParam ("rg_clk1", (float) (r16 + 1)); setParam ("rg_clk2", (float) (r5 + 1)); setParam ("rg_clk3", (float) (r3 + 1));
+            setParam ("rg_sync", 1.0f); setParam ("rg_bpm", 140.0f); setParam ("rg_ring", (float) r16);
+            cables.push_back ({ kInst252, M252::Out_Cv1, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst252, M252::Out_Cv2, B, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst252, M252::Out_R, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst252, M252::Out_G, kInst292, M292::inCtl (1), nextColour (true) });
+            cables.push_back ({ kInst252, M252::Out_B, kInst281, M281::inTrig (0), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (0), A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ B, M259::Out_Final1, kInst292, M292::inSig (1), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (1), kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam (a + "po_freq", hz (55.0f)); setParam (a + "timbre", 0.1f); setParam (a + "timbre_cv", 0.6f);
+            setParam (b + "po_freq", hz (220.0f)); setParam (b + "mo_freq", hz (330.0f)); setParam (b + "idx", 0.3f); setParam (b + "mod_pitch", 1.0f);
+            setParam (f + "att1", 0.1f); setParam (f + "dec1", 0.6f);
+            setParam (l + "mode1", 1.0f); setParam (l + "mode2", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
     }
     patchName = builtinPatchNames()[juce::jlimit (0, builtinPatchNames().size() - 1, index)];
     commit();
@@ -597,6 +678,7 @@ void WcProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (marfPresets.createCopy(), -1, nullptr);
+    root.addChild (rack.m252()->toTree(), -1, nullptr);
     if (auto xml = root.createXml()) copyXmlToBinary (*xml, destData);
 }
 
@@ -612,6 +694,8 @@ void WcProcessor::setStateInformation (const void* data, int sizeInBytes)
     patchFromTree (root.getChildWithName ("WCPATCH"));
     auto mp = root.getChildWithName ("MARFPRESETS");
     if (mp.isValid()) marfPresets = mp.createCopy();
+    auto rg = root.getChildWithName ("RG252");
+    if (rg.isValid()) rack.m252()->fromTree (rg);
 }
 
 juce::File WcProcessor::patchFolder() const
@@ -628,6 +712,7 @@ bool WcProcessor::savePatchFile (const juce::File& f)
     patchName = f.getFileNameWithoutExtension();
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
+    root.addChild (rack.m252()->toTree(), -1, nullptr);
     auto xml = root.createXml();
     return xml != nullptr && xml->writeTo (f);
 }
@@ -641,6 +726,7 @@ bool WcProcessor::loadPatchFile (const juce::File& f)
     auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid()) apvts.replaceState (params);
     patchFromTree (root.getChildWithName ("WCPATCH"));
+    { auto rg = root.getChildWithName ("RG252"); if (rg.isValid()) rack.m252()->fromTree (rg); else rack.m252()->clearAll(); }
     patchName = f.getFileNameWithoutExtension();
     sendChangeMessage();
     return true;

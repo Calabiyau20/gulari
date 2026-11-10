@@ -22,6 +22,9 @@
 #include "modules/M207.h"
 #include "modules/M296.h"
 #include "modules/M248.h"
+#include "modules/M218.h"
+#include "modules/M250.h"
+#include "modules/M252.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -643,6 +646,65 @@ int main (int argc, char** argv)
         m.beginBlock (256); m.btnReset[0].store (true); m.tick (in, out); m.btnReset[0].store (false); m.tick (in, out);
         std::printf ("  stage 1 quantized to D minor: 0.33 V -> %.2f V\n", out[M248::outJ (0, 3)]);
         if (std::fabs (out[M248::outJ (0, 3)] - 0.2f) > 0.01f) ok = false;   // 3 st = d# is not in D minor: down to d
+    }
+
+    {
+        std::printf ("218 TOUCH KEYBOARD\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m218();
+        float in[48] {}, out[48] {};
+        m.reset(); m.beginBlock (256);
+        m.touchPressure.store (0.8f); m.touchKey.store (7);                 // G above the lowest C
+        for (int i = 0; i < 2000; ++i) m.tick (in, out);
+        std::printf ("  key 8 (G): pitch %.2f V (expected 1.90), pressure %.1f V\n", out[M218::Out_Pitch], out[M218::Out_Pressure]);
+        if (std::fabs (out[M218::Out_Pitch] - 1.9f) > 0.01f || out[M218::Out_Pressure] < 7.0f) ok = false;
+        m.touchKey.store (-1); m.tick (in, out);
+        // arpeggiator over three MIDI notes, ascending, 10 steps per second
+        setP (p, "kb_arp", 0.0f); setP (p, "kb_rate", std::log (40.0f) / std::log (60.0f)); m.beginBlock (256);
+        int pulses = 0; bool was = false;
+        m.reset(); for (int n : { 48, 52, 55 }) m.handleMidi (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100));
+        std::set<int> pitches;
+        for (int i = 0; i < (int) SR; ++i) { m.tick (in, out); const bool hi = out[M218::Out_Pulse] > 5.0f; if (hi && ! was) { ++pulses; } was = hi; if (i % 480 == 0) pitches.insert ((int) std::lround (out[M218::Out_Pitch] * 10.0f)); }
+        std::printf ("  arpeggio of C E G at 20 steps/s: %d pulses in 1 s, %d distinct pitches\n", pulses, (int) pitches.size());
+        if (std::abs (pulses - 20) > 1 || pitches.size() < 3) ok = false;
+    }
+
+    {
+        std::printf ("250 DUAL ARBITRARY FUNCTION GENERATOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m250();
+        float in[48] {}, out[48] {};
+        for (int k = 1; k <= 16; ++k) { setP (p, "sq_v1_" + juce::String (k), 0.05f * (float) k); setP (p, "sq_t_" + juce::String (k), 0.0f); setP (p, "sq_trng_" + juce::String (k), 0.0f); }
+        setP (p, "sq_loopend", 3.0f); setP (p, "sq_loopto", 2.0f); setP (p, "sq_loops", 2.0f);
+        m.reset(); m.beginBlock (256);
+        m.btnStart.store (true); m.tick (in, out); m.btnStart.store (false);
+        std::vector<int> st; int last = -1;
+        for (int i = 0; i < (int) (SR * 0.12); ++i) { m.tick (in, out); const int s = (int) std::lround (out[M250::Out_Cv1] / 0.5f); if (s != last) { st.push_back (s); last = s; } }
+        std::printf ("  stages (10 ms each, loop 3 -> 2 twice): "); for (int s : st) std::printf ("%d ", s); std::printf ("\n");
+        const int want[9] = { 1, 2, 3, 2, 3, 2, 3, 4, 5 };
+        bool good = st.size() >= 9; for (int k = 0; good && k < 9; ++k) if (st[(size_t) k] != want[k]) good = false;
+        if (! good) ok = false;
+    }
+
+    {
+        std::printf ("252 POLYPHONIC RHYTHM GENERATOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m252();
+        float in[48] {}, out[48] {};
+        m.clearAll();
+        for (int i = 0; i < 16; ++i) m.rgb[M252::base (10) + i].store (1);    // ring 16, red on every cell
+        for (int i = 0; i < 3; ++i) m.rgb[M252::base (0) + i].store (2);      // ring 3, green on every cell
+        setP (p, "rg_clk1", 11.0f); setP (p, "rg_clk2", 1.0f); setP (p, "rg_sync", 1.0f); setP (p, "rg_bpm", 120.0f);
+        m.reset(); m.beginBlock (256);
+        int r = 0, g = 0, c1 = 0; bool wr = false, wg = false, wc = false;
+        for (int i = 0; i < (int) (SR * 8.0) - 10; ++i)   // one 16-cell master cycle at 120 BPM = 8 s
+        {
+            m.tick (in, out);
+            const bool hr = out[M252::Out_R] > 5.0f, hg = out[M252::Out_G] > 5.0f, hc = out[M252::Out_Cell1] > 5.0f;
+            r += hr && ! wr; g += hg && ! wg; c1 += hc && ! wc; wr = hr; wg = hg; wc = hc;
+        }
+        std::printf ("  sync on 1, 8 s: ring 16 red %d (16), ring 3 green %d (3), cell 1 %d (1)\n", r, g, c1);
+        if (r != 16 || g != 3 || c1 != 1) ok = false;
     }
 
     // ---- 3d. a 0.1.0 patch still loads (slot remap) ----
