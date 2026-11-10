@@ -1,0 +1,126 @@
+#pragma once
+// Small DSP building blocks shared by the West Coast modules.
+#include <cmath>
+#include <array>
+#include <algorithm>
+
+namespace wc::dsp
+{
+constexpr float kPi = 3.14159265358979f;
+constexpr float kTwoPi = 6.28318530717959f;
+
+inline float clampf (float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+inline float lerp (float a, float b, float t) { return a + (b - a) * t; }
+inline float sgn (float v) { return v > 0.0f ? 1.0f : (v < 0.0f ? -1.0f : 0.0f); }
+
+// 2-point polyBLEP residual for a unit step at fractional position t (phase) with increment dt
+inline float polyBlep (float t, float dt) noexcept
+{
+    if (dt <= 0.0f) return 0.0f;
+    if (t < dt) { t /= dt; return t + t - t * t - 1.0f; }
+    if (t > 1.0f - dt) { t = (t - 1.0f) / dt; return t * t + t + t + 1.0f; }
+    return 0.0f;
+}
+
+// one-pole low pass, bilinear (matches the analog RC pole)
+struct OnePoleLP
+{
+    float b = 1.0f, a = 0.0f, z = 0.0f;
+    void set (float fc, float fs) noexcept
+    {
+        const float wcT = kTwoPi * fc / fs;
+        b = wcT / (2.0f + wcT);
+        a = (wcT - 2.0f) / (wcT + 2.0f);
+    }
+    // H(z) = b (1 + z^-1) / (1 + a z^-1), transposed direct form II
+    float process (float x) noexcept
+    {
+        const float y = b * x + z;
+        z = b * x - a * y;
+        return y;
+    }
+    void reset() noexcept { z = 0.0f; }
+};
+
+// AC coupling (one-pole high pass)
+struct DcBlock
+{
+    float k = 0.001f, z = 0.0f;
+    void set (float fc, float fs) noexcept { k = 1.0f - std::exp (-kTwoPi * fc / fs); }
+    float process (float x) noexcept { z += (x - z) * k; return x - z; }
+    void reset() noexcept { z = 0.0f; }
+};
+
+// Vactrol (LED + LDR): fast attack, slow decay - used on control signals (AM index, output level)
+struct Vactrol
+{
+    float up = 0.1f, down = 0.01f, y = 0.0f;
+    void set (float attackMs, float decayMs, float fs) noexcept
+    {
+        up = 1.0f - std::exp (-1.0f / (0.001f * attackMs * fs));
+        down = 1.0f - std::exp (-1.0f / (0.001f * decayMs * fs));
+    }
+    float process (float x) noexcept { y += (x - y) * (x > y ? up : down); return y; }
+};
+
+// Linear-phase FIR decimator 4:1 (63 taps, Kaiser beta 8, passband to ~0.42 fs_out)
+struct Decimator4
+{
+    static constexpr int kTaps = 63;
+    static std::array<float, kTaps> makeTaps()
+    {
+        std::array<float, kTaps> h {};
+        const double fc = 0.105;     // cycles / sample at the 4x rate
+        const double beta = 8.0;
+        auto bessel0 = [] (double x) { double s = 1.0, t = 1.0; for (int k = 1; k < 30; ++k) { t *= (x / (2.0 * k)) * (x / (2.0 * k)); s += t; } return s; };
+        double sum = 0.0;
+        for (int n = 0; n < kTaps; ++n)
+        {
+            const double m = n - (kTaps - 1) / 2.0;
+            const double sinc = m == 0.0 ? 2.0 * fc : std::sin (2.0 * 3.14159265358979 * fc * m) / (3.14159265358979 * m);
+            const double r = 2.0 * n / (kTaps - 1) - 1.0;
+            const double w = bessel0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / bessel0 (beta);
+            h[(size_t) n] = (float) (sinc * w);
+            sum += sinc * w;
+        }
+        for (auto& v : h) v = (float) (v / sum);
+        return h;
+    }
+    std::array<float, kTaps * 2> buf {};   // doubled ring so the dot product reads contiguously
+    int pos = 0;
+    void push (float x) noexcept
+    {
+        buf[(size_t) pos] = x;
+        buf[(size_t) (pos + kTaps)] = x;
+        if (++pos >= kTaps) pos = 0;
+    }
+    float output (const std::array<float, kTaps>& h) const noexcept
+    {
+        const float* b = buf.data() + pos;   // oldest .. newest
+        float s = 0.0f;
+        for (int i = 0; i < kTaps; ++i) s += h[(size_t) i] * b[i];
+        return s;
+    }
+    void reset() noexcept { buf.fill (0.0f); pos = 0; }
+};
+
+// smoothed control value: linear ramp to a target over a fixed number of samples
+struct Ramp
+{
+    float v = 0.0f, target = 0.0f, step = 0.0f;
+    int left = 0;
+    void snap (float x) noexcept { v = target = x; left = 0; step = 0.0f; }
+    void to (float x, int len) noexcept
+    {
+        if (x == target && left == 0) return;
+        target = x;
+        left = std::max (1, len);
+        step = (target - v) / (float) left;
+    }
+    float next() noexcept
+    {
+        if (left > 0) { v += step; if (--left == 0) v = target; }
+        return v;
+    }
+};
+} // namespace wc::dsp

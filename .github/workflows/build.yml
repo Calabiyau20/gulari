@@ -17,21 +17,25 @@ jobs:
       - name: Configure (universal arm64 + x86_64)
         run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
       - name: Build VST3, AU, CLAP, Standalone
-        run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_AU Synthgularity_CLAP Synthgularity_Standalone CalabiYauResonator_VST3 CalabiYauResonator_AU CalabiYauResonator_CLAP CalabiYauResonator_Standalone -- -quiet
+        run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_AU Synthgularity_CLAP Synthgularity_Standalone CalabiYauResonator_VST3 CalabiYauResonator_AU CalabiYauResonator_CLAP CalabiYauResonator_Standalone WestCoastModular_VST3 WestCoastModular_AU WestCoastModular_CLAP WestCoastModular_Standalone -- -quiet
       - name: Ad-hoc sign
         run: |
           cd build/Synthgularity_artefacts/Release
           for p in VST3/*.vst3 AU/*.component CLAP/*.clap Standalone/*.app; do codesign --force --deep -s - "$p"; done
           cd ../../CalabiYauResonator_artefacts/Release
           for p in VST3/*.vst3 AU/*.component CLAP/*.clap Standalone/*.app; do codesign --force --deep -s - "$p"; done
+          cd ../../WestCoastModular_artefacts/Release
+          for p in VST3/*.vst3 AU/*.component CLAP/*.clap Standalone/*.app; do codesign --force --deep -s - "$p"; done
       - name: Validate AU
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R build/Synthgularity_artefacts/Release/AU/*.component ~/Library/Audio/Plug-Ins/Components/
           cp -R build/CalabiYauResonator_artefacts/Release/AU/*.component ~/Library/Audio/Plug-Ins/Components/
+          cp -R build/WestCoastModular_artefacts/Release/AU/*.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
           auval -v aumu Sygy CbYu
           auval -v aumu CyRs CbYu
+          auval -v aumu CyWc CbYu
       - name: Check minimum macOS
         run: |
           vtool -show-build build/Synthgularity_artefacts/Release/AU/Synthgularity.component/Contents/MacOS/Synthgularity | grep -E "minos|version"
@@ -48,11 +52,16 @@ jobs:
           ditto -c -k --keepParent "AU/Calabi-Yau Resonator.component" ../../../Resonator-mac-AU.zip
           ditto -c -k --keepParent "CLAP/Calabi-Yau Resonator.clap" ../../../Resonator-mac-CLAP.zip
           ditto -c -k --keepParent "Standalone/Calabi-Yau Resonator.app" ../../../Resonator-mac-Standalone.zip
+          cd ../../WestCoastModular_artefacts/Release
+          ditto -c -k --keepParent "VST3/Calabi Yau West Coast Modular.vst3" ../../../WestCoast-mac-VST3.zip
+          ditto -c -k --keepParent "AU/Calabi Yau West Coast Modular.component" ../../../WestCoast-mac-AU.zip
+          ditto -c -k --keepParent "CLAP/Calabi Yau West Coast Modular.clap" ../../../WestCoast-mac-CLAP.zip
+          ditto -c -k --keepParent "Standalone/Calabi Yau West Coast Modular.app" ../../../WestCoast-mac-Standalone.zip
       - name: Publish build to the 'builds' branch
         run: |
           mkdir -p /tmp/out/mac && cp -R build/Synthgularity_artefacts/Release/VST3/Synthgularity.vst3 build/Synthgularity_artefacts/Release/AU/Synthgularity.component build/Synthgularity_artefacts/Release/CLAP/Synthgularity.clap /tmp/out/mac/
           mkdir -p /tmp/out/resonator-mac && cp -R build/CalabiYauResonator_artefacts/Release/VST3/*.vst3 build/CalabiYauResonator_artefacts/Release/AU/*.component build/CalabiYauResonator_artefacts/Release/CLAP/*.clap /tmp/out/resonator-mac/
-          cp Synthgularity-mac-*.zip Resonator-mac-*.zip /tmp/out/
+          cp Synthgularity-mac-*.zip Resonator-mac-*.zip WestCoast-mac-*.zip /tmp/out/
           cd /tmp/out
           git init -q -b builds
           git config user.name "github-actions" && git config user.email "actions@github.com"
@@ -64,6 +73,7 @@ jobs:
           path: |
             Synthgularity-mac-*.zip
             Resonator-mac-*.zip
+            WestCoast-mac-*.zip
 
   windows:
     runs-on: windows-latest
@@ -75,7 +85,7 @@ jobs:
       - name: Configure
         run: cmake -B build -A x64 -T ClangCL
       - name: Build VST3, CLAP, Standalone
-        run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_CLAP Synthgularity_Standalone CalabiYauResonator_VST3 CalabiYauResonator_CLAP CalabiYauResonator_Standalone
+        run: cmake --build build --config Release --target Synthgularity_VST3 Synthgularity_CLAP Synthgularity_Standalone CalabiYauResonator_VST3 CalabiYauResonator_CLAP CalabiYauResonator_Standalone WestCoastModular_VST3 WestCoastModular_CLAP WestCoastModular_Standalone
       - name: Publish build to the 'builds-windows' branch
         shell: bash
         run: |
@@ -87,6 +97,10 @@ jobs:
           cp -R "build/CalabiYauResonator_artefacts/Release/VST3/Calabi-Yau Resonator.vst3" /tmp/out/resonator-win/
           cp "build/CalabiYauResonator_artefacts/Release/CLAP/Calabi-Yau Resonator.clap" /tmp/out/resonator-win/
           cp "build/CalabiYauResonator_artefacts/Release/Standalone/Calabi-Yau Resonator.exe" /tmp/out/resonator-win/
+          mkdir -p /tmp/out/westcoast-win
+          cp -R "build/WestCoastModular_artefacts/Release/VST3/Calabi Yau West Coast Modular.vst3" /tmp/out/westcoast-win/
+          cp "build/WestCoastModular_artefacts/Release/CLAP/Calabi Yau West Coast Modular.clap" /tmp/out/westcoast-win/
+          cp "build/WestCoastModular_artefacts/Release/Standalone/Calabi Yau West Coast Modular.exe" /tmp/out/westcoast-win/
           cd /tmp/out
           git init -q -b builds-windows
           git config user.name "github-actions" && git config user.email "actions@github.com"

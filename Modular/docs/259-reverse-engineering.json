@@ -1,0 +1,176 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 259 Programmable Complex Waveform Generator (Series 200, c. 1970s)",
+    "clone_name": "CW-259 Complex Waveform Generator (module of Calabi Yau West Coast Modular)",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "description": "Ingenieria inversa del 259 para su emulacion como modulo patcheable dentro del rack Calabi Yau West Coast Modular (VST3/AU/CLAP/Standalone). Cada etapa lista su esquematico de referencia, el modelo matematico y el archivo C++ que lo implementa.",
+    "trademark_note": "Buchla y 259 son referencias historicas del hardware original. El plugin es una emulacion independiente, no afiliada ni licenciada por Buchla USA.",
+    "fidelity_levels": {
+      "circuit": "Modelado a partir del circuito publicado con valores de componentes (validado contra SPICE en la fuente).",
+      "measured": "Ajustado a mediciones/rangos documentados del hardware (frecuencias, niveles, comportamiento).",
+      "behavioral": "Reconstruido a partir de la descripcion funcional de los manuales y del reissue licenciado 259t; no hay analisis de circuito publicado para esa etapa."
+    }
+  },
+  "sources": [
+    {"id": "S1", "title": "Esqueda, Poentynen, Valimaki, Parker - Virtual Analog Buchla 259 Wavefolder (DAFx-17)", "url": "https://dafx.de/paper-archive/2017/papers/DAFx17_paper_82.pdf", "used_for": "Etapa 05: topologia, valores de componentes, ecuaciones de las 5 celdas, filtro de salida, antialiasing"},
+    {"id": "S2", "title": "Roman Sowa - Buchla 259 Complex Wave Generator build notes", "url": "https://www.modularsynthesis.com/roman/buchla259/259cwg.htm", "used_for": "Etapas 02-04, 07: nucleo exponencial, 1.2 V/oct, rangos, MO alto/bajo, AM wet-dry con vactrol, modos Local/Remote/Both"},
+    {"id": "S3", "title": "Buchla & Tiptop Audio 259t manual (reissue licenciado del circuito original)", "url": "https://manuals.plus/buchla-and-tiptop-audio/259t-programmable-complex-waveform-generator-manual-2.pdf", "used_for": "Panel: Timbre / Symmetry / Order, tres shapers (folder, saw, M), Mod Index, switches Amplitude/Pitch/Timbre, Phase Lock"},
+    {"id": "S4", "title": "Buchla Archives - Timbre & Digital Nonlinear Waveshaping", "url": "https://www.buchlaarchives.com/blog/timbre-digital-nonlinear-waveshaping", "used_for": "Timbre = ganancia del seno antes del folder; transferencia fija"},
+    {"id": "S5", "title": "Mark Verbos - Buchla tech blog, 'Funny waveshapes' (2009)", "url": "https://buchlatech.blogspot.com/2009/01/funny-waveshapes.html", "used_for": "Nucleo triangular, quasi-saw, Order como crossfade final, AM con modulador balanceado de vactrol despues de Order"},
+    {"id": "S6", "title": "Buchla 259 User Guide, 16-11-1981 (escaneo)", "url": "https://www.modularsynthesis.com/roman/buchla259/Buchla%20259%20Description%20-%20Buchla%20Synthesizer%20User%20Guide%2011-16-1981.pdf", "used_for": "Referencia del panel. Es un escaneo sin texto; no se pudo leer automaticamente."},
+    {"id": "S7", "title": "Indice de documentos Buchla - rubidium.se", "url": "https://rubidium.se/~magnus/synths/companies/buchla/", "used_for": "Inventario de modulos de la serie 100/200 para las proximas entregas (208, 248, 266, 281, 292...)"}
+  ],
+  "reverse_engineering_prompt": {
+    "system_role": "Ingeniero DSP experto en emulacion de circuitos analogicos y desarrollo de plugins JUCE.",
+    "objective": "Replicar el 259 como modulo de un rack modular con cables, con la misma arquitectura de senal, rangos y comportamiento que el hardware.",
+    "instructions": [
+      "1. Analizar cada etapa: nucleo oscilador, conformadores, red no lineal, moduladores y salida.",
+      "2. Traducir cada modelo a C++ en tiempo real (osciladores por acumulador de fase, no linealidades estaticas con ADAA, filtros por transformada bilineal).",
+      "3. Integrar el modulo en el rack: entradas y salidas como jacks (banana = control DC, mini = audio), cables a nivel de sample.",
+      "4. Parametros en APVTS con suavizado (sin clicks).",
+      "5. Documentar los esquematicos de referencia en bloques de texto."
+    ]
+  },
+  "signal_conventions": {
+    "pitch": "1.2 V/oct (estandar Buchla). La perilla Frequency fija la frecuencia con 0 V en la entrada Pitch.",
+    "control_voltage": "0 a +10 V en jacks banana (DC). Pulsos y gates de 0 / +10 V; umbral de 'alto' = +3 V.",
+    "audio": "Jacks mini, nivel nominal 1.0 (aprox. 1 V pico), acoplados en AC.",
+    "jack_types": "Banana (control, se pueden apilar desde una salida) y mini 3.5 mm (audio). Como en el sistema 200, no se mezclan: banana con banana, mini con mini.",
+    "internal_rate": "El 259 corre a 4x de la frecuencia del host; las salidas se diezman con un FIR de fase lineal de 63 taps (Kaiser, beta 8)."
+  },
+  "hardware_schematic_reference": {
+    "stages": [
+      {
+        "stage_id": "01_cv_summing_expo",
+        "name": "Suma de control y convertidor exponencial (Principal y Modulation)",
+        "fidelity": "measured",
+        "description": "Las entradas de control se suman en un amplificador inversor y alimentan un par diferencial exponencial compensado con resistencias tempco de 1K. Entrada Keyboard/Pitch escalada a 1.2 V/oct (82K en la version vintage). La perilla coarse cubre ~27.5 Hz a ~7 kHz en el Principal.",
+        "schematic_ascii": "  Pitch (1.2V/oct) --[82K]--+\n  CV in --[atten]--[100K]---+\n  Coarse pot -------[100K]--+---[ -U  ]---[R 1K tempco]---+---(Q1 / Q2 expo pair)---> Icore\n  Fine pot  --------[1M ]---+   [ +U  ]                  |      emisores comunes\n                                 |                     [1K tempco]\n                                GND                       |\n                                                         GND\n  Icore = Iref * 2^(Vsum / 1.2 V)",
+        "equations": [
+          "f = f_coarse * 2^(fine/12) * 2^(V_pitch / 1.2) * 2^(cv_atten * V_cv / 1.2)",
+          "f_coarse(principal) = 27.5 Hz * 2^(8 * k), k = 0..1 (27.5 Hz .. 7040 Hz)",
+          "f_coarse(MO high)   = 27.5 Hz * 2^(8 * k);  f_coarse(MO low) = 0.25 Hz * 2^(8 * k)  (0.25 .. 64 Hz)"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::controlRate()"
+      },
+      {
+        "stage_id": "02_principal_core",
+        "name": "Nucleo triangular del Principal Oscillator + conformador a seno + cuadrada",
+        "fidelity": "measured",
+        "description": "Integrador que se invierte en dos umbrales (nucleo triangular, no diente de sierra). La triangular pasa por un conformador de par diferencial que da el seno (trimmer TR1 = forma del seno) y por el comparador U25 que da la cuadrada; la simetria se ajusta en el espejo de corriente.",
+        "schematic_ascii": "  Icore ---> [espejo de corriente + trim SYM] ---> (C timing) ---+---> [buffer] ---> TRI\n                    ^                                          |\n                    |                                          +---> [comparador Schmitt] --> conmuta la direccion\n                    +----------------------------------------------------------------+\n\n  TRI ---[R]---> (par diferencial, trim TR1) ---> [op-amp] ---> SINE out\n  TRI ---------> [U25 comparador, 1M realim.] -------------> SQUARE out",
+        "equations": [
+          "phi[n+1] = frac(phi[n] + f/fs_int)",
+          "tri = 1 - 4*|phi - 0.5|   (rango -1..+1)",
+          "sine = mix( sin(pi/2 * tri), tanh(1.5*tri)/tanh(1.5), shape_trim )   (shape_trim = 0.08, residuo del conformador)",
+          "square = sgn(tri) con correccion polyBLEP en los flancos"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::principal()"
+      },
+      {
+        "stage_id": "03_modulation_oscillator",
+        "name": "Modulation Oscillator (MO)",
+        "fidelity": "measured",
+        "description": "Integrador con su propio convertidor exponencial. Dos rangos: alto (audio) y bajo (sub-audio; en bajo se conmuta otro punto de polarizacion y otro capacitor, IC4C). Selector de forma: diente de sierra, cuadrada, triangular. Salida de senal +-2 V (mini) y salida de control 0..10 V (banana).",
+        "schematic_ascii": "  Vsum_MO --> [expo] --> (integrador, C_hi / C_lo via IC4C) --> TRI --+--> [IC7 selector] --> SIGNAL out (+-2V)\n                                                                    |        ^  pins 13/14 = SAW / SQR / TRI\n                                                                    +--> [comparador] --> SQR\n                                                                    +--> [conformador] --> SAW\n  selector --> [nivel 0..10V] --> CV out (banana)",
+        "equations": [
+          "saw = 2*phi - 1 (polyBLEP)",
+          "sqr = sgn(0.5 - phi) (polyBLEP)",
+          "tri = 1 - 4*|phi - 0.5|",
+          "SIGNAL out = selected (nivel 1.0); CV out = 5 V + 5 V * selected"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::modulator()"
+      },
+      {
+        "stage_id": "04_modulation_section",
+        "name": "Seccion de modulacion: Mod Index, Amplitude / Pitch / Timbre, programacion Local / Remote / Both",
+        "fidelity": "measured",
+        "description": "El MO modula al Principal por tres caminos que se habilitan con switches: Pitch (FM), Timbre (ganancia del seno antes del folder) y Amplitude (modulador balanceado con vactrol despues de Order; AM = wet - dry). La profundidad es comun: Mod Index (+CV). En modo Remote los switches y la forma del MO se programan por tension desde un secuenciador; en Both se combinan panel y tension (OR).",
+        "schematic_ascii": "                     +--[SW Pitch ]---> suma de FM del Principal\n  MO selected --[VCA Mod Index]--+--[SW Timbre]---> suma de Timbre\n                     +--[SW Amplitude]--> [vactrol] --> modulador balanceado (wet - dry) en la salida\n\n  Prog Wave (0..10V) ---+\n  Prog Pitch gate ------+--> [logica Local / Remote / Both, DG445] --> switches efectivos\n  Prog Timbre gate -----+\n  Prog Amp gate --------+",
+        "equations": [
+          "index = clamp(mod_index + mod_index_cv_atten * V_index/10, 0, 1)",
+          "FM:     f_principal += index * 4 * f_principal * mo   (FM lineal sobre la corriente del nucleo, sin pasar por cero: f >= 0)",
+          "Timbre: timbre_eff += index * 0.5 * mo",
+          "AM:     y = dry * (1 - g) + g * dry * mo,  g = vactrol(index), vactrol: ataque 3 ms, caida 40 ms",
+          "Remote: switch = V_prog > 3 V; wave = floor(V_wave / 3.34) -> SAW / SQR / TRI;  Both = Local OR Remote"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::modulation()"
+      },
+      {
+        "stage_id": "05_timbre_wavefolder",
+        "name": "Red de Timbre: wavefolder de 5 celdas en paralelo",
+        "fidelity": "circuit",
+        "description": "El seno del Principal entra a un VCA (Timbre fija la amplitud A, 0..10 V) y a cinco celdas plegadoras con op-amps en paralelo mas un camino directo. Cada celda es una zona muerta seguida de un tramo lineal. Las celdas 1-3 entran al sumador superior; 4, 5 y el camino directo al sumador inferior (V7), que se suma al superior por R7. El sumador superior tiene un polo en RF2*C (1.2 M * 100 pF = 1.33 kHz). Symmetry agrega un offset DC a la entrada del folder.",
+        "component_values": {
+          "branch_1": {"R1": "10k", "R2": "49.9k", "R3": "91k", "R4": "30k", "R5": "68k"},
+          "branch_2": {"R1": "100k", "R2": "100k", "R3": "100k", "R4": "100k", "R5": "100k"},
+          "branch_3": {"R1": "100k", "R2": "43.2k", "R3": "56k", "R4": "68k", "R5": "33k", "R6": "240k"},
+          "C": "100 pF", "R7": "24.9k", "RF1": "24.9k", "RF2": "1.2M", "Vs_cells": "6 V", "summers": "+-15 V"
+        },
+        "schematic_ascii": "              +--[celda 1: G=0.8333 T=0.600V]--+\n              +--[celda 2: G=0.3768 T=2.994V]--+--[sumador superior -RF2 || C]--+--> V'out --> (1 polo 1.33 kHz)\n  A*sin + Vsym-+--[celda 3: G=0.2829 T=5.460V]--+                                 ^\n              +--[celda 4: G=0.5743 T=1.800V]--+                                 |\n              +--[celda 5: G=0.2673 T=4.080V]--+--[sumador inferior V7]--[R7]----+\n              +--[directo  R6,3 ]--------------+\n\n  celda k:  Vin --[R1]--+--[op-amp con diodos en realimentacion]--> 0 si |Vin| < Tk ;  Gk*(Vin - Tk*sgn Vin) si no",
+        "equations": [
+          "V_k = G_k * (Vin - T_k*sgn(Vin))  si |Vin| > T_k ;  0 si no",
+          "V'out = -12.000*V1 - 27.777*V2 - 21.428*V3 + 17.647*V4 + 36.363*V5 + 5.000*Vin",
+          "H(s) = wc/(s + wc), fc = 1/(2*pi*RF2*C) = 1326 Hz (bilineal)",
+          "Vin = A*sine + V_sym,  A = 0.25 V + 9.75 V * timbre_eff,  V_sym = (symmetry - 0.5) * 6 V",
+          "Antialiasing: antiderivada de primer orden (ADAA1) de la no linealidad por tramos, a 4x: F_k(x) = G_k*(|x|-T_k)^2/2 para |x|>T_k; F_dir = 2.5*x^2",
+          "Normalizacion: ganancia compensada por una curva medida en prepare() (RMS de la salida vs A), 70% de compensacion para conservar el aumento de brillo/nivel del hardware"
+        ],
+        "notes": "La fuente S1 modela la red sin Symmetry ni Order; Symmetry se implementa como offset DC en la entrada (S3). S1 usa polyBLAMP a 8x; aca se usa ADAA1 a 4x, que es exacto para no linealidades estaticas por tramos y mas barato.",
+        "cpp": "Modular/Source/modules/Wavefolder259.h"
+      },
+      {
+        "stage_id": "06_saw_m_shapers_and_order",
+        "name": "Conformadores quasi-saw y 'M', y crossfade de Order",
+        "fidelity": "behavioral",
+        "description": "Del nucleo triangular salen una quasi-saw y una forma 'M' (cuadrada con valle en el medio de cada semiciclo). Con Order a la derecha, Timbre cruza el seno con la mezcla saw/M y Symmetry cruza saw con M. Order es el crossfade final entre la salida del folder y la mezcla saw/M (S3, S5).",
+        "schematic_ascii": "  TRI --> [quasi-saw]  --+\n                         +--[xfade Symmetry]--+\n  TRI --> [forma M]   ---+                    +--[xfade Timbre con SINE]--+\n                                                                           +--[xfade ORDER]--> [AM balanceado] --> FINAL\n  SINE --> [VCA Timbre] --> [wavefolder 5 celdas] --> [1 polo 1.33k] ------+",
+        "equations": [
+          "quasi_saw = tanh(1.2*(2*phi - 1))/tanh(1.2)  (polyBLEP en el reset)",
+          "M = sgn(sin(2*pi*phi)) * (1 - 0.6*sin^2(2*pi*phi))  (polyBLEP en 0 y 0.5)",
+          "sawM = lerp(quasi_saw, M, symmetry)",
+          "shaped = lerp(sine, sawM, timbre_eff)",
+          "final = lerp(folder_out, shaped, order)"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::shapers()"
+      },
+      {
+        "stage_id": "07_phase_lock",
+        "name": "Phase Lock",
+        "fidelity": "behavioral",
+        "description": "Entrada de audio con atenuador que engancha la frecuencia del Principal a la de la entrada. Si la entrada esta en o por debajo del Principal, engancha a un multiplo entero; si esta por encima, al subarmonico mas cercano (S3). Sirve para eliminar batidos entre osciladores en unisono u octavas.",
+        "schematic_ascii": "  Lock in --[atten]--> [detector de cruce por cero] --> [comparador de fase vs Principal] --> [integrador] --> suma de control del Principal",
+        "equations": [
+          "f_in estimada por intervalo entre cruces ascendentes",
+          "r = f_in / f_p ;  target = f_in/round(r) si r >= 1 ;  target = round(1/r)*f_in si r < 1",
+          "f_p' = f_p * (target/f_p)^amount ;  fase: phi -= 0.25*amount*wrap(phi) en cada cruce efectivo"
+        ],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::phaseLock()"
+      },
+      {
+        "stage_id": "08_output_stage",
+        "name": "Salidas",
+        "fidelity": "measured",
+        "description": "Salidas del Principal: Sine, Square y Final (complejo), acopladas en AC. Salidas del MO: Signal (audio) y CV 0..10 V (DC).",
+        "schematic_ascii": "  FINAL --[buffer]--[C acople]--> FINAL out (mini)\n  SINE  --[buffer]--[C acople]--> SINE out (mini)\n  SQR   --[buffer]--[C acople]--> SQUARE out (mini)\n  MO    --[buffer]-------------> MO SIGNAL out (mini) ;  --[nivel]--> MO CV out (banana, DC)",
+        "equations": ["acople AC: pasa altos de 1 polo a 8 Hz en las salidas de audio"],
+        "cpp": "Modular/Source/modules/M259.cpp :: M259::outputs()"
+      }
+    ]
+  },
+  "panel_map": {
+    "modulation_oscillator": ["Frequency (coarse)", "Fine (+-3.5 st)", "Range Hi/Lo", "Wave Saw/Square/Tri", "Pitch in (banana, 1.2 V/oct)", "CV in (banana) + atenuverter", "FM in (mini) + cantidad", "Signal out (mini)", "CV out (banana)"],
+    "modulation_section": ["Mod Index", "Index CV in (banana) + atenuador", "Amplitude on/off", "Pitch on/off", "Timbre on/off", "Program Local/Remote/Both", "Prog Wave / Prog Pitch / Prog Timbre / Prog Amp in (banana)", "Phase Lock in (mini) + cantidad"],
+    "principal_oscillator": ["Frequency (coarse)", "Fine (+-3.5 st)", "Pitch in (banana, 1.2 V/oct)", "CV in (banana) + atenuverter", "FM in (mini) + cantidad", "Sine out (mini)", "Square out (mini)"],
+    "waveshape": ["Timbre + CV in (banana) + atenuverter", "Symmetry + CV in (banana)", "Order + CV in (banana)", "Final out x2 (mini)"]
+  },
+  "juce_plugin_implementation_skeleton": {
+    "processor": "WcProcessor (juce::AudioProcessor): APVTS con un banco fijo de parametros por instancia (hasta 4 x 259, MIDI Interface, Output). El rack y los cables viven en el estado (ValueTree).",
+    "graph": "wc::Rack: modulos en orden fijo (MIDI -> 259 A..D -> Output). Cada jack es un float por sample. Cables hacia adelante = 0 samples de latencia; cables hacia atras (realimentacion) = 1 sample, como en el hardware de banana apilado.",
+    "dsp_processing_loop": "for (int i = 0; i < n; ++i) { rack.tick(); out[0][i] = rack.outL(); out[1][i] = rack.outR(); }",
+    "module_interface": "struct Module { virtual void prepare (double sr); virtual void tick (const float* in, float* out) noexcept; };"
+  },
+  "roadmap": ["281 Quad Function Generator", "292 Quad Lowpass Gate (vactrol)", "266 Source of Uncertainty", "248 MARF / 250 Arbitrary Function Generator", "291 Dual Bandpass", "285 Frequency Shifter", "296 Spectral Processor", "227 System Interface"]
+}

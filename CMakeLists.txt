@@ -258,3 +258,59 @@ if(PG_BUILD_TESTS)
     target_link_libraries(ResonatorUiSnapshot PRIVATE mutable SynthgularityAssets juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags)
 endif()
+
+# =============================================================================
+# Calabi Yau West Coast Modular - patchable rack of West Coast modules
+# (first module: CW-259 Complex Waveform Generator, after the Model 259).
+# Self-contained: its own small asset bundle (official isologo + fonts).
+# =============================================================================
+set(WC_PRODUCT_NAME "Calabi Yau West Coast Modular")
+set(WC_VERSION      "0.1.0")
+juce_add_binary_data(WcAssets NAMESPACE WcData HEADER_NAME WcData.h SOURCES
+    Resources/brand/isologo.png Resources/fonts/Montserrat-SemiBold.ttf Resources/fonts/Montserrat-Bold.ttf Resources/fonts/Syncopate-Bold.ttf)
+set_target_properties(WcAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+juce_add_plugin(WestCoastModular
+    PRODUCT_NAME "${WC_PRODUCT_NAME}"
+    COMPANY_NAME "${PG_COMPANY_NAME}"
+    BUNDLE_ID "com.calabiyau.westcoast"
+    PLUGIN_MANUFACTURER_CODE ${PG_MANUFACTURER}
+    PLUGIN_CODE CyWc
+    VERSION ${WC_VERSION}
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    VST3_CATEGORIES Instrument Synth
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice
+    FORMATS ${PG_FORMATS})
+clap_juce_extensions_plugin(TARGET WestCoastModular
+    CLAP_ID "com.calabiyau.westcoast"
+    CLAP_FEATURES instrument synthesizer stereo)
+
+file(GLOB_RECURSE WC_SOURCES Modular/Source/*.cpp Modular/Source/*.h)
+target_sources(WestCoastModular PRIVATE ${WC_SOURCES})
+target_include_directories(WestCoastModular PRIVATE Modular/Source)
+set(WC_DEFS JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0
+    WC_VERSION_STRING="${WC_VERSION}")
+target_compile_definitions(WestCoastModular PUBLIC ${WC_DEFS})
+target_link_libraries(WestCoastModular
+    PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+
+if(PG_BUILD_TESTS)
+    file(GLOB_RECURSE WC_DSP Modular/Source/modules/*.cpp Modular/Source/rack/*.cpp)
+    juce_add_console_app(WcRenderTest PRODUCT_NAME "WcRenderTest")
+    target_sources(WcRenderTest PRIVATE Modular/tests/WcRenderTest.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp ${WC_DSP})
+    target_include_directories(WcRenderTest PRIVATE Modular/Source)
+    target_compile_definitions(WcRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
+    target_link_libraries(WcRenderTest PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
+
+    juce_add_console_app(WcUiSnapshot PRODUCT_NAME "WcUiSnapshot")
+    target_sources(WcUiSnapshot PRIVATE Modular/tests/WcUiSnapshot.cpp ${WC_SOURCES})
+    target_include_directories(WcUiSnapshot PRIVATE Modular/Source)
+    target_compile_definitions(WcUiSnapshot PRIVATE ${WC_DEFS} WC_NO_PLUGIN_ENTRY=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(WcUiSnapshot PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+endif()
