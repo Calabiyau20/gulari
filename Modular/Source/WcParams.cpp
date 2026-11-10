@@ -110,6 +110,49 @@ static void add266 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
     l.add (std::move (g));
 }
 
+static void add245 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
+{
+    const juce::String p ("sv_"), n ("245 ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("sv_grp", "245", "|");
+    const char* rows = "abcd";
+    for (int r = 0; r < 4; ++r)
+        for (int st = 1; st <= 5; ++st)
+            g->addChild (std::make_unique<APF> (juce::ParameterID (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (st), 1),
+                n + juce::String::charToString ((juce::juce_wchar) ('A' + r)) + juce::String (st), NR (0.0f, 1.0f), 0.0f,
+                juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (v * 10.0f, 2) + " V"; })));
+    for (int k = 1; k <= 4; ++k)
+        g->addChild (std::make_unique<APB> (juce::ParameterID (p + "sw" + juce::String (k), 1), n + "Stage Switch " + juce::String (k), true));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "time", 1), n + "Pulser Time", NR (0.0f, 1.0f), 0.55f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const float t = 0.002f * std::pow (5000.0f, v); return t < 1.0f ? juce::String (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s"; })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "tcv", 1), n + "Pulser Time CV", NR (-1.0f, 1.0f), 0.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "len", 1), n + "Pulse Length", NR (0.0f, 1.0f), 0.5f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (v * 100.0f, 0) + " %"; })));
+    l.add (std::move (g));
+}
+
+static void add242 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
+{
+    const juce::String p ("pp_"), n ("242 ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("pp_grp", "242", "|");
+    const char* rows = "abc";
+    for (int r = 0; r < 3; ++r)
+        for (int st = 1; st <= 12; ++st)
+            g->addChild (std::make_unique<APB> (juce::ParameterID (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (st), 1),
+                n + "Matrix " + juce::String::charToString ((juce::juce_wchar) ('A' + r)) + juce::String (st), false));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "len", 1), n + "Stages", NR (1.0f, 12.0f, 1.0f), 8.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "period", 1), n + "Period", NR (0.0f, 1.0f), 0.5f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        {
+            if (v > 0.92f) return juce::String ("off");
+            const float t = 0.002f * std::pow (5000.0f, v / 0.92f);
+            return t < 1.0f ? juce::String (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s";
+        })));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "cv", 1), n + "Period CV", NR (-1.0f, 1.0f), 0.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "row", 1), n + "Edit Row", NR (1.0f, 4.0f, 1.0f), 2.0f));
+    g->addChild (std::make_unique<APF> (juce::ParameterID (p + "col", 1), n + "Edit Column", NR (1.0f, 12.0f, 1.0f), 1.0f));
+    l.add (std::move (g));
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout l;
@@ -120,6 +163,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         g->addChild (std::make_unique<APF> (juce::ParameterID ("midi_trans", 1), "MIDI Transpose", NR (-3.0f, 3.0f, 1.0f), 0.0f, unitAttr (" oct", 0)));
         l.add (std::move (g));
     }
+    add242 (l);
+    add245 (l);
     add266 (l);
     for (int i = 0; i < kMax281; ++i) add281 (l, i);
     for (int i = 0; i < kMax259; ++i) add259 (l, i);

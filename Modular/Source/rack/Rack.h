@@ -1,7 +1,7 @@
 #pragma once
 // The rack: module instances, the cable graph and the per-sample engine.
 //
-// Instances are fixed slots processed in a fixed order: MIDI Interface, 259 A, B, C, D, Output.
+// Instances are fixed slots processed in a fixed order: MIDI, 242, 245, 266, 281 A-B, 259 A-D, 292 A-B, Output.
 // A cable from an earlier slot to a later one has no delay; a cable going backwards (feedback,
 // e.g. 259 B -> 259 A FM while A -> B) reads the previous sample, which is the 1-sample delay of
 // any digital model of a patch with loops.
@@ -17,10 +17,14 @@ class M259;
 class M281;
 class M292;
 class M266;
+class M245;
+class M242;
 
 // slots, in processing order: control sources first, then oscillators, then gates, then the output
 constexpr int kInstMidi = 0;
-constexpr int kInst266 = 1;
+constexpr int kInst242 = 1;
+constexpr int kInst245 = kInst242 + kMax242;
+constexpr int kInst266 = kInst245 + kMax245;
 constexpr int kInst281 = kInst266 + kMax266;
 constexpr int kInst259 = kInst281 + kMax281;
 constexpr int kInst292 = kInst259 + kMax259;
@@ -29,6 +33,8 @@ constexpr int kNumInst = kInstOutput + 1;
 inline ModuleType typeOfInst (int inst)
 {
     if (inst == kInstMidi) return MT_Midi;
+    if (inst < kInst245) return MT_242;
+    if (inst < kInst266) return MT_245;
     if (inst < kInst281) return MT_266;
     if (inst < kInst259) return MT_281;
     if (inst < kInst292) return MT_259;
@@ -41,7 +47,7 @@ inline int subIndex (int inst)
 }
 inline juce::String instPrefix (int inst)
 {
-    switch (typeOfInst (inst)) { case MT_266: return "ua_"; case MT_281: return prefix281 (subIndex (inst)); case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {}; }
+    switch (typeOfInst (inst)) { case MT_242: return "pp_"; case MT_245: return "sv_"; case MT_266: return "ua_"; case MT_281: return prefix281 (subIndex (inst)); case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {}; }
 }
 // stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "midi", "out")
 inline juce::String instKey (int inst)
@@ -89,6 +95,8 @@ public:
     M281* m281 (int i) const;
     M292* m292 (int i) const;
     M266* m266() const;
+    M245* m245() const;
+    M242* m242() const;
     MidiInterface& midi() const;
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)

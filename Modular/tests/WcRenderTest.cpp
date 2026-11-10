@@ -11,6 +11,8 @@
 #include "modules/M292.h"
 #include "modules/OutputModule.h"
 #include "modules/M266.h"
+#include "modules/M245.h"
+#include "modules/M242.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -340,6 +342,102 @@ int main (int argc, char** argv)
             std::printf ("  s&h alternating outputs: A changed %d times, B %d times (20 pulses)\n", changesA, changesB);
             if (std::abs (changesA - changesB) > 1) ok = false;
         }
+    }
+
+    // ---- 3c3. 245 Sequential Voltage Source ----
+    {
+        std::printf ("245 SEQUENTIAL VOLTAGE SOURCE\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m245();
+        float in[24] {}, out[24] {};
+        for (int k = 1; k <= 5; ++k) setP (p, "sv_a" + juce::String (k), 0.1f * (float) k);
+        setP (p, "sv_time", 0.5f); setP (p, "sv_len", 0.25f);
+        m.reset(); m.beginBlock (256);
+        // pulser period and the stage order 1 2 3 4 5 1 ...
+        int pulses = 0; bool was = false; std::vector<int> order; int lastStage = -1;
+        const int N = (int) SR * 3;
+        int gateSamples = 0;
+        for (int i = 0; i < N; ++i)
+        {
+            m.tick (in, out);
+            const bool hi = out[M245::Out_Pulse] > 1.0f;
+            if (hi && ! was) ++pulses;
+            if (hi) ++gateSamples;
+            was = hi;
+            int st = -1; for (int k = 0; k < 5; ++k) if (out[M245::Out_Gate1 + k] > 5.0f) st = k;
+            if (st != lastStage) { order.push_back (st); lastStage = st; }
+        }
+        const double per = M245::periodSec (0.5f), want = 3.0 / per;
+        std::printf ("  pulser: %d pulses in 3 s (expected %.1f, period %.3f s), pulse length %.0f %% of the period\n", pulses, want, per, 100.0 * gateSamples / pulses / (per * SR));
+        if (std::abs (pulses - want) > 1.5) ok = false;
+        bool seqOk = order.size() > 6;
+        for (size_t k = 1; k < order.size(); ++k) if (order[k] != (order[k - 1] + 1) % 5) seqOk = false;
+        std::printf ("  stage order: "); for (size_t k = 0; k < juce::jmin<size_t> (order.size(), 12); ++k) std::printf ("%d ", order[k] + 1); std::printf ("%s\n", seqOk ? "ok" : "WRONG");
+        if (! seqOk) ok = false;
+        // stage switch 2 off: the sequence returns to 1 after stage 2
+        setP (p, "sv_sw2", 0.0f); m.reset(); m.beginBlock (256);
+        std::set<int> seen;
+        for (int i = 0; i < N; ++i) { m.tick (in, out); for (int k = 0; k < 5; ++k) if (out[M245::Out_Gate1 + k] > 5.0f) seen.insert (k); }
+        std::printf ("  switch 2 off: stages visited %d (expected 2)\n", (int) seen.size());
+        if (seen.size() != 2) ok = false;
+        setP (p, "sv_sw2", 1.0f); m.beginBlock (256);
+        // analog addressing: 5 V -> stage 3, row A = 3 V
+        in[M245::In_Analog] = 5.0f;
+        for (int i = 0; i < 100; ++i) m.tick (in, out);
+        std::printf ("  analog in 5 V: stage %d, row A %.2f V\n", [&] { for (int k = 0; k < 5; ++k) if (out[M245::Out_Gate1 + k] > 5.0f) return k + 1; return 0; }(), out[M245::Out_A]);
+        if (out[M245::Out_Gate3] < 5.0f || std::fabs (out[M245::Out_A] - 3.0f) > 0.01f) ok = false;
+        in[M245::In_Analog] = 0.0f;
+        // stop, then stop again = one single pulse
+        m.btnStop.store (true); for (int i = 0; i < (int) SR; ++i) m.tick (in, out); m.btnStop.store (false);   // let the last pulse end
+        int after = 0; was = false;
+        for (int i = 0; i < (int) SR * 2; ++i)
+        {
+            if (i == 1000) m.btnStop.store (true);
+            if (i == 1100) m.btnStop.store (false);
+            m.tick (in, out);
+            const bool hi = out[M245::Out_Pulse] > 1.0f; if (hi && ! was && i >= 1000) ++after; was = hi;
+        }
+        std::printf ("  stopped + stop button: %d pulse (expected 1)\n", after);
+        if (after != 1) ok = false;
+    }
+
+    // ---- 3c4. 242 Programmable Pulser ----
+    {
+        std::printf ("242 PROGRAMMABLE PULSER\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m242();
+        float in[24] {}, out[24] {};
+        setP (p, "pp_len", 5.0f); setP (p, "pp_a1", 1.0f); setP (p, "pp_a3", 1.0f); setP (p, "pp_b2", 1.0f); setP (p, "pp_period", 0.3f);
+        m.reset(); m.beginBlock (256);
+        int all = 0, a = 0, b = 0, alt1 = 0, alt2 = 0;
+        bool wAll = false, wA = false, wB = false, w1 = false, w2 = false;
+        auto edge = [] (float v, bool& w) { const bool h = v > 5.0f; const bool r = h && ! w; w = h; return r; };
+        const int N = (int) SR * 4;
+        for (int i = 0; i < N; ++i)
+        {
+            m.tick (in, out);
+            all += edge (out[M242::Out_All], wAll); a += edge (out[M242::Out_A], wA); b += edge (out[M242::Out_B], wB);
+            alt1 += edge (out[M242::Out_Alt1], w1); alt2 += edge (out[M242::Out_Alt2], w2);
+        }
+        const int cycles = all / 5;
+        std::printf ("  %d clock pulses (period %.3f s): matrix A %d (2 per 5), B %d (1 per 5), alter %d / %d\n", all, M242::periodSec (0.3f), a, b, alt1, alt2);
+        if (std::abs (a - 2 * cycles) > 2 || std::abs (b - cycles) > 1 || std::abs (alt1 - alt2) > 1 || std::abs (all - 4.0 / M242::periodSec (0.3f)) > 1.5) ok = false;
+        // external clock drives the matrix only
+        bool patchedIn[24] {}; patchedIn[M242::In_Clk] = true;
+        const bool* saved = m.patched; m.patched = patchedIn;
+        setP (p, "pp_period", 1.0f); m.reset(); m.beginBlock (256);   // internal clock off
+        a = 0; all = 0; wA = wAll = false;
+        for (int i = 0; i < 10 * 200; ++i)
+        {
+            in[M242::In_Clk] = (i % 200) < 20 ? 10.0f : 0.0f;
+            m.tick (in, out);
+            a += edge (out[M242::Out_A], wA); all += edge (out[M242::Out_All], wAll);
+        }
+        m.patched = saved;
+        std::printf ("  external clock, 10 pulses: matrix A %d (expected 4), all out %d (expected 0, internal off)\n", a, all);
+        if (a != 4 || all != 0) ok = false;
     }
 
     // ---- 3d. a 0.1.0 patch still loads (slot remap) ----

@@ -5,6 +5,8 @@
 #include "../modules/M281.h"
 #include "../modules/M292.h"
 #include "../modules/M266.h"
+#include "../modules/M245.h"
+#include "../modules/M242.h"
 
 namespace wc::ui
 {
@@ -228,8 +230,31 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     {
         if (c.style == CtrlStyle::Push)
         {
-            const int n = juce::String (c.suffix).getTrailingIntValue() - 1;
-            auto b = std::make_unique<PushButton> (proc.rack.m281 (subIndex (inst))->manual[juce::jlimit (0, 3, n)]);
+            const juce::String id (c.suffix);
+            std::unique_ptr<PushButton> b;
+            const auto type = typeOfInst (inst);
+            if (type == MT_281)
+                b = std::make_unique<PushButton> (&proc.rack.m281 (subIndex (inst))->manual[juce::jlimit (0, 3, id.getTrailingIntValue() - 1)]);
+            else if (type == MT_245)
+                b = std::make_unique<PushButton> (id == "start" ? &proc.rack.m245()->btnStart : &proc.rack.m245()->btnStop,
+                                                  id == "start" ? "Start the pulser" : "Stop the pulser (when stopped: a single pulse)");
+            else if (type == MT_242)
+            {
+                auto* m = proc.rack.m242();
+                if (id == "cell")
+                {
+                    b = std::make_unique<PushButton> (nullptr, "on / off: toggle the matrix point under the cursor (row and column encoders)");
+                    b->onPress = [this]
+                    {
+                        auto get = [this] (const char* s) { auto* v = proc.apvts.getRawParameterValue (prefix + s); return v ? (int) std::lround (v->load()) : 1; };
+                        toggleMatrixCell (get ("row") - 1, get ("col") - 1);
+                    };
+                }
+                else
+                    b = std::make_unique<PushButton> (id == "start" ? &m->btnStart : (id == "stop" ? &m->btnStop : &m->btnSingle),
+                                                      id == "start" ? "Start" : (id == "stop" ? "Stop" : "Single pulse"));
+            }
+            if (b == nullptr) continue;
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
             pushes.push_back (std::move (b));
@@ -380,7 +405,7 @@ void ModulePanel::paint (juce::Graphics& g)
     for (auto& t : spec.texts)
     {
         juce::String txt (t.text);
-        if (t.style == 4 && isRemovable (inst) && typeOfInst (inst) != MT_266) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
+        if (t.style == 4 && isRemovable (inst) && typeOfInst (inst) != MT_266 && typeOfInst (inst) != MT_245 && typeOfInst (inst) != MT_242) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
         const auto f = t.style == 0 ? WcLook::label (t.size) : WcLook::title (t.size);
         const float w = juce::GlyphArrangement::getStringWidth (f, txt) + 10.0f;
         juce::Rectangle<float> box;
@@ -488,8 +513,32 @@ void ModulePanel::updateLeds()
     }
 }
 
+void ModulePanel::toggleMatrixCell (int row, int col)
+{
+    if (row < 0 || row > 3 || col < 0 || col > 11) return;
+    if (row == 0)
+    {
+        if (auto* p = proc.apvts.getParameter (prefix + "len")) p->setValueNotifyingHost (p->convertTo0to1 ((float) (col + 1)));
+    }
+    else if (auto* p = proc.apvts.getParameter (prefix + juce::String::charToString ((juce::juce_wchar) ('a' + row - 1)) + juce::String (col + 1)))
+        p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
+    // the cursor follows the click, as if the encoders had been turned
+    if (auto* p = proc.apvts.getParameter (prefix + "row")) p->setValueNotifyingHost (p->convertTo0to1 ((float) (row + 1)));
+    if (auto* p = proc.apvts.getParameter (prefix + "col")) p->setValueNotifyingHost (p->convertTo0to1 ((float) (col + 1)));
+}
+
 void ModulePanel::mouseDown (const juce::MouseEvent& e)
 {
+    if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_242)
+    {
+        for (auto& d : spec.leds)
+            if (d.id >= 100 && e.position.getDistanceFrom ({ d.x, d.y }) < 10.0f)
+            {
+                toggleMatrixCell ((d.id - 100) / 12, (d.id - 100) % 12);
+                return;
+            }
+        return;
+    }
     if (! e.mods.isPopupMenu() || ! isRemovable (inst)) return;
     juce::PopupMenu m;
     m.addItem (1, "Remove " + instName (inst));

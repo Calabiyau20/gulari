@@ -1,0 +1,51 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 245 Sequential Voltage Source + Model 242 Programmable Pulser",
+    "clone_name": "SV-245 Sequential Voltage Source / PP-242 Programmable Pulser",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla, 245 y 242 se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [
+    { "id": "S1", "title": "Buchla & Tiptop Audio 245t manual", "used_for": "pulser (spike 10 V + gate 5 V, ref ramp, .002-10 s), stage switches, analog addressing thresholds" },
+    { "id": "S2", "title": "Buchla & Tiptop Audio 242t manual", "used_for": "matriz 4 x 12, encoders + on/off, stop/single/start, CLK IN / RST IN, ALTER, pulsos de 1 ms" },
+    { "id": "S3", "title": "Fotos del frente 245t y 242t (enviadas por Martin)", "used_for": "disposicion espacial y colores de jacks" }
+  ],
+  "stages": [
+    {
+      "stage_id": "245_01_pulser",
+      "name": "Pulser",
+      "fidelity": "behavioral",
+      "description": "Reloj interno .002 a 10 s (perilla time + c.v. con atenuversor). Cada periodo: PULSE OUT da un pico de 10 V de ~100 us y luego un gate de 5 V cuya duracion es pulse length (0-100 % del periodo, + c.v.). REF OUT es una rampa que cae de 10 V a 0 V en cada periodo. START arranca, STOP detiene; STOP con el pulser detenido dispara un pulso unico. Normalizado a ADVANCE.",
+      "schematic_ascii": "  START/STOP --[flip-flop run]--+\n  TIME + c.v. --[expo]--> [rampa 10->0 V] --+--> REF OUT\n                                            +--[comparador fin de rampa]--+--[one-shot 100 us, 10 V]--+--> PULSE OUT\n                                                                          +--[one-shot len*T, 5 V]----+\n                                                                          +--> ADVANCE (normal)",
+      "equations": [ "T = 0.002 * 5000^k s  (k = 0..1 -> 2 ms .. 10 s)", "k_eff = k + tcv * Vcv / 10", "gate = clamp(len + Vlen/10, 0, 0.98) * T" ],
+      "cpp": "Modular/Source/modules/M245.cpp"
+    },
+    {
+      "stage_id": "245_02_stages",
+      "name": "Stages, switches y direccionamiento",
+      "fidelity": "measured",
+      "description": "Cinco etapas, cuatro voltajes por etapa (filas A-D, 0-10 V). Gate de etapa 10 V mientras esta activa. ADVANCE avanza; el switch n controla la transicion n -> n+1: apagado, la secuencia vuelve a 1. STAGE SELECT salta a esa etapa. ANALOG IN elige la etapa por voltaje y anula advance y select.",
+      "equations": [ "analog: <0.75 V off; 0.75-2.5 V = 1; 2.5-4.25 = 2; 4.25-6 = 3; 6-7.75 = 4; 7.75-10 = 5", "advance: stage = (stage < 5 && sw[stage]) ? stage + 1 : 1" ],
+      "cpp": "Modular/Source/modules/M245.cpp"
+    },
+    {
+      "stage_id": "242_01_clock",
+      "name": "Reloj, stop / single / start",
+      "fidelity": "behavioral",
+      "description": "Periodo por etapa .002-10 s (fin de recorrido = off) con c.v. por atenuversor (+-5 octavas en 10 V). ALL OUT da cada pulso; ALTER reparte los pulsos alternadamente en dos salidas y entrega la rampa del periodo. SINGLE da un pulso. Pulsos de 1 ms.",
+      "equations": [ "T = 0.002 * 5000^(k / 0.92)", "rate = 2^(cv * V / 2)" ],
+      "cpp": "Modular/Source/modules/M242.cpp"
+    },
+    {
+      "stage_id": "242_02_matrix",
+      "name": "Matriz 4 x 12",
+      "fidelity": "behavioral",
+      "description": "Fila n: largo del ciclo (1-12 etapas, se marca la ultima). Filas A, B, C: patrones; en cada etapa encendida sale un pulso por MATRIX A/B/C. Edicion con encoders de fila y columna + boton on/off (y clic directo sobre los LEDs). CLK IN reemplaza al reloj interno solo para la matriz; RST IN vuelve a la primera etapa.",
+      "cpp": "Modular/Source/modules/M242.cpp"
+    }
+  ],
+  "panel_note": "Disposicion calcada de los frentes 245t y 242t. Jacks: naranja = entradas de pulso, rojo = salidas de pulso, negro = entradas de c.v., azul = salidas de c.v., blanco = ref, gris = rampa ALTER."
+}

@@ -5,6 +5,8 @@
 #include "Module.h"
 #include "../modules/M259.h"
 #include "../modules/M266.h"
+#include "../modules/M245.h"
+#include "../modules/M242.h"
 
 namespace wc
 {
@@ -390,6 +392,151 @@ static ModuleSpec make266()
     return s;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// SV-245 Sequential Voltage Source - layout of the 245t front (photo, 656 x 554 px):
+// the PULSER on the left, five stage columns of four voltage knobs (rows A-D), stage LEDs on top,
+// stage switches, gate outputs and stage select inputs below, stored voltage outputs on the right.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make245()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_245;
+    s.name = "SEQUENTIAL VOLTAGE SOURCE";
+    s.model = "SV-245";
+    s.after = "after Buchla 245t";
+    s.width = 656.0f;
+    s.height = 554.0f;
+    const float sx[5] = { 222, 305, 388, 471, 554 };
+    const float ry[4] = { 112, 184, 256, 328 };
+    // inputs (M245::In)
+    s.jacks.push_back (JT ("advance", K::Banana, false, 622, 432, kTintOrange, true));   // In_Advance
+    for (int n = 0; n < 5; ++n) s.jacks.push_back (JT ("", K::Banana, false, sx[n], 492, kTintOrange, true));   // In_Sel1..5
+    s.jacks.push_back (J ("analog", K::Banana, false, 622, 492));                         // In_Analog
+    s.jacks.push_back (JT ("stop", K::Banana, false, 48, 370, kTintOrange, true));        // In_Stop
+    s.jacks.push_back (JT ("start", K::Banana, false, 128, 370, kTintOrange, true));      // In_Start
+    s.jacks.push_back (J ("", K::Banana, false, 128, 432));                               // In_LenCv
+    s.jacks.push_back (J ("", K::Banana, false, 48, 432));                                // In_TimeCv
+    // outputs (M245::Out)
+    for (int n = 0; n < 5; ++n) s.jacks.push_back (J ("", K::Banana, true, sx[n], 432, true));      // Out_Gate1..5
+    for (int r = 0; r < 4; ++r) s.jacks.push_back (J ("", K::Banana, true, 622, ry[r]));              // Out_A..D
+    s.jacks.push_back (JT ("ref", K::Banana, true, 48, 496, 0xfff4f4f0));                // Out_Ref (white)
+    s.jacks.push_back (J ("pulse", K::Banana, true, 128, 496, true));                    // Out_Pulse
+    // controls
+    static const char* ids[4][5] = { { "a1", "a2", "a3", "a4", "a5" }, { "b1", "b2", "b3", "b4", "b5" },
+                                     { "c1", "c2", "c3", "c4", "c5" }, { "d1", "d2", "d3", "d4", "d5" } };
+    for (int r = 0; r < 4; ++r)
+        for (int n = 0; n < 5; ++n) s.controls.push_back (C (ids[r][n], "", CtrlStyle::Knob, sx[n], ry[r], kSkirt));
+    static const char* sw[4] = { "sw1", "sw2", "sw3", "sw4" };
+    for (int k = 0; k < 4; ++k) s.controls.push_back (C (sw[k], "", CtrlStyle::Toggle, (sx[k] + sx[k + 1]) * 0.5f, 380, kSkirt));
+    s.controls.push_back (C ("stop", "", CtrlStyle::Push, 48, 82));
+    s.controls.push_back (C ("start", "", CtrlStyle::Push, 128, 82));
+    s.controls.push_back (C ("time", "", CtrlStyle::BigKnob, 88, 190, kSkirt, ".002|.01|.1|1|10"));
+    s.controls.push_back (C ("tcv", "", CtrlStyle::SmallKnob, 48, 290, kSkirt, "-|*|0|*|+"));
+    s.controls.push_back (C ("len", "", CtrlStyle::SmallKnob, 128, 290, kSkirt, "*|*|*|*|*"));
+    // silkscreen
+    s.lines = { L (4, 24, 652, 24), L (4, 528, 652, 528), L (176, 24, 176, 528), L (590, 24, 590, 528),
+                L (176, 362, 590, 362), L (176, 462, 652, 462), L (4, 330, 176, 330), L (590, 362, 652, 362) };
+    for (int n = 0; n < 5; ++n) s.lines.push_back (L (sx[n], 140, sx[n], 156, 1.0f));
+    for (int k = 0; k < 4; ++k)        // the stage switch arrows: stage n -> n+1
+        s.lines.push_back (L (sx[k] + 14, 405, sx[k + 1] - 14, 405, 1.2f, false, true));
+    for (int r = 0; r < 4; ++r) s.lines.push_back (L (580, ry[r], 604, ry[r], 1.2f, false, true));
+    s.lines.push_back (L (88, 440, 88, 486, 1.2f, true));                  // pulser -> advance (normalled)
+    const char* letters[4] = { "A", "B", "C", "D" };
+    const char* nums[5] = { "1", "2", "3", "4", "5" };
+    for (int r = 0; r < 4; ++r) s.texts.push_back (T (letters[r], 186, ry[r] + 4, 10.0f, 3));
+    for (int n = 0; n < 5; ++n)
+    {
+        s.texts.push_back (T (nums[n], sx[n], 48, 11.0f, 1));
+        s.leds.push_back (D (sx[n], 68, M245::Led_Stage1 + n));
+    }
+    s.leds.push_back (D (48, 50, M245::Led_Stop, 0xffffd23a));
+    s.leds.push_back (D (128, 50, M245::Led_Start, 0xff3ad05a));
+    s.texts.push_back (T ("SEQUENTIAL VOLTAGE SOURCE  SV-245", 328, 14, 10.5f, 4));
+    s.texts.push_back (T ("PULSER", 88, 40, 10.0f, 1));
+    s.texts.push_back (T ("stop", 48, 108, 9.0f)); s.texts.push_back (T ("start", 128, 108, 9.0f));
+    s.texts.push_back (T ("time", 88, 248, 9.5f));
+    s.texts.push_back (T ("c.v.", 48, 318, 9.0f)); s.texts.push_back (T ("length", 128, 318, 9.0f));
+    s.texts.push_back (T ("c.v. in", 48, 456, 9.0f)); s.texts.push_back (T ("length c.v.", 128, 456, 8.0f));
+    s.texts.push_back (T ("OUT", 88, 520, 9.0f, 1));
+    s.texts.push_back (T ("STAGE GATE OUTS", 383, 456, 9.0f, 1));
+    s.texts.push_back (T ("STAGE SELECT INPUTS", 383, 520, 9.0f, 1));
+    s.texts.push_back (T ("stored", 622, 52, 9.0f)); s.texts.push_back (T ("voltage", 622, 64, 9.0f)); s.texts.push_back (T ("OUTS", 622, 78, 9.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 245t", 328, 544, 9.0f, 1));
+    scaleSpec (s, 430.0f / 554.0f);
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// PP-242 Programmable Pulser - layout of the 242t front (photo, 413 x 615 px):
+// the 4 x 12 LED matrix (row n = number of stages, rows A / B / C = pulse patterns), the row / column
+// encoders with the on/off button, stop - single - start, the period controls and the jacks.
+// The matrix LEDs can also be clicked directly.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make242()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_242;
+    s.name = "PROGRAMMABLE PULSER";
+    s.model = "PP-242";
+    s.after = "after Buchla 242t";
+    s.width = 413.0f;
+    s.height = 615.0f;
+    // inputs (M242::In)
+    s.jacks.push_back (JT ("start", K::Banana, false, 42, 470, kTintOrange, true));
+    s.jacks.push_back (JT ("stop", K::Banana, false, 112, 470, kTintOrange, true));
+    s.jacks.push_back (J ("period", K::Banana, false, 182, 470));
+    s.jacks.push_back (JT ("clk in", K::Banana, false, 300, 470, kTintOrange, true));
+    s.jacks.push_back (JT ("rst in", K::Banana, false, 370, 470, kTintOrange, true));
+    // outputs (M242::Out): ALTER (two pulses + ramp), MATRIX A B C, ALL
+    s.jacks.push_back (J ("", K::Banana, true, 42, 560, true));
+    s.jacks.push_back (J ("", K::Banana, true, 92, 560, true));
+    s.jacks.push_back (JT ("", K::Banana, true, 142, 560, kTintGrey));
+    s.jacks.push_back (J ("A", K::Banana, true, 220, 560, true));
+    s.jacks.push_back (J ("B", K::Banana, true, 270, 560, true));
+    s.jacks.push_back (J ("C", K::Banana, true, 320, 560, true));
+    s.jacks.push_back (J ("all", K::Banana, true, 378, 560, true));
+    // the matrix
+    const float mx0 = 82, mdx = 28, my[4] = { 70, 108, 146, 184 };
+    const char* rows[4] = { "n", "A", "B", "C" };
+    const char* nums[12] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12" };
+    for (int r = 0; r < 4; ++r)
+    {
+        s.texts.push_back (T (rows[r], 40, my[r] + 4, 11.0f, r == 0 ? 1 : 3));
+        for (int c = 0; c < 12; ++c)
+            s.leds.push_back (D (mx0 + c * mdx, my[r], M242::Led_Matrix + r * M242::kSteps + c, r == 0 ? 0xffffd23a : 0xffe8241c));
+    }
+    for (int c = 0; c < 12; ++c) s.texts.push_back (T (nums[c], mx0 + c * mdx, 46, 8.5f));
+    s.controls.push_back (C ("row", "", CtrlStyle::Knob, 82, 262, kSkirt));
+    s.controls.push_back (C ("col", "", CtrlStyle::Knob, 206, 262, kSkirt));
+    s.controls.push_back (C ("cell", "", CtrlStyle::Push, 326, 262));
+    s.controls.push_back (C ("stop", "", CtrlStyle::Push, 82, 360));
+    s.controls.push_back (C ("single", "", CtrlStyle::Push, 152, 360));
+    s.controls.push_back (C ("start", "", CtrlStyle::Push, 222, 360));
+    s.controls.push_back (C ("cv", "", CtrlStyle::SmallKnob, 182, 412, kSkirt, "-|*|0|*|+"));
+    s.controls.push_back (C ("period", "", CtrlStyle::Knob, 330, 370, kSkirt, ".002|.02|.2|2|10|off"));
+    s.leds.push_back (D (82, 332, M242::Led_Stop, 0xffffd23a));
+    s.leds.push_back (D (222, 332, M242::Led_Start, 0xff3ad05a));
+    s.lines = { L (4, 24, 409, 24), L (4, 218, 409, 218), L (4, 308, 409, 308), L (4, 438, 409, 438), L (4, 512, 409, 512), L (4, 598, 409, 598),
+                L (260, 308, 260, 438), L (240, 438, 240, 512), L (175, 512, 175, 598), L (350, 512, 350, 598),
+                L (182, 430, 182, 452, 1.2f, false, true) };
+    // ALTER icons: two pulses with a dashed alternating arrow, ramp
+    s.lines.push_back (L (52, 540, 82, 540, 1.2f, true, true));
+    s.lines.push_back (L (132, 548, 152, 532, 1.2f)); s.lines.push_back (L (152, 532, 152, 548, 1.2f));
+    s.texts.push_back (T ("PROGRAMMABLE PULSER  PP-242", 206, 14, 10.5f, 4));
+    s.texts.push_back (T ("STAGES", 260, 210, 8.5f, 1, 1));
+    s.texts.push_back (T ("row", 82, 296, 9.0f)); s.texts.push_back (T ("column", 206, 296, 9.0f)); s.texts.push_back (T ("on / off", 326, 290, 9.0f));
+    s.texts.push_back (T ("stop", 82, 386, 9.0f)); s.texts.push_back (T ("single", 152, 386, 9.0f)); s.texts.push_back (T ("start", 222, 386, 9.0f));
+    s.texts.push_back (T ("PERIOD", 330, 330, 9.5f, 1)); s.texts.push_back (T ("c.v.", 210, 412, 8.5f, 0, 1));
+    s.texts.push_back (T ("INPUTS", 120, 506, 9.0f, 1)); s.texts.push_back (T ("CLOCK", 335, 506, 9.0f, 1));
+    s.texts.push_back (T ("ALTER", 92, 590, 9.0f, 1)); s.texts.push_back (T ("MATRIX", 270, 590, 9.0f, 1)); s.texts.push_back (T ("ALL", 378, 590, 9.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 242t", 206, 608, 9.0f, 1));
+    scaleSpec (s, 430.0f / 615.0f);
+    return s;
+}
+
 // ---------------------------------------------------------------------------------------------
 // KB-225 MIDI Interface and OUT-2 Output (in the same visual language)
 // ---------------------------------------------------------------------------------------------
@@ -449,7 +596,7 @@ static ModuleSpec makeOutput()
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242() };
     return specs[t];
 }
 } // namespace wc

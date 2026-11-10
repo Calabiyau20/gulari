@@ -63,12 +63,14 @@ private:
 class PushButton : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit PushButton (std::atomic<bool>& t) : target (t) { setMouseCursor (juce::MouseCursor::PointingHandCursor); setTooltip ("Trigger (hold for a sustained function)"); }
+    explicit PushButton (std::atomic<bool>* t, const juce::String& tip = "Trigger (hold for a sustained function)")
+        : target (t) { setMouseCursor (juce::MouseCursor::PointingHandCursor); setTooltip (tip); }
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override { target.store (true); down = true; repaint(); }
-    void mouseUp (const juce::MouseEvent&) override { target.store (false); down = false; repaint(); }
+    void mouseDown (const juce::MouseEvent&) override { if (target) target->store (true); if (onPress) onPress(); down = true; repaint(); }
+    void mouseUp (const juce::MouseEvent&) override { if (target) target->store (false); down = false; repaint(); }
+    std::function<void()> onPress;
 private:
-    std::atomic<bool>& target;
+    std::atomic<bool>* target = nullptr;
     bool down = false;
 };
 
@@ -81,6 +83,7 @@ public:
     void resized() override {}
     void mouseDown (const juce::MouseEvent&) override;
     void updateLeds();
+    void toggleMatrixCell (int row, int col);   // 242: row 0 = stages, rows 1..3 = A B C
     const int inst;
     std::vector<std::unique_ptr<JackComp>> jacks;
 private:

@@ -132,13 +132,15 @@ void WcEditor::addModuleMenu()
             if (! proc.isPresent (first + i)) { m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")"); any = true; }
         if (! any) m.addItem (999, title + "  - all slots in use", false);
     };
+    addType (kInst242, kMax242, "PP-242 Programmable Pulser");
+    addType (kInst245, kMax245, "SV-245 Sequential Voltage Source");
     addType (kInst266, kMax266, "SU-266 Source of Uncertainty");
     addType (kInst281, kMax281, "QF-281 Quad Function Generator");
     addType (kInst259, kMax259, "CW-259 Complex Waveform Generator");
     addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
     m.addSeparator();
     m.addSectionHeader ("Coming next");
-    for (auto* s : { "248 Multiple Arbitrary Function Generator", "250 Arbitrary Function Generator", "291 Dual Bandpass Filter", "285 Frequency Shifter" })
+    for (auto* s : { "257 Dual Voltage Processor", "258 Dual Oscillator", "264 Quad Sample & Hold", "230 Triple Envelope Follower" })
         m.addItem (998, s, false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {

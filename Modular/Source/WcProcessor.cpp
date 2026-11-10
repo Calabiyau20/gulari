@@ -5,6 +5,8 @@
 #include "modules/M281.h"
 #include "modules/M292.h"
 #include "modules/M266.h"
+#include "modules/M245.h"
+#include "modules/M242.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -123,7 +125,8 @@ void WcProcessor::resetParams()
 juce::StringArray WcProcessor::builtinPatchNames()
 {
     return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison",
-             "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)" };
+             "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)",
+             "245 Sequence (LPG)", "242 Programmed Rhythm" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -258,6 +261,60 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam (a + "po_freq", hz (130.81f)); setParam (a + "mo_freq", hz (130.81f * 2.0f)); setParam (a + "idx", 0.2f); setParam (a + "mod_pitch", 1.0f);
             setParam (a + "timbre", 0.1f); setParam (a + "timbre_cv", 0.45f);
             setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 12:  // 245 Sequence: the pulser steps five stages; row A plays the pitch (0.1 V = one semitone at 1.2 V/oct),
+                  // row B the timbre, each pulse pings the 292
+        {
+            present[(size_t) A] = present[(size_t) kInst245] = present[(size_t) kInst292] = true;
+            const juce::String l (prefix292 (0));
+            const float notes[5] = { 0, 7, 12, 3, 10 }, timb[5] = { 0.2f, 0.5f, 0.8f, 0.35f, 0.65f };
+            for (int k = 0; k < 5; ++k)
+            {
+                setParam ("sv_a" + juce::String (k + 1), notes[k] * 0.01f);
+                setParam ("sv_b" + juce::String (k + 1), timb[k]);
+            }
+            setParam ("sv_time", 0.54f); setParam ("sv_len", 0.15f);
+            cables.push_back ({ kInst245, M245::Out_A, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_A, A, M259::In_MoPitch, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_B, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_Pulse, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (a + "po_freq", hz (110.0f)); setParam (a + "mo_freq", hz (220.0f)); setParam (a + "idx", 0.15f); setParam (a + "mod_pitch", 1.0f);
+            setParam (a + "timbre", 0.05f); setParam (a + "timbre_cv", 0.5f);
+            setParam (l + "mode1", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 13:  // 242 Programmed Rhythm: the 242 clocks the 245 (ALL OUT -> advance); matrix A pings a low voice,
+                  // matrix B a high one through the second 292 channel, matrix C retriggers a 281 sweeping the timbre
+        {
+            present[(size_t) A] = present[(size_t) B] = present[(size_t) kInst242] = present[(size_t) kInst245] = true;
+            present[(size_t) kInst281] = present[(size_t) kInst292] = true;
+            const juce::String l (prefix292 (0)), f (prefix281 (0));
+            const int pa[16] = { 1, 4, 7, 10, 0 }, pb[16] = { 3, 9, 12, 0 }, pc[16] = { 1, 5, 9, 0 };
+            for (int k = 0; pa[k] != 0; ++k) setParam ("pp_a" + juce::String (pa[k]), 1.0f);
+            for (int k = 0; pb[k] != 0; ++k) setParam ("pp_b" + juce::String (pb[k]), 1.0f);
+            for (int k = 0; pc[k] != 0; ++k) setParam ("pp_c" + juce::String (pc[k]), 1.0f);
+            setParam ("pp_len", 12.0f); setParam ("pp_period", 0.447f);
+            const float notes[5] = { 0, 3, 5, 7, 10 };
+            for (int k = 0; k < 5; ++k) setParam ("sv_a" + juce::String (k + 1), notes[k] * 0.01f);
+            setParam ("sv_sw4", 0.0f);   // four-stage loop
+            cables.push_back ({ kInst242, M242::Out_All, kInst245, M245::In_Advance, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_A, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst245, M245::Out_A, B, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst242, M242::Out_A, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst242, M242::Out_B, kInst292, M292::inCtl (1), nextColour (true) });
+            cables.push_back ({ kInst242, M242::Out_C, kInst281, M281::inTrig (0), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (0), A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ B, M259::Out_Final1, kInst292, M292::inSig (1), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (1), kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam (a + "po_freq", hz (55.0f)); setParam (a + "timbre", 0.2f); setParam (a + "timbre_cv", 0.6f);
+            setParam (b + "po_freq", hz (440.0f)); setParam (b + "mo_freq", hz (440.0f * 1.5f)); setParam (b + "idx", 0.3f); setParam (b + "mod_pitch", 1.0f);
+            setParam (f + "att1", 0.05f); setParam (f + "dec1", 0.5f);
+            setParam (l + "mode1", 1.0f); setParam (l + "mode2", 1.0f); setParam ("out_level", 0.9f);
             break;
         }
     }
