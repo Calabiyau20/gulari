@@ -135,12 +135,16 @@ void WcEditor::addModuleMenu()
     addType (kInst242, kMax242, "PP-242 Programmable Pulser");
     addType (kInst245, kMax245, "SV-245 Sequential Voltage Source");
     addType (kInst266, kMax266, "SU-266 Source of Uncertainty");
+    addType (kInst230, kMax230, "EF-230 Triple Envelope Follower");
+    addType (kInst264, kMax264, "QS-264 Quad Sample & Hold");
+    addType (kInst257, kMax257, "VP-257 Dual Voltage Processor");
     addType (kInst281, kMax281, "QF-281 Quad Function Generator");
+    addType (kInst258, kMax258, "DO-258 Dual Oscillator");
     addType (kInst259, kMax259, "CW-259 Complex Waveform Generator");
     addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
     m.addSeparator();
     m.addSectionHeader ("Coming next");
-    for (auto* s : { "257 Dual Voltage Processor", "258 Dual Oscillator", "264 Quad Sample & Hold", "230 Triple Envelope Follower" })
+    for (auto* s : { "285 Frequency Shifter / Balanced Modulator", "277 Signal Delay", "207 Mixer / Preamp" })
         m.addItem (998, s, false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {

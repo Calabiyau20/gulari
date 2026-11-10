@@ -405,7 +405,7 @@ void ModulePanel::paint (juce::Graphics& g)
     for (auto& t : spec.texts)
     {
         juce::String txt (t.text);
-        if (t.style == 4 && isRemovable (inst) && typeOfInst (inst) != MT_266 && typeOfInst (inst) != MT_245 && typeOfInst (inst) != MT_242) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
+        if (t.style == 4 && isRemovable (inst) && (typeOfInst (inst) == MT_281 || typeOfInst (inst) == MT_258 || typeOfInst (inst) == MT_259 || typeOfInst (inst) == MT_292)) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
         const auto f = t.style == 0 ? WcLook::label (t.size) : WcLook::title (t.size);
         const float w = juce::GlyphArrangement::getStringWidth (f, txt) + 10.0f;
         juce::Rectangle<float> box;

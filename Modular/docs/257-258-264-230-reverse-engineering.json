@@ -1,0 +1,51 @@
+{
+  "project_metadata": {
+    "project_name": "Hardware_to_JUCE_VST_Reverse_Engineering",
+    "device": "Buchla Model 257 Dual Voltage Processor, 258 Dual Oscillator, 264 Quad Sample & Hold / Polyphonic Adaptor, 230 Triple Envelope Follower",
+    "clone_name": "VP-257 / DO-258 / QS-264 / EF-230",
+    "host": "Calabi Yau West Coast Modular",
+    "target_framework": "JUCE 8 (C++17)",
+    "output_format": "JSON Database",
+    "trademark_note": "Buchla y los numeros de modelo se usan como referencia historica; emulacion independiente."
+  },
+  "sources": [
+    { "id": "S1", "title": "Tiptop Audio 257t manual (manuals.plus)", "url": "https://manuals.plus/tiptop-audio/257t-dual-voltage-processor-manual", "used_for": "ecuacion de transferencia, +.5, offset 0-10 V" },
+    { "id": "S2", "title": "Tiptop Audio 258t manual (Buchla 200 catalogue text)", "url": "https://analoguehaven.com/tiptop-audio/258t/manual.pdf", "used_for": "5 Hz - 20 kHz sin cambio de rango, processing, f.m., waveshape: osc 1 seno-sierra, osc 2 seno-cuadrada" },
+    { "id": "S3", "title": "Buchla 264t (voltpages)", "url": "https://ogabrielluiz.github.io/voltpages/modules/tiptop-audio--buchla-264t/", "used_for": "sample / track, common, poly adaptor 1-4 voces, offset +-2 V, modulation" },
+    { "id": "S4", "title": "Tiptop Buchla 230t (Perfect Circuit / Synthtopia)", "url": "https://www.perfectcircuit.com/tiptop-buchla-230t.html", "used_for": "sensitivity, decay, transient / sustained, salidas 0-10 V + pulsos" }
+  ],
+  "stages": [
+    {
+      "stage_id": "257_01_processor",
+      "name": "Attenuverter + crossfader + offset",
+      "fidelity": "measured",
+      "equations": [ "Vout = Va*K + (Vb + 5*plus5)*(1 - M') + Vc*M' + Voffset", "M' = clamp(M + Vm/10, 0, 1)", "K = -1..+1, Voffset = 0..10 V" ],
+      "schematic_ascii": "  Va --[K]-------------------+\n  Vb --(+5 V)--[1-M']-------+--[sumador]--> Vout\n  Vc ----------[M']----------+\n  Voffset -------------------+",
+      "cpp": "Modular/Source/modules/M257.cpp"
+    },
+    {
+      "stage_id": "258_01_oscillator",
+      "name": "Dual oscillator",
+      "fidelity": "behavioral",
+      "description": "Dos osciladores independientes. Frecuencia 5 Hz - 20 kHz en una perilla (exponencial), kbd input a 1.2 V/oct (boton 1V/oct para 1 V/oct), processing input escalada por un atenuversor, f.m. lineal con profundidad, waveshape perilla + c.v.: osc 1 seno -> sierra, osc 2 seno -> cuadrada. Formas limitadas en banda (polyBLEP).",
+      "equations": [ "f = 5 * 4000^k * 2^((Vkbd + P*Vproc) / 1.2)", "f_fm = f * (1 + 4 * depth * Vfm)", "out = (1 - s)*sin + s*(saw | 0.8*square), s = clamp(knob + Vshape/10, 0, 1)" ],
+      "cpp": "Modular/Source/modules/M258.cpp"
+    },
+    {
+      "stage_id": "264_01_sample_hold",
+      "name": "Quad sample & hold / polyphonic adaptor",
+      "fidelity": "behavioral",
+      "description": "Cuatro canales: sample (retiene en el flanco de subida) o track (sigue mientras el pulso esta alto, congela al bajar). Pulse out = pulso de entrada. COMMON: la entrada c.v. 4 alimenta los cuatro. POLY: cada pulso pasa a la siguiente voz (1..voices), muestrea la c.v. comun en esa voz y dispara su pulse out (1 ms). OFFSET +-2 V a las salidas; MODULATION (audio, profundidad hasta +-2 V) se suma antes de la retencion. Las salidas ART digitales del 264t no se emulan.",
+      "cpp": "Modular/Source/modules/M264.cpp"
+    },
+    {
+      "stage_id": "230_01_follower",
+      "name": "Triple envelope follower",
+      "fidelity": "behavioral",
+      "description": "Tres canales: rectificador de onda completa -> detector de pico (ataque 1 ms, caida 10 ms - 3 s). Sensitivity -20..+30 dB (0 dB: audio de amplitud 1 = 10 V). Comparador con 10 % de histeresis sobre un umbral 0-10 V: TRANSIENT = pulso de 5 ms por ataque, SUSTAINED = gate mientras supera el umbral.",
+      "equations": [ "x = min(12, 10*|in|*g)", "env += (x - env) * (x > env ? a_1ms : a_decay)" ],
+      "cpp": "Modular/Source/modules/M230.cpp"
+    }
+  ],
+  "panel_note": "Paneles provisorios en el lenguaje visual de la serie 200t; se calcan de las fotos del 257t, 258t, 264t y 230t en cuanto esten disponibles."
+}

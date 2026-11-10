@@ -13,6 +13,10 @@
 #include "modules/M266.h"
 #include "modules/M245.h"
 #include "modules/M242.h"
+#include "modules/M257.h"
+#include "modules/M258.h"
+#include "modules/M264.h"
+#include "modules/M230.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -438,6 +442,93 @@ int main (int argc, char** argv)
         m.patched = saved;
         std::printf ("  external clock, 10 pulses: matrix A %d (expected 4), all out %d (expected 0, internal off)\n", a, all);
         if (a != 4 || all != 0) ok = false;
+    }
+
+    // ---- 3c5. 257 / 258 / 264 / 230 ----
+    {
+        std::printf ("257 DUAL VOLTAGE PROCESSOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m257();
+        float in[24] {}, out[24] {};
+        setP (p, "vp_k1", -0.5f); setP (p, "vp_m1", 0.25f); setP (p, "vp_p51", 1.0f); setP (p, "vp_off1", 0.1f);
+        m.beginBlock (256);
+        in[M257::inOf (0, 0)] = 4.0f; in[M257::inOf (0, 1)] = 2.0f; in[M257::inOf (0, 2)] = 2.5f; in[M257::inOf (0, 3)] = 8.0f;
+        m.tick (in, out);
+        const float want = 4.0f * -0.5f + (2.0f + 5.0f) * 0.5f + 8.0f * 0.5f + 1.0f;   // M' = 0.25 + 0.25
+        std::printf ("  Va K + Vb (1-M) + Vc M + off = %.3f V (expected %.3f)\n", out[M257::Out_1], want);
+        if (std::fabs (out[M257::Out_1] - want) > 1e-4f) ok = false;
+    }
+    {
+        std::printf ("258 DUAL OSCILLATOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m258 (0);
+        float in[24] {}, out[24] {};
+        setP (p, "oa_freq1", std::log (110.0f / 5.0f) / std::log (4000.0f)); setP (p, "oa_shape1", 0.0f);
+        auto hzOf = [&] (float kbd)
+        {
+            in[M258::inOf (0, 0)] = kbd; m.reset(); m.beginBlock (256);
+            int z = 0; float last = 0.0f; const int N = (int) SR * 2;
+            for (int i = 0; i < N; ++i) { m.tick (in, out); if (last < 0.0f && out[M258::Out_1] >= 0.0f) ++z; last = out[M258::Out_1]; }
+            return z / 2.0;
+        };
+        const double f0 = hzOf (0.0f), f1 = hzOf (1.2f), f2 = hzOf (2.4f);
+        std::printf ("  tracking at 1.2 V/oct: %.1f Hz, %.1f Hz, %.1f Hz (110 / 220 / 440)\n", f0, f1, f2);
+        if (std::fabs (f0 - 110.0) > 1.0 || std::fabs (f1 - 220.0) > 1.5 || std::fabs (f2 - 440.0) > 2.5) ok = false;
+        // waveshape: 2nd harmonic energy grows from sine to saw
+        auto h2 = [&] (float shape)
+        {
+            setP (p, "oa_shape1", shape); in[M258::inOf (0, 0)] = 0.0f; m.reset(); m.beginBlock (256);
+            double re1 = 0, im1 = 0, re2 = 0, im2 = 0; const int N = (int) SR;
+            for (int i = 0; i < N; ++i) { m.tick (in, out); const double t = 6.283185307 * 110.0 * i / SR; re1 += out[0] * std::cos (t); im1 += out[0] * std::sin (t); re2 += out[0] * std::cos (2 * t); im2 += out[0] * std::sin (2 * t); }
+            return 20.0 * std::log10 (std::sqrt (re2 * re2 + im2 * im2) / std::sqrt (re1 * re1 + im1 * im1) + 1e-9);
+        };
+        const double a = h2 (0.0f), b = h2 (1.0f);
+        std::printf ("  2nd harmonic re fundamental: sine %.1f dB, saw %.1f dB (saw ideal -6.0)\n", a, b);
+        if (a > -40.0 || std::fabs (b + 6.0) > 1.5) ok = false;
+    }
+    {
+        std::printf ("264 QUAD SAMPLE & HOLD\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m264();
+        float in[24] {}, out[24] {};
+        setP (p, "sh_track2", 1.0f); m.reset(); m.beginBlock (256);
+        // channel 1 samples, channel 2 tracks: both see a ramp with a long pulse
+        in[M264::In_Pulse1] = in[M264::In_Pulse2] = 10.0f;
+        float o1 = 0, o2 = 0;
+        for (int i = 0; i < 100; ++i) { in[M264::In_Cv1] = in[M264::In_Cv2] = 0.01f * i; m.tick (in, out); o1 = out[M264::Out_Cv1]; o2 = out[M264::Out_Cv2]; }
+        std::printf ("  long pulse over a ramp: sample holds %.2f V, track follows to %.2f V\n", o1, o2);
+        if (std::fabs (o1) > 1e-4f || std::fabs (o2 - 0.99f) > 1e-4f) ok = false;
+        in[M264::In_Pulse1] = in[M264::In_Pulse2] = 0.0f;
+        // poly: 3 voices round robin from the common input
+        setP (p, "sh_voices", 3.0f); m.reset(); m.beginBlock (256);
+        float vals[4] {};
+        for (int k = 0; k < 4; ++k)
+        {
+            in[M264::In_Cv4] = (float) (k + 1);
+            in[M264::In_Poly] = 10.0f; m.tick (in, out); in[M264::In_Poly] = 0.0f; m.tick (in, out);
+        }
+        for (int c = 0; c < 4; ++c) vals[c] = out[M264::Out_Cv1 + c];
+        std::printf ("  poly, 3 voices, notes 1 2 3 4: voices hold %.0f %.0f %.0f %.0f (expected 4 2 3 0)\n", vals[0], vals[1], vals[2], vals[3]);
+        if (vals[0] != 4.0f || vals[1] != 2.0f || vals[2] != 3.0f || vals[3] != 0.0f) ok = false;
+    }
+    {
+        std::printf ("230 TRIPLE ENVELOPE FOLLOWER\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m230();
+        float in[24] {}, out[24] {};
+        setP (p, "ef_sens1", 0.4f); setP (p, "ef_thr1", 0.3f); m.reset(); m.beginBlock (256);
+        int pulses = 0; bool was = false; float peak = 0.0f;
+        const int N = (int) SR * 2;
+        for (int i = 0; i < N; ++i)
+        {
+            const bool burst = (i % (int) (SR / 4)) < (int) (SR / 16);          // 4 bursts per second
+            in[M230::In_Audio1] = burst ? 0.5f * std::sin (6.283185f * 440.0f * i / (float) SR) : 0.0f;
+            m.tick (in, out);
+            if (i > (int) SR) peak = juce::jmax (peak, out[M230::Out_Env1]);
+            const bool hi = out[M230::Out_Pulse1] > 5.0f; if (hi && ! was) ++pulses; was = hi;
+        }
+        std::printf ("  0.5 amplitude bursts at 0 dB: envelope peak %.2f V (expected ~5), %d pulses in 2 s (expected 8)\n", peak, pulses);
+        if (std::fabs (peak - 5.0f) > 0.3f || pulses != 8) ok = false;
     }
 
     // ---- 3d. a 0.1.0 patch still loads (slot remap) ----

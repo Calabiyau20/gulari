@@ -7,6 +7,9 @@
 #include "../modules/M266.h"
 #include "../modules/M245.h"
 #include "../modules/M242.h"
+#include "../modules/M257.h"
+#include "../modules/M264.h"
+#include "../modules/M230.h"
 
 namespace wc
 {
@@ -537,6 +540,184 @@ static ModuleSpec make242()
     return s;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// VP-257 Dual Voltage Processor (after the 257t): two sections, attenuverter K on Va, crossfader M between Vb and Vc
+// (+.5 adds 5 V to Vb), offset, Vout. Layout in panel units (height 430).
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make257()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_257; s.name = "DUAL VOLTAGE PROCESSOR"; s.model = "VP-257"; s.after = "after Buchla 257t";
+    s.width = 300.0f; s.height = 430.0f;
+    const float y0[2] = { 28, 220 };
+    static const char* kk[2] = { "k1", "k2" }; static const char* mm[2] = { "m1", "m2" }; static const char* pp[2] = { "p51", "p52" }; static const char* oo[2] = { "off1", "off2" };
+    for (int n = 0; n < 2; ++n)
+    {
+        const float y = y0[n];
+        s.jacks.push_back (J ("Va", K::Banana, false, 32, y + 158));
+        s.jacks.push_back (J ("Vb", K::Banana, false, 88, y + 158));
+        s.jacks.push_back (J ("c.v.", K::Banana, false, 150, y + 158));
+        s.jacks.push_back (J ("Vc", K::Banana, false, 210, y + 158));
+    }
+    s.jacks.push_back (J ("Vout", K::Banana, true, 268, y0[0] + 158));
+    s.jacks.push_back (J ("Vout", K::Banana, true, 268, y0[1] + 158));
+    for (int n = 0; n < 2; ++n)
+    {
+        const float y = y0[n];
+        s.controls.push_back (C (kk[n], "", CtrlStyle::Knob, 52, y + 62, kSkirt, "-|*|*|*|0|*|*|*|+"));
+        s.controls.push_back (C (mm[n], "", CtrlStyle::Knob, 150, y + 62, kSkirt, "b|*|*|*|*|*|*|*|c"));
+        s.controls.push_back (C (oo[n], "", CtrlStyle::Knob, 248, y + 62, kSkirt, "0|*|*|*|5|*|*|*|10"));
+        s.controls.push_back (C (pp[n], "", CtrlStyle::Toggle, 88, y + 116, kSkirt));
+        s.texts.push_back (T ("K", 52, y + 108, 11.0f, 3));
+        s.texts.push_back (T ("M", 150, y + 108, 11.0f, 3));
+        s.texts.push_back (T ("offset", 248, y + 104, 9.5f));
+        s.texts.push_back (T ("+.5", 72, y + 120, 9.5f, 1, 2));
+        s.lines.push_back (L (32, y + 140, 52, y + 92, 1.2f));                    // Va -> K
+        s.lines.push_back (L (100, y + 150, 128, y + 92, 1.2f, true));             // Vb -> M
+        s.lines.push_back (L (198, y + 150, 172, y + 92, 1.2f, true));             // Vc -> M
+        s.lines.push_back (L (232, y + 158, 250, y + 158, 1.2f, false, true));     // -> out
+        s.leds.push_back (D (268, y + 128, M257::Led_1 + n, 0xff3a7ae8));
+        s.texts.push_back (T (n == 0 ? "1" : "2", 14, y + 16, 11.0f, 1, 1));
+    }
+    s.lines.push_back (L (4, 22, 296, 22)); s.lines.push_back (L (4, 214, 296, 214)); s.lines.push_back (L (4, 408, 296, 408));
+    s.texts.push_back (T ("DUAL VOLTAGE PROCESSOR  VP-257", 150, 12, 10.5f, 4));
+    s.texts.push_back (T ("Va K + Vb (1 - M) + Vc M + offset", 150, 38, 8.5f));
+    s.texts.push_back (T ("Va K + Vb (1 - M) + Vc M + offset", 150, 230, 8.5f));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 257t", 150, 420, 9.0f, 1));
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// DO-258 Dual Oscillator (after the 258t): two columns, frequency 5 Hz - 20 kHz, waveshape (1: sine-saw, 2: sine-square),
+// processing attenuverter, f.m. depth; kbd / processing / f.m. / waveshape inputs, audio output.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make258()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_258; s.name = "DUAL OSCILLATOR"; s.model = "DO-258"; s.after = "after Buchla 258t";
+    s.width = 360.0f; s.height = 430.0f;
+    const float cx[2] = { 92, 268 };
+    for (int o = 0; o < 2; ++o)
+    {
+        const float x = cx[o];
+        s.jacks.push_back (JT ("kbd", K::Banana, false, x - 63, 362, kTintGrey));
+        s.jacks.push_back (J ("proc.", K::Banana, false, x - 21, 362));
+        s.jacks.push_back (J ("f.m.", K::Mini, false, x + 21, 362));
+        s.jacks.push_back (J ("shape", K::Banana, false, x + 63, 362));
+    }
+    s.jacks.push_back (J ("", K::Mini, true, cx[0], 50));
+    s.jacks.push_back (J ("", K::Mini, true, cx[1], 50));
+    static const char* fr[2] = { "freq1", "freq2" }; static const char* sh[2] = { "shape1", "shape2" };
+    static const char* pr[2] = { "proc1", "proc2" }; static const char* fm[2] = { "fm1", "fm2" };
+    for (int o = 0; o < 2; ++o)
+    {
+        const float x = cx[o];
+        s.controls.push_back (C (fr[o], "", CtrlStyle::BigKnob, x, 128, kSkirt, "5|20|80|320|1.3k|5k|20k"));
+        s.controls.push_back (C (sh[o], "", CtrlStyle::Knob, x, 226, kSkirt, "*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (pr[o], "", CtrlStyle::SmallKnob, x - 42, 298, kSkirt, "-|*|0|*|+"));
+        s.controls.push_back (C (fm[o], "", CtrlStyle::SmallKnob, x + 42, 298, kSkirt, "*|*|*|*|*"));
+        s.texts.push_back (T ("frequency (Hz)", x, 180, 9.0f));
+        s.texts.push_back (T ("processing", x - 42, 326, 8.5f)); s.texts.push_back (T ("f.m.", x + 42, 326, 8.5f));
+        s.texts.push_back (T ("waveshape", x, 266, 9.0f));
+        s.texts.push_back (T ("output", x + 36, 54, 9.0f, 0, 1));
+        s.texts.push_back (T (o == 0 ? "1" : "2", x - 50, 54, 12.0f, 3));
+    }
+    iconSine (s, cx[0] - 36, 226); iconSaw (s, cx[0] + 38, 226);
+    iconSine (s, cx[1] - 36, 226); iconSqr (s, cx[1] + 38, 226);
+    s.controls.push_back (C ("volt1", "", CtrlStyle::Button, 180, 226));
+    s.texts.push_back (T ("1V/oct", 180, 250, 8.5f));
+    s.lines = { L (4, 22, 356, 22), L (180, 22, 180, 200), L (180, 262, 180, 408), L (4, 80, 356, 80), L (4, 338, 356, 338), L (4, 408, 356, 408) };
+    s.texts.push_back (T ("DUAL OSCILLATOR  DO-258", 180, 12, 10.5f, 4));
+    s.texts.push_back (T ("INPUTS", 180, 392, 9.0f, 1));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 258t", 180, 420, 9.0f, 1));
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// QS-264 Quad Sample & Hold / Polyphonic Adaptor (after the 264t): four channels with sample / track switches,
+// the polyphonic adaptor (poly input, number of voices, common c.v.), offset and modulation.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make264()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_264; s.name = "QUAD SAMPLE & HOLD"; s.model = "QS-264"; s.after = "after Buchla 264t";
+    s.width = 420.0f; s.height = 430.0f;
+    const float cx[4] = { 48, 118, 188, 258 };
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (JT ("", K::Banana, false, cx[c], 150, kTintOrange, true));   // pulse in
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, false, cx[c], 206));                       // c.v. in
+    s.jacks.push_back (JT ("poly in", K::Banana, false, 48, 360, kTintOrange, true));
+    s.jacks.push_back (J ("mod. in", K::Mini, false, 140, 360));
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c], 262, true));                  // pulse out
+    for (int c = 0; c < 4; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c], 318));                        // c.v. out
+    static const char* tr[4] = { "track1", "track2", "track3", "track4" };
+    const char* nums[4] = { "1", "2", "3", "4" };
+    for (int c = 0; c < 4; ++c)
+    {
+        s.controls.push_back (C (tr[c], "", CtrlStyle::Toggle, cx[c], 70, kSkirt));
+        s.texts.push_back (T (nums[c], cx[c], 40, 11.0f, 1));
+        s.leds.push_back (D (cx[c], 110, M264::Led_1 + c));
+    }
+    s.controls.push_back (C ("common", "", CtrlStyle::Toggle, 362, 70, kSkirt));
+    s.controls.push_back (C ("voices", "", CtrlStyle::Knob, 362, 160, kSkirt, "1|2|3|4"));
+    s.controls.push_back (C ("offset", "", CtrlStyle::Knob, 362, 252, kSkirt, "-2|*|0|*|+2"));
+    s.controls.push_back (C ("mod", "", CtrlStyle::Knob, 260, 362, kSkirt, "*|*|*|*|*"));
+    s.lines = { L (4, 22, 416, 22), L (296, 22, 296, 340), L (4, 340, 416, 340), L (4, 408, 416, 408), L (4, 236, 296, 236), L (4, 124, 296, 124) };
+    s.lines.push_back (L (162, 360, 228, 362, 1.2f, false, true));
+    s.texts.push_back (T ("track", 296 - 4, 60, 8.5f, 0, 2)); s.texts.push_back (T ("sample", 296 - 4, 82, 8.5f, 0, 2));
+    s.texts.push_back (T ("PULSE IN", 150, 176, 8.5f, 1)); s.texts.push_back (T ("C.V. IN", 150, 230, 8.5f, 1));
+    s.texts.push_back (T ("PULSE OUT", 150, 288, 8.5f, 1)); s.texts.push_back (T ("C.V. OUT", 150, 336, 8.5f, 1));
+    s.texts.push_back (T ("common", 362, 40, 9.0f)); s.texts.push_back (T ("on / off", 362, 100, 8.0f));
+    s.texts.push_back (T ("voices", 362, 200, 9.0f)); s.texts.push_back (T ("offset", 362, 292, 9.0f));
+    s.texts.push_back (T ("modulation", 260, 398, 8.5f)); s.texts.push_back (T ("POLYPHONIC ADAPTOR", 362, 330, 8.0f, 1));
+    s.texts.push_back (T ("QUAD SAMPLE & HOLD  QS-264", 210, 12, 10.5f, 4));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 264t", 210, 420, 9.0f, 1));
+    return s;
+}
+
+// ---------------------------------------------------------------------------------------------
+// EF-230 Triple Envelope Follower (after the 230t): three channels, audio in, sensitivity, decay, pulse threshold,
+// transient / sustained pulse mode, envelope (c.v.) and pulse outputs.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make230()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_230; s.name = "TRIPLE ENVELOPE FOLLOWER"; s.model = "EF-230"; s.after = "after Buchla 230t";
+    s.width = 330.0f; s.height = 430.0f;
+    const float cx[3] = { 58, 165, 272 };
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Mini, false, cx[c], 60));
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] - 24, 368));
+    for (int c = 0; c < 3; ++c) s.jacks.push_back (J ("", K::Banana, true, cx[c] + 24, 368, true));
+    static const char* se[3] = { "sens1", "sens2", "sens3" }; static const char* de[3] = { "decay1", "decay2", "decay3" };
+    static const char* th[3] = { "thr1", "thr2", "thr3" }; static const char* mo[3] = { "mode1", "mode2", "mode3" };
+    const char* nums[3] = { "1", "2", "3" };
+    for (int c = 0; c < 3; ++c)
+    {
+        const float x = cx[c];
+        s.controls.push_back (C (se[c], "", CtrlStyle::Knob, x, 132, kSkirt, "*|*|*|*|*|*|*|*|*"));
+        s.controls.push_back (C (de[c], "", CtrlStyle::Knob, x, 214, kSkirt, ".01|.1|1|3"));
+        s.controls.push_back (C (th[c], "", CtrlStyle::SmallKnob, x - 22, 290, kSkirt));
+        s.controls.push_back (C (mo[c], "", CtrlStyle::Toggle, x + 26, 290, 0xffd8261f));
+        s.texts.push_back (T (nums[c], x - 34, 64, 11.0f, 3));
+        s.texts.push_back (T ("sensitivity", x, 172, 8.5f)); s.texts.push_back (T ("decay", x, 254, 8.5f));
+        s.texts.push_back (T ("thresh.", x - 22, 318, 7.5f));
+        s.texts.push_back (T ("sust.", x + 26, 266, 7.5f)); s.texts.push_back (T ("trans.", x + 26, 316, 7.5f));
+        s.texts.push_back (T ("c.v.", x - 24, 392, 8.5f)); s.texts.push_back (T ("pulse", x + 24, 392, 8.5f));
+        s.leds.push_back (D (x - 24, 340, M230::Led_Env1 + c, 0xff3a7ae8));
+        s.leds.push_back (D (x + 24, 340, M230::Led_Pulse1 + c));
+        s.lines.push_back (L (x, 78, x, 100, 1.2f, false, true));
+    }
+    s.lines.push_back (L (4, 22, 326, 22)); s.lines.push_back (L (4, 408, 326, 408));
+    s.lines.push_back (L (111, 22, 111, 408)); s.lines.push_back (L (219, 22, 219, 408));
+    s.texts.push_back (T ("TRIPLE ENVELOPE FOLLOWER  EF-230", 165, 12, 10.5f, 4));
+    s.texts.push_back (T ("CALABI YAU  -  after Buchla 230t", 165, 420, 9.0f, 1));
+    return s;
+}
+
 // ---------------------------------------------------------------------------------------------
 // KB-225 MIDI Interface and OUT-2 Output (in the same visual language)
 // ---------------------------------------------------------------------------------------------
@@ -596,7 +777,7 @@ static ModuleSpec makeOutput()
 
 const ModuleSpec& specFor (ModuleType t)
 {
-    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242() };
+    static const ModuleSpec specs[MT_Count] = { makeMidi(), make259(), makeOutput(), make281(), make292(), make266(), make245(), make242(), make257(), make258(), make264(), make230() };
     return specs[t];
 }
 } // namespace wc

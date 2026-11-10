@@ -7,6 +7,10 @@
 #include "modules/M266.h"
 #include "modules/M245.h"
 #include "modules/M242.h"
+#include "modules/M257.h"
+#include "modules/M258.h"
+#include "modules/M264.h"
+#include "modules/M230.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -126,7 +130,8 @@ juce::StringArray WcProcessor::builtinPatchNames()
 {
     return { "Init Voice", "FM Bell", "Folded Bass", "Order Sweep", "Timbre Wobble", "Ring Mod Drone", "Cross-FM Pair", "Phase Lock Unison",
              "Bongo (LPG ping)", "Function Pluck", "Quadrature Drift", "Uncertainty (generative)",
-             "245 Sequence (LPG)", "242 Programmed Rhythm" };
+             "245 Sequence (LPG)", "242 Programmed Rhythm",
+             "258 Morphing Duo", "264 Poly Round Robin" };
 }
 
 void WcProcessor::loadBuiltinPatch (int index)
@@ -315,6 +320,68 @@ void WcProcessor::loadBuiltinPatch (int index)
             setParam (b + "po_freq", hz (440.0f)); setParam (b + "mo_freq", hz (440.0f * 1.5f)); setParam (b + "idx", 0.3f); setParam (b + "mod_pitch", 1.0f);
             setParam (f + "att1", 0.05f); setParam (f + "dec1", 0.5f);
             setParam (l + "mode1", 1.0f); setParam (l + "mode2", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 14:  // 258 Morphing Duo: the keyboard plays both 258 oscillators (a fifth apart); a cycling 281 pair, crossfaded
+                  // by the 257, morphs the waveshapes; both through the 292, left and right
+        {
+            const int O = kInst258;
+            present[(size_t) O] = present[(size_t) kInst257] = present[(size_t) kInst281] = present[(size_t) kInst292] = true;
+            const juce::String o (prefix258 (0)), f (prefix281 (0)), l (prefix292 (0));
+            cables.push_back ({ kInstMidi, MI::Out_Pitch, O, M258::inOf (0, 0), nextColour (true) });
+            cables.push_back ({ kInstMidi, MI::Out_Pitch2, O, M258::inOf (1, 0), nextColour (true) });
+            setParam (o + "freq1", std::log (65.406f / 5.0f) / std::log (4000.0f));
+            setParam (o + "freq2", std::log (98.0f / 5.0f) / std::log (4000.0f));
+            setParam (f + "mode1", 2.0f); setParam (f + "att1", 0.62f); setParam (f + "dec1", 0.7f);
+            setParam (f + "mode2", 2.0f); setParam (f + "att2", 0.75f); setParam (f + "dec2", 0.62f);
+            cables.push_back ({ kInst281, M281::outFunc (0), kInst257, M257::inOf (0, 1), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (1), kInst257, M257::inOf (0, 3), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (1), kInst257, M257::inOf (0, 2), nextColour (true) });
+            cables.push_back ({ kInst257, M257::Out_1, O, M258::inOf (0, 3), nextColour (true) });
+            cables.push_back ({ kInst281, M281::outFunc (0), O, M258::inOf (1, 3), nextColour (true) });
+            setParam ("vp_k1", 0.0f); setParam ("vp_m1", 0.3f);
+            setParam (o + "shape1", 0.1f); setParam (o + "shape2", 0.05f);
+            cables.push_back ({ O, M258::Out_1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ O, M258::Out_2, kInst292, M292::inSig (1), nextColour (false) });
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInstMidi, MI::Out_Gate, kInst292, M292::inCtl (1), nextColour (true) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInstOutput, OutputModule::In_Left, nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (1), kInstOutput, OutputModule::In_Right, nextColour (false) });
+            setParam (l + "mode1", 1.0f); setParam (l + "mode2", 1.0f); setParam ("midi_trans", 1.0f); setParam ("out_level", 0.9f);
+            break;
+        }
+        case 15:  // 264 Poly Round Robin: the 242 clocks the 266 quantized voltages and the 264 polyphonic adaptor, which deals
+                  // the notes to three voices (258 1, 258 2, 259 A) and pings each one in its own 292 channel; the 230 follows
+                  // the first voice and opens the 259 timbre. Plays by itself.
+        {
+            const int O = kInst258;
+            for (int i : { kInst242, kInst266, kInst264, kInst230, O, (int) A, kInst292 }) present[(size_t) i] = true;
+            const juce::String o (prefix258 (0)), l (prefix292 (0));
+            setParam ("pp_len", 8.0f); setParam ("pp_period", 0.47f);
+            cables.push_back ({ kInst242, M242::Out_All, kInst266, M266::In_QPulse, nextColour (true) });
+            cables.push_back ({ kInst266, M266::Out_Qn1, kInst264, M264::In_Cv4, nextColour (true) });
+            cables.push_back ({ kInst242, M242::Out_All, kInst264, M264::In_Poly, nextColour (true) });
+            setParam ("sh_common", 1.0f); setParam ("sh_voices", 3.0f); setParam ("ua_steps", 5.0f);
+            cables.push_back ({ kInst264, M264::Out_Cv1, O, M258::inOf (0, 0), nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Cv2, O, M258::inOf (1, 0), nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Cv3, A, M259::In_PoPitch, nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Cv3, A, M259::In_MoPitch, nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Pulse1, kInst292, M292::inCtl (0), nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Pulse2, kInst292, M292::inCtl (1), nextColour (true) });
+            cables.push_back ({ kInst264, M264::Out_Pulse3, kInst292, M292::inCtl (2), nextColour (true) });
+            cables.push_back ({ O, M258::Out_1, kInst292, M292::inSig (0), nextColour (false) });
+            cables.push_back ({ O, M258::Out_2, kInst292, M292::inSig (1), nextColour (false) });
+            cables.push_back ({ A, M259::Out_Final1, kInst292, M292::inSig (2), nextColour (false) });
+            cables.push_back ({ kInst292, M292::outSig (0), kInst230, M230::In_Audio1, nextColour (false) });
+            cables.push_back ({ kInst230, M230::Out_Env1, A, M259::In_TimbreCv, nextColour (true) });
+            cables.push_back ({ kInst292, M292::outAll, kInstOutput, OutputModule::In_Left, nextColour (false) });
+            setParam (o + "freq1", std::log (130.81f / 5.0f) / std::log (4000.0f)); setParam (o + "shape1", 0.45f);
+            setParam (o + "freq2", std::log (261.63f / 5.0f) / std::log (4000.0f)); setParam (o + "shape2", 0.3f);
+            setParam (a + "po_freq", hz (196.0f)); setParam (a + "mo_freq", hz (392.0f)); setParam (a + "idx", 0.2f); setParam (a + "mod_pitch", 1.0f);
+            setParam (a + "timbre", 0.05f); setParam (a + "timbre_cv", 0.5f);
+            setParam ("ef_sens1", 0.7f); setParam ("ef_decay1", 0.45f);
+            for (int k = 1; k <= 3; ++k) setParam (l + "mode" + juce::String (k), 1.0f);
+            setParam ("out_level", 0.6f);
             break;
         }
     }

@@ -1,7 +1,7 @@
 #pragma once
 // The rack: module instances, the cable graph and the per-sample engine.
 //
-// Instances are fixed slots processed in a fixed order: MIDI, 242, 245, 266, 281 A-B, 259 A-D, 292 A-B, Output.
+// Instances are fixed slots processed in a fixed order: MIDI, 242, 245, 266, 230, 264, 257, 281 A-B, 258 A-B, 259 A-D, 292 A-B, Output.
 // A cable from an earlier slot to a later one has no delay; a cable going backwards (feedback,
 // e.g. 259 B -> 259 A FM while A -> B) reads the previous sample, which is the 1-sample delay of
 // any digital model of a patch with loops.
@@ -19,14 +19,22 @@ class M292;
 class M266;
 class M245;
 class M242;
+class M257;
+class M258;
+class M264;
+class M230;
 
 // slots, in processing order: control sources first, then oscillators, then gates, then the output
 constexpr int kInstMidi = 0;
 constexpr int kInst242 = 1;
 constexpr int kInst245 = kInst242 + kMax242;
 constexpr int kInst266 = kInst245 + kMax245;
-constexpr int kInst281 = kInst266 + kMax266;
-constexpr int kInst259 = kInst281 + kMax281;
+constexpr int kInst230 = kInst266 + kMax266;
+constexpr int kInst264 = kInst230 + kMax230;
+constexpr int kInst257 = kInst264 + kMax264;
+constexpr int kInst281 = kInst257 + kMax257;
+constexpr int kInst258 = kInst281 + kMax281;
+constexpr int kInst259 = kInst258 + kMax258;
 constexpr int kInst292 = kInst259 + kMax259;
 constexpr int kInstOutput = kInst292 + kMax292;
 constexpr int kNumInst = kInstOutput + 1;
@@ -35,19 +43,34 @@ inline ModuleType typeOfInst (int inst)
     if (inst == kInstMidi) return MT_Midi;
     if (inst < kInst245) return MT_242;
     if (inst < kInst266) return MT_245;
-    if (inst < kInst281) return MT_266;
-    if (inst < kInst259) return MT_281;
+    if (inst < kInst230) return MT_266;
+    if (inst < kInst264) return MT_230;
+    if (inst < kInst257) return MT_264;
+    if (inst < kInst281) return MT_257;
+    if (inst < kInst258) return MT_281;
+    if (inst < kInst259) return MT_258;
     if (inst < kInst292) return MT_259;
     if (inst < kInstOutput) return MT_292;
     return MT_Output;
 }
-inline int subIndex (int inst)
+inline int firstInstOf (ModuleType t)
 {
-    switch (typeOfInst (inst)) { case MT_266: return inst - kInst266; case MT_281: return inst - kInst281; case MT_259: return inst - kInst259; case MT_292: return inst - kInst292; default: return 0; }
+    switch (t)
+    {
+        case MT_242: return kInst242; case MT_245: return kInst245; case MT_266: return kInst266; case MT_230: return kInst230;
+        case MT_264: return kInst264; case MT_257: return kInst257; case MT_281: return kInst281; case MT_258: return kInst258;
+        case MT_259: return kInst259; case MT_292: return kInst292; case MT_Output: return kInstOutput; default: return kInstMidi;
+    }
 }
+inline int subIndex (int inst) { return inst - firstInstOf (typeOfInst (inst)); }
 inline juce::String instPrefix (int inst)
 {
-    switch (typeOfInst (inst)) { case MT_242: return "pp_"; case MT_245: return "sv_"; case MT_266: return "ua_"; case MT_281: return prefix281 (subIndex (inst)); case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {}; }
+    switch (typeOfInst (inst))
+    {
+        case MT_242: return "pp_"; case MT_245: return "sv_"; case MT_266: return "ua_"; case MT_230: return "ef_"; case MT_264: return "sh_";
+        case MT_257: return "vp_"; case MT_281: return prefix281 (subIndex (inst)); case MT_258: return prefix258 (subIndex (inst));
+        case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {};
+    }
 }
 // stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "midi", "out")
 inline juce::String instKey (int inst)
@@ -97,6 +120,10 @@ public:
     M266* m266() const;
     M245* m245() const;
     M242* m242() const;
+    M257* m257() const;
+    M258* m258 (int i) const;
+    M264* m264() const;
+    M230* m230() const;
     MidiInterface& midi() const;
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)

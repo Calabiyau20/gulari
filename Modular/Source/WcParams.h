@@ -5,9 +5,10 @@
 // or removed from the rack. Prefixes: "midi_", "out_", and "a_" .. "d_" for the four 259 slots.
 namespace wc
 {
-constexpr int kMax259 = 4, kMax281 = 2, kMax292 = 2, kMax266 = 1, kMax245 = 1, kMax242 = 1;
+constexpr int kMax259 = 4, kMax281 = 2, kMax292 = 2, kMax266 = 1, kMax245 = 1, kMax242 = 1, kMax257 = 1, kMax258 = 2, kMax264 = 1, kMax230 = 1;
 inline const char* prefix259 (int i) { static const char* p[kMax259] = { "a_", "b_", "c_", "d_" }; return p[i]; }
 inline const char* prefix281 (int i) { static const char* p[kMax281] = { "fa_", "fb_" }; return p[i]; }
+inline const char* prefix258 (int i) { static const char* p[kMax258] = { "oa_", "ob_" }; return p[i]; }
 inline const char* prefix292 (int i) { static const char* p[kMax292] = { "la_", "lb_" }; return p[i]; }
 
 // coarse frequency knob, normalised 0..1 -> Hz
