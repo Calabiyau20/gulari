@@ -169,7 +169,7 @@ static ModuleSpec make259()
         T ("-", 148, 279, 11.0f, 1), T ("+", 184, 279, 11.0f, 1), T ("-", 217, 279, 11.0f, 1), T ("+", 253, 279, 11.0f, 1),
         T ("-", 408, 279, 11.0f, 1), T ("+", 444, 279, 11.0f, 1), T ("-", 484, 296, 11.0f, 1), T ("+", 526, 296, 11.0f, 1),
         T ("PROGRAM", 591, 33, 8.5f, 1),
-        T ("CALABI YAU   -   after Buchla 259t", 290, 407, 9.0f, 1),
+        T ("@foot", 290, 407, 9.0f, 1),
     };
     s.leds = {
         D (22, 101, M259::Led_High), D (22, 117, M259::Led_Low),
@@ -253,7 +253,7 @@ static ModuleSpec make281()
     s.texts.push_back (T ("on", 377, 314, 7.5f, 1)); s.texts.push_back (T ("off", 377, 327, 7.5f, 1));
     s.texts.push_back (T ("QUADRATURE", 375, 340, 8.5f, 1));
     s.texts.push_back (T ("QUAD FUNCTION GENERATOR  QF-281", 206, 12, 10.5f, 4));
-    s.texts.push_back (T ("CALABI YAU   -   after Buchla 281t", 206, 358, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 206, 358, 9.0f, 1));
     scaleSpec (s, 430.0f / 370.0f);
     return s;
 }
@@ -306,7 +306,7 @@ static ModuleSpec make292()
     s.texts.push_back (T ("D", 18, 484, 9.0f, 1)); s.texts.push_back (T ("E", 18, 496, 9.0f, 1));
     s.texts.push_back (T ("lopass", 34, 463, 9.0f, 0, 1)); s.texts.push_back (T ("combo", 34, 477, 9.0f, 0, 1)); s.texts.push_back (T ("gate", 34, 491, 9.0f, 0, 1));
     s.texts.push_back (T ("SIGNAL", 14, 528, 10.0f, 1, 1)); s.texts.push_back (T ("INPUTS", 14, 546, 10.0f, 1, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 292t", 200, 604, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 200, 604, 9.0f, 1));
     scaleSpec (s, 430.0f / 630.0f);
     return s;
 }
@@ -391,7 +391,7 @@ static ModuleSpec make266()
         T ("STORED RANDOM VOLTAGES", 210, 580, 10.0f, 1),
         T ("c.v. in", 445, 510, 9.0f),
         T ("INTEGRATOR", 495, 580, 10.0f, 1),
-        T ("CALABI YAU  -  after Buchla 266t", 295, 602, 9.0f, 1),
+        T ("@foot", 295, 602, 9.0f, 1),
     };
     s.leds = {
         D (375, 124, M266::Led_Fluct1), D (375, 234, M266::Led_Fluct2),
@@ -473,7 +473,7 @@ static ModuleSpec make245()
     s.texts.push_back (T ("STAGE GATE OUTS", 383, 456, 9.0f, 1));
     s.texts.push_back (T ("STAGE SELECT INPUTS", 383, 520, 9.0f, 1));
     s.texts.push_back (T ("stored", 622, 52, 9.0f)); s.texts.push_back (T ("voltage", 622, 64, 9.0f)); s.texts.push_back (T ("OUTS", 622, 78, 9.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 245t", 328, 544, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 328, 544, 9.0f, 1));
     scaleSpec (s, 430.0f / 554.0f);
     return s;
 }
@@ -542,7 +542,7 @@ static ModuleSpec make242()
     s.texts.push_back (T ("PERIOD", 330, 330, 9.5f, 1)); s.texts.push_back (T ("c.v.", 210, 412, 8.5f, 0, 1));
     s.texts.push_back (T ("INPUTS", 120, 506, 9.0f, 1)); s.texts.push_back (T ("CLOCK", 335, 506, 9.0f, 1));
     s.texts.push_back (T ("ALTER", 92, 590, 9.0f, 1)); s.texts.push_back (T ("MATRIX", 270, 590, 9.0f, 1)); s.texts.push_back (T ("ALL", 378, 590, 9.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 242t", 206, 608, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 206, 608, 9.0f, 1));
     scaleSpec (s, 430.0f / 615.0f);
     return s;
 }
@@ -591,7 +591,7 @@ static ModuleSpec make257()
     }
     s.lines.push_back (L (8, 79, 752, 79)); s.lines.push_back (L (8, 677, 752, 677)); s.lines.push_back (L (8, 1287, 752, 1287));
     s.texts.push_back (T ("DUAL VOLTAGE PROCESSOR  VP-257", 380, 38, 10.5f, 4));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 257t", 380, 1325, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 380, 1325, 9.0f, 1));
     scaleSpec (s, 430.0f / 1362.0f);
     return s;
 }
@@ -639,7 +639,7 @@ static ModuleSpec make258()
         s.lines.push_back (L (8, y + 470, 667, y + 470));
     }
     s.texts.push_back (T ("DUAL OSCILLATOR  DO-258", 337, 24, 10.5f, 4));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 258t", 337, 1062, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 337, 1062, 9.0f, 1));
     scaleSpec (s, 430.0f / 1090.0f);
     return s;
 }
@@ -690,7 +690,7 @@ static ModuleSpec make264()
         T ("press to auto tune", 717, 88, 8.5f), T ("hold to initial tune", 717, 190, 8.5f),
         T ("OFFSET", 717, 600, 10.0f, 1), T ("-", 662, 740, 10.0f, 3), T ("+", 772, 740, 10.0f, 3),
         T ("MODULATION", 717, 785, 9.5f, 1), T ("zero", 662, 935, 9.0f), T ("max", 772, 935, 9.0f),
-        T ("CALABI YAU  -  after Buchla 264t", 417, 1142, 9.0f, 1), T ("POLYPHONIC ADAPTOR", 417, 1105, 9.0f, 1),
+        T ("@foot", 417, 1142, 9.0f, 1), T ("POLYPHONIC ADAPTOR", 417, 1105, 9.0f, 1),
     };
     scaleSpec (s, 430.0f / 1172.0f);
     return s;
@@ -734,7 +734,7 @@ static ModuleSpec make230()
     s.texts.push_back (T ("sustained", 100, 530, 9.0f)); s.texts.push_back (T ("transient", 500, 528, 9.0f));
     s.texts.push_back (T ("DECAY TIME", 300, 686, 10.0f, 1));
     s.texts.push_back (T ("SENSITIVITY", 300, 892, 10.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 230t", 300, 1108, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 300, 1108, 9.0f, 1));
     scaleSpec (s, 430.0f / 1140.0f);
     return s;
 }
@@ -777,7 +777,7 @@ static ModuleSpec make285()
         T ("ring", 120, 562, 10.0f), T ("OUT", 370, 615, 10.0f, 1), T ("variable", 620, 562, 10.0f),
         T ("control", 110, 692, 9.5f), T ("IN", 370, 748, 10.0f, 1), T ("signal", 505, 692, 9.5f), T ("ref.", 640, 692, 9.5f),
         T ("MODULATION", 370, 818, 10.0f, 1), T ("amplitude", 640, 818, 9.5f), T ("+", 170, 948, 9.0f, 3),
-        T ("CALABI YAU  -  after Buchla 285t", 370, 1008, 9.0f, 1),
+        T ("@foot", 370, 1008, 9.0f, 1),
     };
     scaleSpec (s, 430.0f / 1030.0f);
     return s;
@@ -823,7 +823,7 @@ static ModuleSpec make277()
         T ("long", 722, 685, 9.5f), T ("original", 722, 795, 9.5f),
         T ("control", 92, 808, 9.0f), T ("input", 92, 838, 9.0f), T ("-", 215, 840, 9.0f, 3), T ("+", 342, 840, 9.0f, 3),
         T ("modu-", 92, 965, 9.0f), T ("lation", 92, 995, 9.0f),
-        T ("CALABI YAU  -  after Buchla 277t", 393, 1205, 9.0f, 1),
+        T ("@foot", 393, 1205, 9.0f, 1),
     };
     scaleSpec (s, 430.0f / 1247.0f);
     return s;
@@ -888,7 +888,7 @@ static ModuleSpec make207()
     s.texts.push_back (T ("PREAMP", 784, 448, 9.5f, 1)); s.texts.push_back (T ("GAIN", 725, 510, 9.0f, 1));
     s.texts.push_back (T ("70", 752, 540, 9.0f, 1, 1)); s.texts.push_back (T ("55", 752, 570, 9.0f, 1, 1));
     s.texts.push_back (T ("INPUT", 831, 610, 9.0f, 1)); s.texts.push_back (T ("OUTPUT", 725, 649, 9.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 207t", 343, 772, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 343, 772, 9.0f, 1));
     scaleSpec (s, 430.0f / 793.0f);
     return s;
 }
@@ -964,7 +964,7 @@ static ModuleSpec make296()
     s.texts.push_back (T ("even", 712, 528, 8.0f)); s.texts.push_back (T ("odd", 712, 540, 8.0f));
     s.texts.push_back (T ("even pre-emph.", 625, 590, 8.0f)); s.texts.push_back (T ("odd pre-emph.", 800, 590, 8.0f));
     s.texts.push_back (T ("LOCAL  PROGRAM  INPUTS", 450, 614, 9.0f, 1));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 296", 425, 692, 9.0f, 1));
+    s.texts.push_back (T ("@foot", 425, 692, 9.0f, 1));
     scaleSpec (s, 430.0f / 707.0f);
     return s;
 }
@@ -1137,7 +1137,7 @@ static ModuleSpec make248()
     s.lines.push_back (L (912, Y (1275), 1826, Y (1275))); s.lines.push_back (L (X (710), Y (1275), X (710), 640)); s.lines.push_back (L (X (833), Y (1275), X (833), 640));
     s.lines.push_back (L (4, 30, 1826, 30)); s.lines.push_back (L (4, 640, 1826, 640)); s.lines.push_back (L (912, Y (838), 1826, Y (838)));
     s.texts.push_back (T ("MULTIPLE ARBITRARY FUNCTION GENERATOR  MODEL MF-248", 915, 15, 10.0f, 4));
-    s.texts.push_back (T ("CALABI YAU  -  after Buchla 248t", 1300, Y (1372), 8.5f, 1));
+    s.texts.push_back (T ("@foot", 1300, Y (1372), 8.5f, 1));
     scaleSpec (s, 430.0f / 648.0f);
     return s;
 }
@@ -1304,7 +1304,7 @@ static ModuleSpec make250()
                     T ("all", 1050, 255, 9.0f), T ("1", 1050, 408, 8.5f), T ("2", 1050, 568, 8.5f), T ("PULSE", 1030, 640, 9.0f, 1), T ("OUTPUTS", 1035, 655, 9.0f, 1),
                     T ("strobed", 955, 690, 8.5f), T ("continuous", 955, 717, 8.5f), T ("offset", 945, 745, 8.5f),
                     T ("pulse", 825, 783, 8.5f), T ("cv in", 895, 783, 8.5f),
-                    T ("CALABI YAU  -  after Buchla 250e", 548, 885, 9.0f, 1) })
+                    T ("@foot", 548, 885, 9.0f, 1) })
         s.texts.push_back (t);
     for (auto l : { L (4, 36, 1093, 36), L (4, 868, 1093, 868), L (4, 340, 110, 340), L (4, 705, 270, 705), L (990, 665, 1093, 665), L (990, 245, 1093, 245),
                     L (50, 150, 50, 140), L (50, 140, 145, 140), L (145, 140, 145, 160) })
@@ -1401,7 +1401,7 @@ static ModuleSpec make252()
         T ("on 1", 760, 745, 8.5f, 0, 1), T ("on cycl", 760, 772, 8.5f, 0, 1), T ("sync", 672, 760, 8.5f, 0, 2),
         T ("master", 952, 360, 8.5f, 0, 2), T ("CLOCKS", 1085, 348, 9.5f, 1), T ("assign / dt", 1003, 502, 8.0f),
         T ("clock 2", 952, 538, 8.5f, 0, 2), T ("clock 3", 952, 710, 8.5f, 0, 2),
-        T ("CALABI YAU  -  after Buchla 252e", 564, 902, 9.0f, 1),
+        T ("@foot", 564, 902, 9.0f, 1),
     };
     s.lines = { L (4, 36, 1124, 36), L (4, 140, 1124, 140), L (4, 880, 1124, 880), L (435, 36, 435, 140), L (1010, 36, 1010, 140),
                 L (225, 140, 225, 250), L (225, 250, 345, 250), L (345, 140, 345, 250), L (950, 140, 950, 330), L (950, 330, 1124, 330),
@@ -1780,13 +1780,14 @@ static ModuleSpec makeOutput()
     return s;
 }
 
-// the engraved footer replaces the old "CALABI YAU - after ..." line of each layout: keep its height, drop the text
+// Each layout marks where its footer sits with a "@foot" placeholder text: finish() takes that height
+// and removes the placeholder, and RackView engraves CALABI YAU - isologo - model there instead.
 static ModuleSpec finish (ModuleSpec s)
 {
     for (auto it = s.texts.begin(); it != s.texts.end();)
     {
         const juce::String t (it->text);
-        if (t.contains ("after Buchla") || t.startsWith ("CALABI YAU  -  after"))
+        if (t == "@foot")
         {
             if (s.footY <= 0.0f) s.footY = it->y;
             it = s.texts.erase (it);
