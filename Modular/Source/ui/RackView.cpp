@@ -387,7 +387,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                 {
                     b = std::make_unique<PushButton> (nullptr, id == "set" ? "Jump & loop: set the loop stage, then the jump-to stage, then the count (centre knob)"
                                                                  : id == "vset" ? "Voltage set 1 / 2 (the outer knobs edit the selected set)"
-                                                                 : id == "editbtn" ? "Edit mode: the switches below program the stage picked with the centre knob"
+                                                                 : id == "editbtn" ? "Edit lamp: the program lights follow the stage picked with the centre knob instead of the one playing"
                                                                  : id == "addrbtn" ? "Stage addressing: off / strobed / continuous"
                                                                  : id == "remote" ? "Remote enable (preset manager)"
                                                                  : "Edit mode: programs the stage selected with the centre knob");
@@ -397,9 +397,10 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                         auto put = [this] (const juce::String& pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
                         const juce::String st = "_" + juce::String ((int) std::lround (raw ("edit")));
                         auto cycle = [&] (const juce::String& pid, int n) { put (pid, (float) (((int) std::lround (raw (pid)) + 1) % n)); };
+                        // EDIT only switches what the program lamps show: the stage being edited, or the one playing.
+                        // It is a lamp, not a lock - every switch below programs the stage picked with the centre knob
+                        // whether it is lit or not, the way the panel worked before the lamp existed.
                         if (id == "editbtn") { put ("editmode", raw ("editmode") > 0.5f ? 0.0f : 1.0f); repaint(); return; }
-                        // the switches program a stage only in edit mode (the voltage and time knobs always work)
-                        if (raw ("editmode") < 0.5f && id != "vset" && id != "remote" && id != "addrbtn") return;
                         if (id == "tq" || id == "ti" || id == "vq" || id == "vi" || id == "p1" || id == "p2" || id == "text" || id == "vext" || id == "fix")
                             put (id + st, raw (id + st) > 0.5f ? 0.0f : 1.0f);
                         else if (id == "trng") cycle ("trng" + st, 4);
@@ -469,6 +470,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             else if (type == MT_264)
                 b = std::make_unique<PushButton> (nullptr, "press to auto tune / hold to initial tune (the plugin's oscillators never drift)");
             if (b == nullptr) continue;
+            b->setComponentID (id);      // so a test can press a named button without going through the mouse
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
             pushes.push_back (std::move (b));

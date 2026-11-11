@@ -78,6 +78,63 @@ int main (int argc, char** argv)
         std::printf ("zoom: %.2f -> %.2f on one notch, ceiling %.2f, floor %.2f  %s\n", start, up, top, bottom,
                      (up > start && std::fabs (top - 1.5f) < 0.001f && std::fabs (bottom - 0.5f) < 0.001f) ? "ok" : "BAD");
     }
+    // AF-250: every push button on the panel has to move something. The edit lamp must not gate the rest:
+    // for a while it did, and thirteen of the switches went dead unless EDIT happened to be lit.
+    {
+        WcProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setPresent (wc::kInst250, true);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+
+        wc::ui::ModulePanel* panel = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+        {
+            if (panel != nullptr) return;
+            if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (&c)) { if (p->inst == wc::kInst250) { panel = p; return; } }
+            for (auto* ch : c.getChildren()) find (*ch);
+        };
+        find (*ed);
+        if (panel == nullptr) { std::printf ("250 buttons: NO panel\n"); return 1; }
+
+        // the whole apvts state, so a press that changes nothing anywhere is caught
+        auto snapshot = [&proc]
+        {
+            juce::String s;
+            for (auto* p : proc.getParameters()) s << p->getValue() << ",";
+            return s;
+        };
+        auto press = [&] (const juce::String& id) -> bool
+        {
+            for (auto* ch : panel->getChildren())
+                if (auto* b = dynamic_cast<wc::ui::PushButton*> (ch))
+                    if (b->getComponentID() == id && b->onPress != nullptr) { b->onPress(); return true; }
+            return false;
+        };
+
+        // "set" walks a three-press sequence, so it gets three; the rest must bite on the first press
+        const char* ids[] = { "editbtn", "vset", "remote", "addrbtn", "tq", "ti", "vq", "vi",
+                              "p1", "p2", "text", "vext", "fix", "trng", "vrng", "mode", "set" };
+        juce::StringArray dead;
+        for (auto* id : ids)
+        {
+            const auto before = snapshot();
+            if (! press (id)) { dead.add (juce::String (id) + " (missing)"); continue; }
+            if (snapshot() == before) dead.add (id);
+        }
+        // and they have to keep working with the edit lamp off, which is where the regression lived
+        press ("editbtn");
+        for (auto* id : { "tq", "p1", "trng", "mode", "vrng" })
+        {
+            const auto before = snapshot();
+            press (id);
+            if (snapshot() == before) dead.add (juce::String (id) + " (lamp off)");
+        }
+        std::printf ("250 buttons: %d tested, %s\n", (int) (sizeof (ids) / sizeof (ids[0])),
+                     dead.isEmpty() ? "all respond  ok" : ("DEAD: " + dead.joinIntoString (", ")).toRawUTF8());
+        if (! dead.isEmpty()) return 1;
+    }
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {
         WcProcessor proc;
