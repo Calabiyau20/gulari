@@ -1,6 +1,7 @@
 // Renders the West Coast Modular editor to PNG:  WcUiSnapshot <outDir>
 // one image per built-in patch, plus a test that patches a cable through the editor's API.
 #include "WcEditor.h"
+#include "modules/M250.h"
 #include "modules/M259.h"
 #include "ui/RackView.h"
 
@@ -134,6 +135,31 @@ int main (int argc, char** argv)
         std::printf ("250 buttons: %d tested, %s\n", (int) (sizeof (ids) / sizeof (ids[0])),
                      dead.isEmpty() ? "all respond  ok" : ("DEAD: " + dead.joinIntoString (", ")).toRawUTF8());
         if (! dead.isEmpty()) return 1;
+
+        // MODE has to reach all five stage modes from the panel, and pulse - which has no lamp of its
+        // own on the front - has to light adv and stop together rather than leaving the row dark.
+        {
+            auto* m = proc.rack.m250();
+            auto modeOf = [&proc] { auto* v = proc.apvts.getRawParameterValue ("sq_mode_1"); return v != nullptr ? (int) std::lround (v->load()) : -1; };
+            if (auto* p = proc.apvts.getParameter ("sq_mode_1")) p->setValueNotifyingHost (0.0f);
+            if (auto* p = proc.apvts.getParameter ("sq_edit")) p->setValueNotifyingHost (0.0f);   // edit stage 1
+            juce::String walk;
+            bool lamps = true;
+            for (int i = 1; i <= 5; ++i)
+            {
+                press ("mode");
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+                const int md = modeOf();
+                walk << md << (i < 5 ? " " : "");
+                const int lit = (m->led (58) > 0.5f) + (m->led (59) > 0.5f) + (m->led (60) > 0.5f) + (m->led (61) > 0.5f);
+                if (md == 4) { if (! (m->led (58) > 0.5f && m->led (61) > 0.5f && lit == 2)) lamps = false; }
+                else if (lit != 1) lamps = false;
+            }
+            const bool wraps = walk == "1 2 3 4 0";
+            std::printf ("250 mode: walks %s (want 1 2 3 4 0) %s, lamps %s\n", walk.toRawUTF8(),
+                         wraps ? "ok" : "BAD", lamps ? "ok" : "BAD");
+            if (! wraps || ! lamps) return 1;
+        }
     }
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {

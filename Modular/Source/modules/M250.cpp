@@ -174,7 +174,15 @@ float M250::led (int id) const noexcept
         case 50: case 51: case 52: case 53: case 54: case 55: return fv (F_VRng) == id - 50 ? 1.0f : 0.0f;
         case 56: return fv (F_P1) ? 1.0f : 0.0f;
         case 57: return fv (F_P2) ? 1.0f : 0.0f;
-        case 58: case 59: case 60: case 61: return fv (F_Mode) == id - 58 ? 1.0f : 0.0f;
+        // adv / sust / enble / stop have a lamp each. Pulse is the fifth mode and the front has no fifth
+        // lamp, so it lights adv and stop together - which is what it does: the stage stops here, and a
+        // pulse at start/adv is what moves it on.
+        case 58: case 59: case 60: case 61:
+        {
+            const int md = fv (F_Mode);
+            if (md == kModePulse) return (id == 58 || id == 61) ? 1.0f : 0.0f;
+            return md == id - 58 ? 1.0f : 0.0f;
+        }
         case 62: return fv (F_TExt) ? 1.0f : 0.0f;
         case 63: return fv (F_VExt) ? 1.0f : 0.0f;
         case 64: return fv (F_Fix) ? 1.0f : 0.0f;

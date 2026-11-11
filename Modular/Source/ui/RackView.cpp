@@ -405,7 +405,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                             put (id + st, raw (id + st) > 0.5f ? 0.0f : 1.0f);
                         else if (id == "trng") cycle ("trng" + st, 4);
                         else if (id == "vrng") cycle ("vrng" + st, 6);
-                        else if (id == "mode") cycle ("mode" + st, 4);
+                        else if (id == "mode") cycle ("mode" + st, 5);   // adv, sust, enble, stop, pulse
                         else if (id == "vset") put ("set", raw ("set") > 0.5f ? 0.0f : 1.0f);
                         else if (id == "addrbtn") cycle ("addr", 3);
                         else if (id == "remote") put ("remote", raw ("remote") > 0.5f ? 0.0f : 1.0f);

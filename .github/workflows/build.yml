@@ -8,7 +8,40 @@ permissions:
   contents: write
 
 jobs:
+  # The gate. Nothing gets packaged until the DSP and the interface both pass, because a build that
+  # compiles can still ship a panel full of dead controls - which is exactly how 1.0.0 went out.
+  # Linux only: it is the one runner where a headless X server is a single apt package.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Linux build and display dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build xvfb libasound2-dev libjack-jackd2-dev libcurl4-openssl-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libglu1-mesa-dev mesa-common-dev
+      - name: Fetch libraries
+        run: bash setup.sh
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPG_BUILD_TESTS=ON
+      - name: Build the test programs
+        run: cmake --build build --target WcRenderTest WcUiSnapshot
+      - name: DSP, modules and licensing
+        run: ./build/WcRenderTest_artefacts/Release/WcRenderTest "${RUNNER_TEMP}/render"
+      - name: Interface - panels, zoom, cables, every button on the 250
+        run: xvfb-run -a ./build/WcUiSnapshot_artefacts/Release/WcUiSnapshot "${RUNNER_TEMP}/ui"
+      - name: Keep the panel snapshots, pass or fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WestCoast-panels
+          path: ${{ runner.temp }}/ui/*.png
+          if-no-files-found: warn
+
   macos:
+    needs: tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +109,7 @@ jobs:
             WestCoast-mac-*.zip
 
   windows:
+    needs: tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
