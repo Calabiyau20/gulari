@@ -123,4 +123,72 @@ struct Ramp
         return v;
     }
 };
+// zero-delay-feedback state variable filter (Simper / TPT); g = tan (pi fc / fs), k = 1 / Q
+struct Svf
+{
+    float ic1 = 0.0f, ic2 = 0.0f, g = 0.1f, k = 1.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+    void set (float fc, float q, float fs) noexcept
+    {
+        g = std::tan (kPi * clampf (fc, 5.0f, 0.45f * fs) / fs);
+        k = 1.0f / std::max (0.05f, q);
+        a1 = 1.0f / (1.0f + g * (g + k)); a2 = g * a1; a3 = g * a2;
+    }
+    // returns band pass; low / high through the references
+    float process (float x, float& lp, float& hp) noexcept
+    {
+        const float v3 = x - ic2;
+        const float v1 = a1 * ic1 + a2 * v3;
+        const float v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
+        lp = v2; hp = x - k * v1 - v2;
+        if (! std::isfinite (ic1) || ! std::isfinite (ic2)) { ic1 = ic2 = 0.0f; }
+        return v1;
+    }
+    float bp (float x) noexcept { float l, h; return process (x, l, h); }
+    void reset() noexcept { ic1 = ic2 = 0.0f; }
+};
+
+// shelving filters (RBJ cookbook biquads), gain in dB
+struct Biquad
+{
+    float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
+    void shelf (bool high, float fc, float dB, float fs) noexcept
+    {
+        const float A = std::pow (10.0f, dB / 40.0f), w = kTwoPi * fc / fs, cw = std::cos (w), sw = std::sin (w);
+        const float al = sw / 2.0f * std::sqrt (2.0f), sa = 2.0f * std::sqrt (A) * al;
+        float B0, B1, B2, A0, A1, A2;
+        if (! high) { B0 = A * ((A + 1) - (A - 1) * cw + sa); B1 = 2 * A * ((A - 1) - (A + 1) * cw); B2 = A * ((A + 1) - (A - 1) * cw - sa);
+                      A0 = (A + 1) + (A - 1) * cw + sa; A1 = -2 * ((A - 1) + (A + 1) * cw); A2 = (A + 1) + (A - 1) * cw - sa; }
+        else        { B0 = A * ((A + 1) + (A - 1) * cw + sa); B1 = -2 * A * ((A - 1) + (A + 1) * cw); B2 = A * ((A + 1) + (A - 1) * cw - sa);
+                      A0 = (A + 1) - (A - 1) * cw + sa; A1 = 2 * ((A - 1) - (A + 1) * cw); A2 = (A + 1) - (A - 1) * cw - sa; }
+        b0 = B0 / A0; b1 = B1 / A0; b2 = B2 / A0; a1 = A1 / A0; a2 = A2 / A0;
+    }
+    float process (float x) noexcept
+    {
+        const float y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2; z2 = b2 * x - a2 * y;
+        return y;
+    }
+    void reset() noexcept { z1 = z2 = 0.0f; }
+};
+
+// white noise (xorshift32), uniform -1..1
+struct Noise
+{
+    unsigned int s = 0x9e3779b9u;
+    void seed (unsigned int v) noexcept { s = v ? v : 1u; }
+    float next() noexcept { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return (float) (int) s * (1.0f / 2147483648.0f); }
+    float uni() noexcept { return 0.5f * next() + 0.5f; }
+};
+
+// pink (-3 dB / oct) filter for white noise (Paul Kellet, economy)
+struct Pink
+{
+    float b0 = 0, b1 = 0, b2 = 0;
+    float process (float w) noexcept
+    {
+        b0 = 0.99765f * b0 + w * 0.0990460f; b1 = 0.96300f * b1 + w * 0.2965164f; b2 = 0.57000f * b2 + w * 1.0526913f;
+        return (b0 + b1 + b2 + w * 0.1848f) * 0.22f;
+    }
+};
 } // namespace wc::dsp

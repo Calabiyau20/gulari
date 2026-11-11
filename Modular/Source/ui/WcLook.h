@@ -16,6 +16,18 @@ namespace col
     const juce::Colour ledGreen { 0xff35e06a };
 }
 
+// the two panel finishes: 0 = Classic (200-series aluminium, blue silkscreen), 1 = Neon Void (Calabi Yau cosmos)
+namespace skin
+{
+    extern int current;                 // set by the editor, read while painting
+    inline bool neon() { return current == 1; }
+    juce::Colour panelHi (juce::uint32 specBg);
+    juce::Colour panelLo (juce::uint32 specBg);
+    juce::Colour ink (juce::uint32 specInk);
+    juce::Colour knobCap (juce::uint32 cap);
+    juce::Colour engrave();             // the engraved footer lettering
+}
+
 // patch cord colours: banana cords (red, black, blue, yellow, green, white), mini cords use darker variants
 juce::Colour cableColour (int index, bool banana);
 

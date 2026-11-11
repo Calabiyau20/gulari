@@ -29,14 +29,16 @@ public:
 
     std::atomic<bool> btnStart { false }, btnStop { false };
     std::atomic<int> loopsDone { 0 };
-    static void timeRange (int r, float& lo, float& hi) { static const float t[3][2] = { { .01f, .1f }, { .08f, .8f }, { .6f, 6.0f } }; lo = t[r][0]; hi = t[r][1]; }
+    static void timeRange (int r, float& lo, float& hi) { static const float t[3][2] = { { .01f, .1f }, { .08f, .8f }, { .6f, 6.0f } }; r = juce::jlimit (0, 2, r); lo = t[r][0]; hi = t[r][1]; }
+    std::atomic<double> hostBpm { 120.0 };   // set by the processor every block (time range 4 = sync to the host tempo)
+    static constexpr int kModePulse = 4;     // stage modes: 0 adv, 1 sust, 2 enable, 3 stop, 4 pulse
 
 private:
     std::atomic<float>* vP[2][kStages] {}; std::atomic<float>* tP[kStages] {};
     enum F { F_P1, F_P2, F_TQ, F_TI, F_VQ, F_VI, F_TRng, F_VRng, F_Mode, F_TExt, F_VExt, F_Fix, F_Count };
     std::atomic<float>* fP[F_Count][kStages] {};
     std::atomic<float>* multP = nullptr; std::atomic<float>* mcvP = nullptr; std::atomic<float>* addrP = nullptr; std::atomic<float>* offP = nullptr;
-    std::atomic<float>* lEndP = nullptr; std::atomic<float>* lToP = nullptr; std::atomic<float>* lCntP = nullptr; std::atomic<float>* editP = nullptr; std::atomic<float>* setP = nullptr; std::atomic<float>* remP = nullptr;
+    std::atomic<float>* lEndP = nullptr; std::atomic<float>* lToP = nullptr; std::atomic<float>* lCntP = nullptr; std::atomic<float>* editP = nullptr; std::atomic<float>* setP = nullptr; std::atomic<float>* remP = nullptr; std::atomic<float>* editModeP = nullptr;
     float fs = 48000.0f;
     float v[2][kStages] {}, t[kStages] {};
     int f[F_Count][kStages] {};

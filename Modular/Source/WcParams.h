@@ -5,10 +5,11 @@
 // or removed from the rack. Prefixes: "midi_", "out_", and "a_" .. "d_" for the four 259 slots.
 namespace wc
 {
-constexpr int kMax259 = 4, kMax281 = 2, kMax292 = 2, kMax266 = 1, kMax245 = 1, kMax242 = 1, kMax257 = 1, kMax258 = 2, kMax264 = 1, kMax230 = 1, kMax285 = 1, kMax277 = 1, kMax207 = 1, kMax296 = 1, kMax248 = 1, kMax218 = 1, kMax250 = 1, kMax252 = 1;
+constexpr int kMax259 = 4, kMax281 = 2, kMax292 = 2, kMax266 = 1, kMax245 = 1, kMax242 = 1, kMax257 = 1, kMax258 = 2, kMax264 = 1, kMax230 = 1, kMax285 = 1, kMax277 = 1, kMax207 = 1, kMax296 = 1, kMax248 = 1, kMax218 = 1, kMax250 = 1, kMax252 = 1, kMax267 = 1, kMax275 = 1, kMax284 = 1, kMax291 = 1, kMax666 = 4;
 inline const char* prefix259 (int i) { static const char* p[kMax259] = { "a_", "b_", "c_", "d_" }; return p[i]; }
 inline const char* prefix281 (int i) { static const char* p[kMax281] = { "fa_", "fb_" }; return p[i]; }
 inline const char* prefix258 (int i) { static const char* p[kMax258] = { "oa_", "ob_" }; return p[i]; }
+inline const char* prefix666 (int i) { static const char* p[kMax666] = { "s1_", "s2_", "s3_", "s4_" }; return p[i]; }
 inline const char* prefix292 (int i) { static const char* p[kMax292] = { "la_", "lb_" }; return p[i]; }
 
 // coarse frequency knob, normalised 0..1 -> Hz

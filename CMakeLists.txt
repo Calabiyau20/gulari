@@ -265,7 +265,7 @@ endif()
 # Self-contained: its own small asset bundle (official isologo + fonts).
 # =============================================================================
 set(WC_PRODUCT_NAME "Calabi Yau West Coast Modular")
-set(WC_VERSION      "0.9.1")
+set(WC_VERSION      "1.0.0")
 juce_add_binary_data(WcAssets NAMESPACE WcData HEADER_NAME WcData.h SOURCES
     Resources/brand/isologo.png Resources/fonts/Montserrat-SemiBold.ttf Resources/fonts/Montserrat-Bold.ttf Resources/fonts/Syncopate-Bold.ttf Modular/Presets/factory.xml)
 set_target_properties(WcAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -297,26 +297,55 @@ set(WC_DEFS JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE
     WC_VERSION_STRING="${WC_VERSION}")
 target_compile_definitions(WestCoastModular PUBLIC ${WC_DEFS})
 target_link_libraries(WestCoastModular
-    PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp
+    PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+
+# Release hardening: nothing but the plug-in entry points is exported, dead code goes, and the symbol
+# table is stripped. With link-time optimisation on top, the shipped binary gives little to read.
+set(WC_HARDEN_TARGETS WestCoastModular WestCoastModular_CLAP)
+foreach(_fmt ${PG_FORMATS})
+    list(APPEND WC_HARDEN_TARGETS WestCoastModular_${_fmt})
+endforeach()
+foreach(_wc_t ${WC_HARDEN_TARGETS})
+    if(TARGET ${_wc_t})
+        if(MSVC)
+            target_compile_options(${_wc_t} PRIVATE $<$<CONFIG:Release>:/GL /Gy /Gw>)
+            target_link_options(${_wc_t} PRIVATE $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>)
+        else()
+            target_compile_options(${_wc_t} PRIVATE $<$<CONFIG:Release>:-fvisibility=hidden -fvisibility-inlines-hidden -ffunction-sections -fdata-sections>)
+            if(APPLE)
+                target_link_options(${_wc_t} PRIVATE $<$<CONFIG:Release>:-Wl,-dead_strip -Wl,-x>)
+            else()
+                target_link_options(${_wc_t} PRIVATE $<$<CONFIG:Release>:-Wl,--gc-sections -Wl,-s>)
+            endif()
+        endif()
+    endif()
+endforeach()
 
 if(PG_BUILD_TESTS)
     file(GLOB_RECURSE WC_DSP Modular/Source/modules/*.cpp Modular/Source/rack/*.cpp)
     juce_add_console_app(WcRenderTest PRODUCT_NAME "WcRenderTest")
-    target_sources(WcRenderTest PRIVATE Modular/tests/WcRenderTest.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp ${WC_DSP})
+    target_sources(WcRenderTest PRIVATE Modular/tests/WcRenderTest.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp Modular/Source/WcLicense.cpp ${WC_DSP})
     target_include_directories(WcRenderTest PRIVATE Modular/Source)
     target_compile_definitions(WcRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
-    target_link_libraries(WcRenderTest PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
+    target_link_libraries(WcRenderTest PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
 
     juce_add_console_app(WcPresetGen PRODUCT_NAME "WcPresetGen")
-    target_sources(WcPresetGen PRIVATE Modular/tests/WcPresetGen.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp ${WC_DSP})
+    target_sources(WcPresetGen PRIVATE Modular/tests/WcPresetGen.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp Modular/Source/WcLicense.cpp ${WC_DSP})
     target_include_directories(WcPresetGen PRIVATE Modular/Source)
     target_compile_definitions(WcPresetGen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
-    target_link_libraries(WcPresetGen PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
+    target_link_libraries(WcPresetGen PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
 
     juce_add_console_app(WcUiSnapshot PRODUCT_NAME "WcUiSnapshot")
     target_sources(WcUiSnapshot PRIVATE Modular/tests/WcUiSnapshot.cpp ${WC_SOURCES})
     target_include_directories(WcUiSnapshot PRIVATE Modular/Source)
     target_compile_definitions(WcUiSnapshot PRIVATE ${WC_DEFS} WC_NO_PLUGIN_ENTRY=1 JUCE_MODAL_LOOPS_PERMITTED=1)
-    target_link_libraries(WcUiSnapshot PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+    target_link_libraries(WcUiSnapshot PRIVATE WcAssets juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
+
+    # key generator - never shipped, never run by CI; the private key lives only on Martin's machine
+    juce_add_console_app(WcKeygen PRODUCT_NAME "WcKeygen")
+    target_sources(WcKeygen PRIVATE Modular/tests/WcKeygen.cpp Modular/Source/WcLicense.cpp)
+    target_include_directories(WcKeygen PRIVATE Modular/Source)
+    target_compile_definitions(WcKeygen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(WcKeygen PRIVATE juce::juce_cryptography juce::juce_data_structures juce::juce_recommended_config_flags)
 endif()

@@ -52,6 +52,32 @@ int main (int argc, char** argv)
         juce::PNGImageFormat().writeImageToStream (img, os);
         std::printf ("%d: %d cables\n", k, (int) proc.getCables().size());
     }
+    // zoom: Ctrl + wheel over the rack steps progressively and stops at 50 % and 150 %
+    {
+        WcProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        wc::ui::RackView* rv = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+        {
+            if (rv != nullptr) return;
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) { rv = r; return; }
+            for (auto* ch : c.getChildren()) find (*ch);
+        };
+        find (*ed);
+        if (rv == nullptr || rv->onZoomGesture == nullptr) { std::printf ("zoom: NO gesture hook\n"); return 1; }
+        const float start = proc.uiZoom;
+        rv->onZoomGesture (0.1f, { 400.0f, 300.0f });
+        const float up = proc.uiZoom;
+        for (int i = 0; i < 40; ++i) rv->onZoomGesture (0.1f, { 400.0f, 300.0f });
+        const float top = proc.uiZoom;
+        for (int i = 0; i < 80; ++i) rv->onZoomGesture (-0.1f, { 400.0f, 300.0f });
+        const float bottom = proc.uiZoom;
+        std::printf ("zoom: %.2f -> %.2f on one notch, ceiling %.2f, floor %.2f  %s\n", start, up, top, bottom,
+                     (up > start && std::fabs (top - 1.5f) < 0.001f && std::fabs (bottom - 0.5f) < 0.001f) ? "ok" : "BAD");
+    }
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {
         WcProcessor proc;

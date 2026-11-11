@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "../WcProcessor.h"
+#include "../modules/M666.h"
 #include "WcLook.h"
 
 namespace wc::ui
@@ -115,7 +116,9 @@ private:
     juce::String prefix;
     std::vector<std::unique_ptr<juce::Slider>> sliders;
     std::vector<juce::String> sliderIds;
-    int set250 = -1;
+    std::vector<juce::String> boundIds;      // resolved parameter id of each slider ({e} / {n} / {s} substituted)
+    void rebindDynamic();
+    juce::String resolveId (const juce::String& suffix) const;
     // 252: knobs that edit the cursor cell (not host parameters), copy buffer, cached cursor
     std::map<juce::String, std::unique_ptr<juce::Slider>> freeKnobs;
     struct Cell252 { int rgb = 0, sub = 0; float subc = 0, off = 0, cv[6] { -1, -1, -1, -1, -1, -1 }; bool valid = false; } clip252;
@@ -126,6 +129,11 @@ private:
     void free252 (const juce::String& name, double v);
     void action252 (const juce::String& id);
     void paint252 (juce::Graphics&);
+    void paint666 (juce::Graphics&);
+    void paint291 (juce::Graphics&);
+    int seq666 = 0;
+    std::unique_ptr<wc::M666::Frame> frame666;
+    std::vector<juce::Point<float>> trail666;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::vector<std::unique_ptr<ParamSwitch>> switches;
     std::vector<std::unique_ptr<PushButton>> pushes;
@@ -159,6 +167,9 @@ public:
     void paint (juce::Graphics&) override;
     void setZoom (float z);
     float getZoom() const { return zoom; }
+    // Ctrl (or Cmd) + wheel over the rack zooms; a plain wheel is left to the viewport, which scrolls.
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    std::function<void (float amount, juce::Point<float> posInRack)> onZoomGesture;
     juce::Point<int> preferredSize() const;   // at the current zoom
 
     // dragging cables

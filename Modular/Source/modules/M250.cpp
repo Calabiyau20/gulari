@@ -17,6 +17,7 @@ M250::M250 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     multP = apvts.getRawParameterValue (p + "mult"); mcvP = apvts.getRawParameterValue (p + "mcv");
     addrP = apvts.getRawParameterValue (p + "addr"); offP = apvts.getRawParameterValue (p + "offset");
     lEndP = apvts.getRawParameterValue (p + "loopend"); lToP = apvts.getRawParameterValue (p + "loopto"); lCntP = apvts.getRawParameterValue (p + "loops");
+    editModeP = apvts.getRawParameterValue (p + "editmode");
     editP = apvts.getRawParameterValue (p + "edit"); setP = apvts.getRawParameterValue (p + "set"); remP = apvts.getRawParameterValue (p + "remote");
 }
 
@@ -57,12 +58,26 @@ void M250::enter (int s, const float* in) noexcept
     from1 = out1; from2 = out2; timeFrom = timeOut;
     if (f[F_Fix][s] && f[F_VExt][s])
         for (int set = 0; set < 2; ++set) fixV[set] = in[In_ExtA + juce::jlimit (0, 3, (int) (v[set][s] * 4.0f))];
-    float lo, hi;
-    timeRange (juce::jlimit (0, 2, f[F_TRng][s]), lo, hi);
     float k = t[s];
     if (f[F_TExt][s]) k = dsp::clampf (in[In_ExtA + juce::jlimit (0, 3, (int) (t[s] * 4.0f))] / 10.0f, 0.0f, 1.0f);
-    if (f[F_TQ][s]) k = std::round (k * 8.0f) / 8.0f;          // quantized time: nine values per range
-    dur = juce::jlimit (0.0005f, 600.0f, lo * std::pow (hi / lo, k) * mult * std::exp2 (mcv * in[In_MultCv] / 5.0f));
+    const int rng = juce::jlimit (0, 3, f[F_TRng][s]);
+    if (rng == 3)
+    {
+        // host tempo: the time knob picks one of seven note values; mult and c.v. do not change the clock division
+        static const float beats[7] = { 0.125f, 1.0f / 6.0f, 0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 1.0f };
+        const double bpm = juce::jlimit (20.0, 400.0, hostBpm.load (std::memory_order_relaxed));
+        dur = (float) (beats[juce::jlimit (0, 6, (int) std::lround (k * 6.0f))] * 60.0 / bpm);
+    }
+    else
+    {
+        float lo, hi;
+        timeRange (rng, lo, hi);
+        float secs = lo * std::pow (hi / lo, k);
+        // quantized time: binary rhythmic values .01, .02, .04 ... 5.12 s
+        if (f[F_TQ][s]) secs = 0.01f * std::exp2 ((float) juce::jlimit (0, 9, (int) std::lround (std::log2 (secs / 0.01f))));
+        // time multiplier .25 - 4, external c.v. scales by 1/2 .. 2
+        dur = juce::jlimit (0.0005f, 600.0f, secs * mult * std::exp2 (dsp::clampf (mcv * in[In_MultCv] / 10.0f, -1.0f, 1.0f)));
+    }
     pAll = (int) (0.005f * fs);
     p1 = f[F_P1][s] ? pAll : 0; p2 = f[F_P2][s] ? pAll : 0;
     if (f[F_Mode][s] == 3) running = false;                    // stop stage: the sequence stops here
@@ -91,8 +106,13 @@ void M250::tick (const float* in, float* out) noexcept
     const bool startHi = in[In_Start] > 3.0f, stopHi = in[In_Stop] > 3.0f;
     if (rising (startHi, startWas) | rising (btnStart.load (std::memory_order_relaxed), bStartWas))
     {
-        if (! running && elapsed <= 0.0) enter (stage, in);    // a fresh start computes the stage time
-        running = true;
+        if (running && f[F_Mode][stage] == kModePulse) next (in);   // pulse mode: start / adv steps to the next stage
+        else
+        {
+            if (! running && elapsed <= 0.0) enter (stage, in);    // a fresh start computes the stage time
+            else if (! running && f[F_Mode][stage] == 3) next (in); // continue after a stop stage
+            running = true;
+        }
     }
     if (rising (stopHi, stopWas) | rising (btnStop.load (std::memory_order_relaxed), bStopWas)) running = false;
     const int addrStage = juce::jlimit (0, kStages - 1, (int) ((off + in[In_AddrCv] / 10.0f) * (float) kStages));
@@ -104,9 +124,11 @@ void M250::tick (const float* in, float* out) noexcept
         if (running)
         {
             const int mode = f[F_Mode][stage];
-            const bool hold = (mode == 1 && stopHi) || (mode == 2 && ! startHi);   // sustain: gate at stop pauses; enable: runs while start is high
+            // sustain: a gate at start / adv pauses the stage; enable: the stage runs only while that gate is high;
+            // pulse: waits for a pulse (handled above)
+            const bool hold = (mode == 1 && startHi) || (mode == 2 && ! startHi) || mode == kModePulse;
             if (! hold) elapsed += 1.0 / fs;
-            if (elapsed >= dur) next (in);
+            if (mode != kModePulse && elapsed >= dur) next (in);
         }
     }
     const int s = stage;
@@ -126,21 +148,26 @@ void M250::tick (const float* in, float* out) noexcept
 
 float M250::led (int id) const noexcept
 {
+    const bool editing = editModeP != nullptr && editModeP->load() > 0.5f;
     const int edit = juce::jlimit (0, kStages - 1, (int) std::lround (editP->load()) - 1);
     if (id >= 0 && id < kStages)
     {
         if (id == curStage.load (std::memory_order_relaxed)) return 1.0f;
-        if (id == edit) return (juce::Time::getMillisecondCounter() / 300) % 2 ? 0.5f : 0.1f;
+        if (editing && id == edit) return (juce::Time::getMillisecondCounter() / 300) % 2 ? 0.5f : 0.1f;
         return 0.0f;
     }
     if (id >= 20 && id < 20 + kStages) { const int s = id - 20; return (fP[F_P1][s]->load() > 0.5f || fP[F_P2][s]->load() > 0.5f) ? 0.8f : 0.0f; }
     if (id == 40) return runLed.load (std::memory_order_relaxed) ? 1.0f : 0.0f;
-    auto fv = [&] (int k) { return (int) std::lround (fP[k][edit]->load()); };
+    if (id == 68) return editing ? 1.0f : 0.0f;
+    // the program LEDs show the stage being edited (edit mode) or the stage that is playing
+    const int show = editing ? edit : juce::jlimit (0, kStages - 1, curStage.load (std::memory_order_relaxed));
+    auto fv = [&] (int k) { return (int) std::lround (fP[k][show]->load()); };
     switch (id)
     {
         case 41: return fv (F_TQ) ? 1.0f : 0.0f;
         case 42: return fv (F_TI) ? 1.0f : 0.0f;
         case 43: case 44: case 45: return fv (F_TRng) == id - 43 ? 1.0f : 0.0f;
+        case 69: return fv (F_TRng) == 3 ? 1.0f : 0.0f;
         case 46: case 47: return (int) std::lround (setP->load()) == id - 46 ? 1.0f : 0.0f;
         case 48: return fv (F_VQ) ? 1.0f : 0.0f;
         case 49: return fv (F_VI) ? 1.0f : 0.0f;
@@ -154,7 +181,6 @@ float M250::led (int id) const noexcept
         case 65: return (int) std::lround (addrP->load()) == 1 ? 1.0f : 0.0f;
         case 66: return (int) std::lround (addrP->load()) == 2 ? 1.0f : 0.0f;
         case 67: return remP->load() > 0.5f ? 1.0f : 0.0f;
-        case 68: return 1.0f;
         default: return 0.0f;
     }
 }

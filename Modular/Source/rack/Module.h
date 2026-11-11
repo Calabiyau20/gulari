@@ -9,7 +9,7 @@ namespace wc
 // Banana jacks carry control (DC, 0..10 V, pulses), mini jacks carry audio, exactly like a Series 200 system.
 enum class JackKind { Banana, Mini };
 
-enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_Count };
+enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_267, MT_275, MT_284, MT_291, MT_666, MT_Count };
 
 struct JackSpec
 {
@@ -48,7 +48,7 @@ struct ModuleSpec
     ModuleType type;
     const char* name;      // panel title
     const char* model;     // model code on the panel
-    const char* after;     // "after Buchla 259" (historical reference), or ""
+    const char* engr;      // model engraved at the foot of the panel ("277t"), or "" (set from the layout)
     float width, height;
     std::vector<JackSpec> jacks;      // inputs first, then outputs (order = DSP indices)
     std::vector<ControlSpec> controls;
@@ -57,6 +57,7 @@ struct ModuleSpec
     std::vector<LineSpec> lines;
     std::vector<LedSpec> leds;
     juce::uint32 bg = 0, ink = 0;       // panel colour / silkscreen colour (0 = aluminium, blue)
+    float footY = 0.0f;                 // centre line of the engraved "CALABI YAU (isologo) model" footer
     int numIn() const { int n = 0; for (auto& j : jacks) n += j.output ? 0 : 1; return n; }
     int numOut() const { int n = 0; for (auto& j : jacks) n += j.output ? 1 : 0; return n; }
     int jackIndex (bool output, int idx) const   // DSP index -> position in jacks[]

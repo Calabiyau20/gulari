@@ -3,6 +3,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "WcParams.h"
 #include "rack/Rack.h"
+#include "WcLicense.h"
 
 class WcProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
 {
@@ -61,6 +62,18 @@ public:
     juce::ValueTree marfPresets { "MARFPRESETS" };
     juce::String patchName { "Init Voice" };
     float uiZoom = 1.0f;
+    int uiSkin = 0;                       // 0 Classic, 1 Neon Void
+
+    // ---- licensing ----
+    wc::License license;
+    bool demo() const noexcept { return ! license.licensed(); }
+    int oscillatorsInRack() const;        // 259 + 258 slots currently in the rack
+    bool canAddOscillator (int inst) const;
+    void recheckLicense (const juce::File& extra = {});
+    // factory library navigation (prev / next in the header)
+    int factoryIndex = -1;
+    void loadFactoryAt (int index);
+    void stepFactory (int delta);
 
     juce::AudioProcessorValueTreeState apvts;
     wc::Rack rack;

@@ -25,6 +25,12 @@
 #include "modules/M218.h"
 #include "modules/M250.h"
 #include "modules/M252.h"
+#include "modules/M267.h"
+#include "modules/M275.h"
+#include "modules/M284.h"
+#include "modules/M291.h"
+#include "modules/M666.h"
+#include "WcLicense.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
@@ -726,6 +732,432 @@ int main (int argc, char** argv)
             good = good && (c.dstInst == kInst259 || (c.srcInst == kInst259 + 1 && c.dstInst == kInstOutput));
         std::printf ("0.1.0 PATCH COMPAT: %s (%d cables)\n", good ? "ok" : "BROKEN", (int) p.getCables().size());
         if (! good || p.getCables().size() != 2) ok = false;
+    }
+
+    // ---- 3e. 284 Quad Voltage Controlled Envelope Generator ----
+    {
+        std::printf ("284 QUAD ENVELOPE GENERATOR\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& e = *p.rack.m284();
+        float in[48] {}, out[48] {};
+        // delay -> attack -> duration -> decay, each read off the knob
+        auto kn = [] (float secs) { return std::log (secs / 0.002f) / std::log (5000.0f); };   // inverse of knobTime
+        setP (p, "ev_del1", kn (0.05f)); setP (p, "ev_att1", kn (0.05f));
+        setP (p, "ev_dur1", kn (0.10f)); setP (p, "ev_dec1", kn (0.10f));
+        setP (p, "ev_ctl1", 0.0f);
+        e.beginBlock (256);
+        {
+            double tRise = -1, tPeak = -1, tFall = -1, tEnd = -1;
+            int pulses = 0; bool pWas = false;
+            float peak = 0.0f, prev = 0.0f;
+            for (int i = 0; i < (int) (SR * 0.6); ++i)
+            {
+                in[M284::inTrig (0)] = i < 48 ? 10.0f : 0.0f;                 // 1 ms start pulse
+                e.tick (in, out);
+                const float v = out[M284::outEnv (0, 0)];
+                const double t = i / SR;
+                if (tRise < 0 && v > 0.05f) tRise = t;                        // end of the delay
+                if (v > peak) { peak = v; tPeak = t; }                        // top of the attack
+                if (tPeak > 0 && tFall < 0 && v < peak - 0.05f) tFall = t;    // end of the duration
+                if (tFall > 0 && tEnd < 0 && v < 0.05f) tEnd = t;             // end of the decay
+                const bool pulse = out[M284::outPulse (0)] > 3.0f;
+                if (pulse && ! pWas) ++pulses;
+                pWas = pulse; prev = v;
+            }
+            juce::ignoreUnused (prev);
+            std::printf ("  ch1 delay %.3f s (0.050)  attack ends %.3f s (0.100)  duration ends %.3f s (0.200)  decay ends %.3f s (0.300)  peak %.2f V  end pulses %d\n",
+                         tRise, tPeak, tFall, tEnd, peak, pulses);
+            if (std::fabs (tRise - 0.05) > 0.012 || std::fabs (tPeak - 0.10) > 0.015
+                || std::fabs (tFall - 0.20) > 0.02 || std::fabs (tEnd - 0.30) > 0.03) ok = false;
+            if (peak < 9.0f || peak > 10.5f || pulses != 1) ok = false;
+        }
+        // sustain: the duration holds while the input stays high
+        {
+            setP (p, "ev_sus1", 1.0f);
+            e.beginBlock (256); e.reset();
+            double tEnd = -1;
+            float peak = 0.0f;
+            const int gate = (int) (SR * 0.5);
+            for (int i = 0; i < (int) (SR * 1.2); ++i)
+            {
+                in[M284::inTrig (0)] = i < gate ? 10.0f : 0.0f;
+                e.tick (in, out);
+                const float v = out[M284::outEnv (0, 0)];
+                peak = std::max (peak, v);
+                if (i > gate && tEnd < 0 && v < 0.05f) tEnd = i / SR;
+            }
+            std::printf ("  ch1 sustain: a 0.500 s gate holds, envelope ends %.3f s (0.600 = gate + decay)  peak %.2f V\n", tEnd, peak);
+            if (std::fabs (tEnd - 0.60) > 0.05 || peak < 9.0f) ok = false;
+            setP (p, "ev_sus1", 0.0f);
+        }
+        // the control input scales the times of its own channel only
+        {
+            setP (p, "ev_ctl2", 1.0f);                                        // full right: the c.v. shortens
+            setP (p, "ev_del2", 0.0f); setP (p, "ev_att2", kn (0.1f));
+            setP (p, "ev_dur2", 0.0f); setP (p, "ev_dec2", kn (0.1f));
+            auto attackTime = [&] (float cv)
+            {
+                e.beginBlock (256); e.reset();
+                for (auto& v : in) v = 0.0f;
+                in[M284::inCtl (1)] = cv;
+                float peak = 0.0f; double tPeak = 0.0;
+                for (int i = 0; i < (int) (SR * 0.8); ++i)
+                {
+                    in[M284::inTrig (1)] = i < 48 ? 10.0f : 0.0f;
+                    e.tick (in, out);
+                    const float v = out[M284::outEnv (1, 0)];
+                    if (v > peak) { peak = v; tPeak = i / SR; }
+                }
+                return tPeak;
+            };
+            const double t0 = attackTime (0.0f), t5 = attackTime (5.0f);
+            std::printf ("  ch2 control input: attack %.3f s at 0 V, %.3f s at +5 V (shorter)\n", t0, t5);
+            if (! (t5 < t0 * 0.75)) ok = false;
+        }
+    }
+
+    // ---- 3f. 267 Uncertainty Source / Dual Bandpass Filter ----
+    {
+        std::printf ("267 UNCERTAINTY SOURCE / DUAL FILTER\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& u = *p.rack.m267();
+        float in[48] {}, out[48] {};
+        // noise colour: low -3 dB/oct, flat 0, high +3 dB/oct
+        {
+            const int order = 14, N = 1 << order;
+            juce::dsp::FFT fft (order);
+            const char* names[3] = { "low", "flat", "high" };
+            const int outs[3] = { M267::Out_Low, M267::Out_Flat1, M267::Out_High };
+            std::vector<std::vector<float>> bufs (3, std::vector<float> ((size_t) N * 2, 0.0f));
+            std::vector<double> spec[3];
+            for (int k = 0; k < 3; ++k) spec[k].assign ((size_t) N / 2, 0.0);
+            u.beginBlock (256);
+            for (int rep = 0; rep < 16; ++rep)
+            {
+                for (int i = 0; i < N; ++i)
+                {
+                    u.tick (in, out);
+                    for (int k = 0; k < 3; ++k) bufs[(size_t) k][(size_t) i] = out[outs[k]];
+                }
+                for (int k = 0; k < 3; ++k)
+                {
+                    fft.performFrequencyOnlyForwardTransform (bufs[(size_t) k].data());
+                    for (int b = 0; b < N / 2; ++b) spec[k][(size_t) b] += (double) bufs[(size_t) k][(size_t) b] * bufs[(size_t) k][(size_t) b];
+                    std::fill (bufs[(size_t) k].begin(), bufs[(size_t) k].end(), 0.0f);
+                }
+            }
+            auto band = [&] (int k, double f0, double f1) { double e = 0; for (int b = (int) (f0 * N / SR); b < (int) (f1 * N / SR); ++b) e += spec[k][(size_t) b]; return e / (f1 - f0); };
+            for (int k = 0; k < 3; ++k)
+            {
+                const double slope = 10.0 * std::log10 (band (k, 8000, 16000) / band (k, 250, 500)) / 5.0;
+                std::printf ("  %-4s noise: %+5.1f dB/oct\n", names[k], slope);
+                if (std::fabs (slope - (k == 0 ? -3.0 : (k == 1 ? 0.0 : 3.0))) > 0.8) ok = false;
+            }
+        }
+        // the two flat outputs are the same source on bridged jacks
+        {
+            u.beginBlock (256);
+            double diff = 0.0;
+            for (int i = 0; i < 2000; ++i) { u.tick (in, out); diff += std::fabs (out[M267::Out_Flat1] - out[M267::Out_Flat2]); }
+            std::printf ("  flat jacks bridged: total difference %.1e\n", diff);
+            if (diff > 1.0e-5) ok = false;
+        }
+        // random source A: the number of new values follows the rate knob
+        {
+            auto changes = [&] (float rateKnob, double secs)
+            {
+                setP (p, "us_ratea", rateKnob);
+                setP (p, "us_randa", 1.0f);                                   // fully random at the mix output
+                u.beginBlock (256); u.reset();
+                int n = 0; float last = -99.0f;
+                for (int i = 0; i < (int) (SR * secs); ++i)
+                {
+                    in[M267::In_SmplA] = (i % 480) < 24 ? 10.0f : 0.0f;       // sample at 100 Hz
+                    u.tick (in, out);
+                    const float v = out[M267::Out_ShA];
+                    if (std::fabs (v - last) > 0.01f) { last = v; ++n; }
+                }
+                return n / secs;
+            };
+            const double slow = changes (0.2f, 2.0), fast = changes (0.8f, 2.0);
+            std::printf ("  random A: %.1f new values/s at rate 0.2 (0.6 Hz), %.1f at 0.8 (20 Hz)\n", slow, fast);
+            if (! (slow < fast * 0.5) || fast < 5.0) ok = false;
+            in[M267::In_SmplA] = 0.0f;
+        }
+        // filter A: a bandpass peak at the knob frequency, narrower as the bandwidth closes
+        {
+            auto peakHz = [&] (float fKnob, float bwKnob, double& q)
+            {
+                setP (p, "us_freqa", fKnob); setP (p, "us_bwa", bwKnob); setP (p, "us_idxa", 0.0f);
+                u.beginBlock (256); u.reset();
+                const int order = 14, N = 1 << order;
+                juce::dsp::FFT fft (order);
+                std::vector<double> spec ((size_t) N / 2, 0.0);
+                std::vector<float> buf ((size_t) N * 2, 0.0f);
+                for (int rep = 0; rep < 12; ++rep)
+                {
+                    for (int i = 0; i < N; ++i) { u.tick (in, out); buf[(size_t) i] = out[M267::Out_SigA1]; }
+                    fft.performFrequencyOnlyForwardTransform (buf.data());
+                    for (int b = 0; b < N / 2; ++b) spec[(size_t) b] += (double) buf[(size_t) b] * buf[(size_t) b];
+                    std::fill (buf.begin(), buf.end(), 0.0f);
+                }
+                // smooth before looking: one noise bin must not decide the peak
+                std::vector<double> sm ((size_t) N / 2, 0.0);
+                for (int b = 4; b < N / 2 - 4; ++b) { double e = 0; for (int k = -4; k <= 4; ++k) e += spec[(size_t) (b + k)]; sm[(size_t) b] = e / 9.0; }
+                int top = 4; for (int b = 5; b < N / 2 - 4; ++b) if (sm[(size_t) b] > sm[(size_t) top]) top = b;
+                const double f = top * SR / N;
+                // "how narrow": the share of the energy that sits within a third of an octave of the peak
+                double in3 = 0.0, all = 0.0;
+                for (int b = 4; b < N / 2 - 4; ++b)
+                {
+                    const double hz = b * SR / N;
+                    all += sm[(size_t) b];
+                    if (hz > f / 1.26 && hz < f * 1.26) in3 += sm[(size_t) b];
+                }
+                q = in3 / std::max (1e-30, all);
+                return f;
+            };
+            double qNarrow = 0, qWide = 0;
+            const double f1 = peakHz (0.5f, 0.0f, qNarrow);                   // narrow
+            const double f2 = peakHz (0.5f, 1.0f, qWide);                     // wide
+            const double want = M267::freqHz (0.5f);
+            std::printf ("  filter A at knob 0.5: peak %.0f Hz, nominal %.0f Hz;  energy within a third of an octave: %.0f %% narrow, %.0f %% wide\n",
+                         f1, want, 100.0 * qNarrow, 100.0 * qWide);
+            if (std::fabs (f1 - want) / want > 0.25 || std::fabs (f2 - want) / want > 0.35) ok = false;
+            if (! (qNarrow > qWide * 1.2)) ok = false;
+        }
+    }
+
+    // ---- 3g. 275 Dual Equalizer / Reverb ----
+    {
+        std::printf ("275 DUAL EQUALIZER / REVERB\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& r = *p.rack.m275();
+        float in[48] {}, out[48] {};
+        // shelving equalizer: +-10 dB at 50 Hz and 10 kHz, read at the "equalized only" output
+        {
+            auto levelAt = [&] (double hz, float treble, float bass)
+            {
+                setP (p, "rv_treb1", treble); setP (p, "rv_bass1", bass); setP (p, "rv_mix1", 0.0f);
+                r.beginBlock (256); r.reset();
+                double acc = 0.0;
+                const int n = (int) (SR * 0.5);
+                for (int i = 0; i < n; ++i)
+                {
+                    in[M275::In_Audio1] = 2.0f * std::sin (2.0 * 3.14159265358979 * hz * i / SR);
+                    r.tick (in, out);
+                    if (i > n / 2) acc += (double) out[M275::Out_Eq1] * out[M275::Out_Eq1];
+                }
+                return 20.0 * std::log10 (std::sqrt (acc / (n / 2)) / 1.4142 + 1e-12);
+            };
+            const double flat1k = levelAt (1000.0, 0.0f, 0.0f);
+            const double hiBoost = levelAt (10000.0, 10.0f, 0.0f) - levelAt (10000.0, 0.0f, 0.0f);
+            const double loCut = levelAt (50.0, 0.0f, -10.0f) - levelAt (50.0, 0.0f, 0.0f);
+            std::printf ("  1 kHz flat %+.2f dB   treble +10 at 10 kHz: %+.1f dB   bass -10 at 50 Hz: %+.1f dB\n", flat1k, hiBoost, loCut);
+            if (std::fabs (flat1k) > 0.6 || std::fabs (hiBoost - 10.0) > 2.5 || std::fabs (loCut + 10.0) > 2.5) ok = false;
+        }
+        // the tank rings on after the input stops, and the mix knob sets how much of it reaches the mix output
+        {
+            auto tail = [&] (float mix, float recede, double& dryPeak)
+            {
+                setP (p, "rv_treb1", 0.0f); setP (p, "rv_bass1", 0.0f);
+                setP (p, "rv_mix1", mix); setP (p, "rv_rec1", recede);
+                r.beginBlock (256); r.reset();
+                double late = 0.0; dryPeak = 0.0;
+                const int burst = (int) (SR * 0.05), total = (int) (SR * 1.5);
+                for (int i = 0; i < total; ++i)
+                {
+                    in[M275::In_Audio1] = i < burst ? 3.0f * std::sin (2.0 * 3.14159265358979 * 440.0 * i / SR) : 0.0f;
+                    r.tick (in, out);
+                    if (i < burst) dryPeak = std::max (dryPeak, (double) std::fabs (out[M275::Out_Mix1a]));
+                    if (i > burst + (int) (SR * 0.2)) late += (double) out[M275::Out_Mix1a] * out[M275::Out_Mix1a];
+                }
+                return std::sqrt (late / (total - burst - (int) (SR * 0.2)));
+            };
+            double dryDrySide = 0, dryWetSide = 0, dryRecede = 0;
+            const double dry = tail (0.0f, 0.0f, dryDrySide);
+            const double wet = tail (0.8f, 0.0f, dryWetSide);
+            const double rec = tail (0.8f, 1.0f, dryRecede);
+            std::printf ("  tail after 0.2 s: dry %.2e, wet %.2e;  dry level near %.2f vs recede %.2f\n", dry, wet, dryDrySide, dryRecede);
+            if (! (wet > dry * 20.0 + 1e-6) || ! (dryRecede < dryWetSide * 0.9)) ok = false;
+            // "reverberated only" carries the tank alone, so it keeps ringing with the mix knob down
+            if (! std::isfinite (rec)) ok = false;
+        }
+    }
+
+    // ---- 3h. 291 Triple Morphing Filter ----
+    {
+        std::printf ("291 TRIPLE MORPHING FILTER\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m291();
+        float in[48] {}, out[48] {};
+        auto spectrumPeak = [&] (int jack, int reps)
+        {
+            const int order = 14, N = 1 << order;
+            juce::dsp::FFT fft (order);
+            std::vector<double> spec ((size_t) N / 2, 0.0);
+            std::vector<float> buf ((size_t) N * 2, 0.0f);
+            juce::Random rng (7);
+            for (int rep = 0; rep < reps; ++rep)
+            {
+                for (int i = 0; i < N; ++i)
+                {
+                    in[M291::In_SigAll] = 3.0f * (rng.nextFloat() * 2.0f - 1.0f);
+                    m.tick (in, out);
+                    buf[(size_t) i] = out[jack];
+                }
+                fft.performFrequencyOnlyForwardTransform (buf.data());
+                for (int b = 0; b < N / 2; ++b) spec[(size_t) b] += (double) buf[(size_t) b] * buf[(size_t) b];
+                std::fill (buf.begin(), buf.end(), 0.0f);
+            }
+            int top = 1; for (int b = 2; b < N / 2; ++b) if (spec[(size_t) b] > spec[(size_t) top]) top = b;
+            return top * SR / N;
+        };
+        // each node filters at its own stage-1 frequency
+        {
+            setP (p, "tm_play", 0.0f); setP (p, "tm_edit", 1.0f); setP (p, "tm_solo", 0.0f);
+            const float f[3] = { 0.30f, 0.55f, 0.80f };
+            for (int nd = 0; nd < 3; ++nd)
+            {
+                const juce::String c = juce::String::charToString ((juce::juce_wchar) ('a' + nd));
+                setP (p, "tm_f_1_" + c, f[nd]);
+                setP (p, "tm_bw_1_" + c, 0.1f);
+                setP (p, "tm_amp_1_" + c, 1.0f);
+            }
+            m.beginBlock (256); m.reset();
+            for (int i = 0; i < 4096; ++i) { in[M291::In_SigAll] = 0.0f; m.tick (in, out); }
+            const int outs[3] = { M291::Out_A, M291::Out_B, M291::Out_C };
+            for (int nd = 0; nd < 3; ++nd)
+            {
+                const double got = spectrumPeak (outs[nd], 8), want = M291::freqHz (f[nd]);
+                std::printf ("  node %c peak %.0f Hz (nominal %.0f Hz)\n", 'A' + nd, got, want);
+                if (std::fabs (got - want) / want > 0.3) ok = false;
+            }
+        }
+        // play: the morph walks from stage 1 to stage 2 over the stage time
+        {
+            setP (p, "tm_f_1_a", 0.2f); setP (p, "tm_f_2_a", 0.9f);
+            setP (p, "tm_time_1", 0.5f);                                       // ~0.3 s
+            setP (p, "tm_play", 1.0f);
+            m.beginBlock (256); m.reset();
+            const float p0 = m.position.load();
+            for (int i = 0; i < (int) (SR * 0.25); ++i) { in[M291::In_SigAll] = 0.0f; m.tick (in, out); }
+            const float p1 = m.position.load();
+            for (int i = 0; i < (int) (SR * 1.0); ++i) { in[M291::In_SigAll] = 0.0f; m.tick (in, out); }
+            const float p2 = m.position.load();
+            std::printf ("  morph position: %.2f -> %.2f after 0.25 s -> %.2f after 1.25 s (0..8 stages)\n", p0, p1, p2);
+            if (! (p1 > p0 + 0.05f) || ! (p2 > p1)) ok = false;
+            setP (p, "tm_play", 0.0f);
+        }
+        // solo sends only the selected node to "all"; the two all jacks are bridged
+        {
+            setP (p, "tm_solo", 1.0f); setP (p, "tm_node", 0.0f);
+            m.beginBlock (256); m.reset();
+            double diff = 0.0;
+            juce::Random rng (3);
+            for (int i = 0; i < 4000; ++i)
+            {
+                in[M291::In_SigAll] = 3.0f * (rng.nextFloat() * 2.0f - 1.0f);
+                m.tick (in, out);
+                diff += std::fabs (out[M291::Out_All1] - out[M291::Out_All2]);
+            }
+            std::printf ("  all jacks bridged under solo: total difference %.1e\n", diff);
+            if (diff > 1.0e-4) ok = false;
+            setP (p, "tm_solo", 0.0f);
+        }
+    }
+
+    // ---- 3i. SC-666 oscilloscope ----
+    {
+        std::printf ("SC-666 OSCILLOSCOPE\n");
+        WcProcessor p;
+        p.prepareToPlay (SR, 256);
+        auto& s = *p.rack.m666 (0);
+        float in[48] {}, out[48] {};
+        const juce::String pre (prefix666 (0));
+        setP (p, pre + "power", 1.0f);
+        setP (p, pre + "src", 0.0f);                                           // INT
+        setP (p, pre + "mode", 0.0f);                                          // AUTO
+        setP (p, pre + "coupling", 1.0f);                                      // DC
+        setP (p, pre + "level", 0.0f);
+        setP (p, pre + "time", 0.5f);
+        // a 100 Hz sine on A: frames arrive, the sweep ramps, and A passes through untouched
+        {
+            s.beginBlock (256); s.reset();
+            M666::Frame fr; int seq = -1; int frames = 0;
+            double sweepMin = 1e9, sweepMax = -1e9, thruErr = 0.0;
+            for (int i = 0; i < (int) (SR * 0.8); ++i)
+            {
+                const float v = 5.0f * std::sin (2.0 * 3.14159265358979 * 100.0 * i / SR);
+                in[M666::In_A] = v;
+                s.tick (in, out);
+                thruErr += std::fabs (out[M666::Out_AThru] - v);
+                sweepMin = std::min (sweepMin, (double) out[M666::Out_Sweep]);
+                sweepMax = std::max (sweepMax, (double) out[M666::Out_Sweep]);
+                if (s.latest (fr, seq)) ++frames;
+            }
+            std::printf ("  frames in 0.8 s: %d   sweep %.1f .. %.1f V   A thru error %.1e   points %d\n",
+                         frames, sweepMin, sweepMax, thruErr, fr.n);
+            if (frames < 2 || fr.n < 16 || thruErr > 1.0e-3) ok = false;
+            if (sweepMax < 9.0 || sweepMin > 0.5) ok = false;
+            // the captured trace must carry the sine, not silence
+            float lo = 1e9f, hi = -1e9f;
+            for (int i = 0; i < fr.n; ++i) { lo = std::min (lo, fr.a[i]); hi = std::max (hi, fr.a[i]); }
+            std::printf ("  trace A spans %.2f .. %.2f\n", lo, hi);
+            if (hi - lo < 0.2f) ok = false;
+        }
+        // GND coupling parks the trace, power off stops the frames
+        {
+            setP (p, pre + "coupling", 2.0f);                                  // GND
+            s.beginBlock (256);
+            M666::Frame fr; int seq = -1;
+            for (int i = 0; i < (int) (SR * 0.4); ++i)
+            {
+                in[M666::In_A] = 5.0f * std::sin (2.0 * 3.14159265358979 * 100.0 * i / SR);
+                s.tick (in, out);
+                s.latest (fr, seq);
+            }
+            float lo = 1e9f, hi = -1e9f;
+            for (int i = 0; i < fr.n; ++i) { lo = std::min (lo, fr.a[i]); hi = std::max (hi, fr.a[i]); }
+            std::printf ("  GND coupling: trace spans %.3f .. %.3f (flat)\n", lo, hi);
+            if (fr.n > 0 && hi - lo > 0.02f) ok = false;
+            setP (p, pre + "coupling", 1.0f);
+        }
+        // four independent instances
+        {
+            int n = 0;
+            for (int i = 0; i < kMax666; ++i) if (p.rack.m666 (i) != nullptr) ++n;
+            std::printf ("  instances available: %d\n", n);
+            if (n != 4) ok = false;
+        }
+    }
+
+    // ---- 3j. licensing: only a signed key file unlocks the rack ----
+    {
+        std::printf ("LICENSE\n");
+        auto demo = [] (const juce::String& blob, const char* what)
+        {
+            const auto l = wc::License::validate (blob);
+            std::printf ("  %-28s -> %s\n", what, l.licensed() ? "LICENSED (wrong!)" : "demo");
+            return ! l.licensed();
+        };
+        if (! demo ("", "empty")) ok = false;
+        if (! demo ("hello", "not a key file")) ok = false;
+        if (! demo ("name=Someone\nver=1\nsig=00\n", "zero signature")) ok = false;
+        if (! demo ("name=Someone\nemail=a@b.c\norder=X\nissued=20260101\nver=1\n"
+                    "sig=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n", "made-up signature")) ok = false;
+        // a key file signed with a key that is not Calabi Yau's must not validate either
+        {
+            juce::RSAKey pub, priv;
+            juce::RSAKey::createKeyPair (pub, priv, 512);
+            const auto blob = wc::License::makeKeyFile ("Impostor", "x@y.z", "NONE", priv.toString());
+            if (! demo (blob, "signed with another key")) ok = false;
+        }
+        std::printf ("  demo mode allows %d oscillators and no preset load / save\n", wc::License::kDemoMaxOscillators);
     }
 
     // ---- 4. CPU ----

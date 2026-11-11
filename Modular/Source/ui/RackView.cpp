@@ -11,6 +11,10 @@
 #include "../modules/M218.h"
 #include "../modules/M250.h"
 #include "../modules/M252.h"
+#include "../modules/M267.h"
+#include "../modules/M291.h"
+#include "../modules/M666.h"
+#include "WcData.h"
 
 namespace wc::ui
 {
@@ -383,16 +387,22 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                 {
                     b = std::make_unique<PushButton> (nullptr, id == "set" ? "Jump & loop: set the loop stage, then the jump-to stage, then the count (centre knob)"
                                                                  : id == "vset" ? "Voltage set 1 / 2 (the outer knobs edit the selected set)"
-                                                                 : "Programs the stage selected with the centre knob");
+                                                                 : id == "editbtn" ? "Edit mode: the switches below program the stage picked with the centre knob"
+                                                                 : id == "addrbtn" ? "Stage addressing: off / strobed / continuous"
+                                                                 : id == "remote" ? "Remote enable (preset manager)"
+                                                                 : "Edit mode: programs the stage selected with the centre knob");
                     b->onPress = [this, id]
                     {
                         auto raw = [this] (const juce::String& pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
                         auto put = [this] (const juce::String& pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
                         const juce::String st = "_" + juce::String ((int) std::lround (raw ("edit")));
                         auto cycle = [&] (const juce::String& pid, int n) { put (pid, (float) (((int) std::lround (raw (pid)) + 1) % n)); };
+                        if (id == "editbtn") { put ("editmode", raw ("editmode") > 0.5f ? 0.0f : 1.0f); repaint(); return; }
+                        // the switches program a stage only in edit mode (the voltage and time knobs always work)
+                        if (raw ("editmode") < 0.5f && id != "vset" && id != "remote" && id != "addrbtn") return;
                         if (id == "tq" || id == "ti" || id == "vq" || id == "vi" || id == "p1" || id == "p2" || id == "text" || id == "vext" || id == "fix")
                             put (id + st, raw (id + st) > 0.5f ? 0.0f : 1.0f);
-                        else if (id == "trng") cycle ("trng" + st, 3);
+                        else if (id == "trng") cycle ("trng" + st, 4);
                         else if (id == "vrng") cycle ("vrng" + st, 6);
                         else if (id == "mode") cycle ("mode" + st, 4);
                         else if (id == "vset") put ("set", raw ("set") > 0.5f ? 0.0f : 1.0f);
@@ -422,6 +432,40 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
                     b->onPress = [this, id] { action252 (id); };
                 }
             }
+            else if (type == MT_291)
+            {
+                b = std::make_unique<PushButton> (nullptr, id == "node" ? "Node: which filter (A / B / C) the encoders edit"
+                                                             : id == "play" ? "Stop / play: morph through the eight stages"
+                                                             : id == "editsel" ? "Edit select: step to the next stage to program"
+                                                             : id == "modtype" ? "Modulation destination: a.m. / b.w. / f.m."
+                                                             : id == "solo" ? "Solo: only the selected node reaches the 'all' outputs"
+                                                             : "Remote enable (preset manager)");
+                b->onPress = [this, id]
+                {
+                    auto raw = [this] (const char* pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+                    auto put = [this] (const char* pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                    if (id == "node") put ("node", (float) (((int) std::lround (raw ("node")) + 1) % 3));
+                    else if (id == "play") put ("play", raw ("play") > 0.5f ? 0.0f : 1.0f);
+                    else if (id == "editsel") put ("edit", (float) ((int) std::lround (raw ("edit")) % 8 + 1));
+                    else if (id == "modtype") put ("modtype", (float) (((int) std::lround (raw ("modtype")) + 1) % 3));
+                    else if (id == "solo") put ("solo", raw ("solo") > 0.5f ? 0.0f : 1.0f);
+                    else if (id == "remote") put ("remote", raw ("remote") > 0.5f ? 0.0f : 1.0f);
+                    rebindDynamic();
+                    repaint();
+                };
+            }
+            else if (type == MT_267)
+            {
+                b = std::make_unique<PushButton> (nullptr, id == "remote" ? "Remote enable (preset manager)" : "Mod type: amplitude / frequency / bandwidth");
+                b->onPress = [this, id]
+                {
+                    auto raw = [this] (const juce::String& pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+                    auto put = [this] (const juce::String& pid, float v) { if (auto* p = proc.apvts.getParameter (prefix + pid)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                    if (id == "remote") put ("remote", raw ("remote") > 0.5f ? 0.0f : 1.0f);
+                    else put (id, (float) (((int) std::lround (raw (id)) + 1) % 3));
+                    repaint();
+                };
+            }
             else if (type == MT_264)
                 b = std::make_unique<PushButton> (nullptr, "press to auto tune / hold to initial tune (the plugin's oscillators never drift)");
             if (b == nullptr) continue;
@@ -437,6 +481,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             fk->getProperties().set ("style", c.style == CtrlStyle::BigKnob ? 0 : (c.style == CtrlStyle::Knob ? 1 : 2));
             fk->getProperties().set ("cap", (juce::int64) c.colour);
             fk->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
+            fk->setScrollWheelEnabled (false);
             fk->setRange (0.0, 1.0);
             fk->setValue (juce::String (c.suffix) == "@phase" ? 0.5 : 0.0, juce::dontSendNotification);
             fk->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
@@ -450,7 +495,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             freeKnobs[nm] = std::move (fk);
             continue;
         }
-        auto* param = proc.apvts.getParameter (prefix + c.suffix);
+        auto* param = proc.apvts.getParameter (resolveId (c.suffix));
         if (param != nullptr && c.style == CtrlStyle::Button)
         {
             auto b = std::make_unique<ParamButton> (*param);
@@ -478,13 +523,15 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             auto f = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::NoTextBox);
             const int len = c.scale2 != nullptr ? juce::String (c.scale2).getIntValue() : 120;
             f->setBounds ((int) c.x - 13, (int) c.y - len / 2, 26, len);
+            f->setScrollWheelEnabled (false);
             f->setPopupDisplayEnabled (true, true, nullptr);
             f->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
             f->setTooltip (param->getName (64));
             addAndMakeVisible (*f);
-            attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, prefix + c.suffix, *f));
+            attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, resolveId (c.suffix), *f));
             sliders.push_back (std::move (f));
             sliderIds.push_back (c.suffix);
+            boundIds.push_back (resolveId (c.suffix));
             continue;
         }
         auto s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
@@ -493,13 +540,15 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         s->getProperties().set ("cap", (juce::int64) c.colour);
         s->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
         s->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
+        s->setScrollWheelEnabled (false);
         s->setPopupDisplayEnabled (true, true, nullptr);
         s->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
         s->setTooltip (param->getName (64));
         addAndMakeVisible (*s);
-        attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, prefix + c.suffix, *s));
+        attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, resolveId (c.suffix), *s));
         sliders.push_back (std::move (s));
         sliderIds.push_back (c.suffix);
+        boundIds.push_back (resolveId (c.suffix));
     }
     int nIn = 0, nOut = 0;
     for (auto& j : spec.jacks)
@@ -555,6 +604,33 @@ static void drawArrowLine (juce::Graphics& g, const LineSpec& l)
         juce::Path head;
         head.addArrow (juce::Line<float> (line.getPointAlongLineProportionally (0.8f), line.getEnd()), 0.0f, 7.0f, 7.0f);
         g.fillPath (head);
+    }
+}
+
+// Controls written with a placeholder follow the panel's edit selectors:
+//   {e} = stage being edited, {n} = node a/b/c (291), {s} = voltage set 1/2 (250)
+juce::String ModulePanel::resolveId (const juce::String& suffix) const
+{
+    juce::String id = suffix;
+    auto raw = [this] (const char* pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+    if (id.contains ("{e}")) id = id.replace ("{e}", juce::String ((int) std::lround (raw ("edit"))));
+    if (id.contains ("{n}")) id = id.replace ("{n}", juce::String::charToString ((juce::juce_wchar) ('a' + juce::jlimit (0, 2, (int) std::lround (raw ("node"))))));
+    if (id.contains ("{s}")) id = id.replace ("{s}", juce::String (1 + juce::jlimit (0, 1, (int) std::lround (raw ("set")))));
+    return prefix + id;
+}
+
+void ModulePanel::rebindDynamic()
+{
+    for (size_t i = 0; i < sliders.size(); ++i)
+    {
+        if (! sliderIds[i].containsChar ('{')) continue;
+        const auto id = resolveId (sliderIds[i]);
+        if (id == boundIds[i]) continue;
+        boundIds[i] = id;
+        attachments[i].reset();
+        if (proc.apvts.getParameter (id) == nullptr) continue;
+        attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *sliders[i]);
+        sliders[i]->setTooltip (proc.apvts.getParameter (id)->getName (64));
     }
 }
 
@@ -716,18 +792,155 @@ void ModulePanel::paint252 (juce::Graphics& g)
     seg7 (spec.sections[5], juce::String ((int) std::lround (proc.apvts.getRawParameterValue (prefix + "bpm")->load())));
 }
 
+// The maker's mark engraved in the aluminium at the foot of every panel:
+// "CALABI YAU  (isologo)  <model>", cut into the metal rather than printed.
+static void drawEngravedFooter (juce::Graphics& g, const ModuleSpec& spec, float panelW)
+{
+    static juce::Image logo = juce::ImageCache::getFromMemory (WcData::isologo_png, WcData::isologo_pngSize);
+    const float y = spec.footY > 0.0f ? spec.footY : spec.height - 9.0f;
+    const float h = juce::jlimit (9.0f, 15.0f, panelW * 0.016f + 8.0f);
+    const auto f = WcLook::title (h * 0.82f);
+    const juce::String left ("CALABI YAU"), right (spec.engr);
+    const float lw = juce::GlyphArrangement::getStringWidth (f, left), rw = juce::GlyphArrangement::getStringWidth (f, right);
+    const float gapW = h * 0.75f, markW = h * 1.25f;
+    const float total = lw + gapW + markW + gapW + rw;
+    float x = (panelW - total) * 0.5f;
+    auto cut = [&] (const juce::String& t, float tx, float tw)
+    {
+        // engraving: a dark bite above, a bright highlight below, then the metal-coloured letter
+        g.setColour (juce::Colours::black.withAlpha (0.38f));
+        g.setFont (f);
+        g.drawText (t, juce::Rectangle<float> (tx, y - h * 0.5f - 0.7f, tw, h), juce::Justification::centred, false);
+        g.setColour (juce::Colours::white.withAlpha (skin::neon() ? 0.20f : 0.55f));
+        g.drawText (t, juce::Rectangle<float> (tx, y - h * 0.5f + 0.9f, tw, h), juce::Justification::centred, false);
+        g.setColour (skin::engrave());
+        g.drawText (t, juce::Rectangle<float> (tx, y - h * 0.5f, tw, h), juce::Justification::centred, false);
+    };
+    cut (left, x, lw);
+    x += lw + gapW;
+    const auto mark = juce::Rectangle<float> (x, y - markW * 0.5f, markW, markW);
+    if (logo.isValid())
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.30f));
+        g.drawEllipse (mark.translated (0.0f, -0.7f).reduced (0.4f), 0.9f);
+        g.setOpacity (skin::neon() ? 0.85f : 0.62f);
+        g.drawImage (logo, mark, juce::RectanglePlacement::centred);
+        g.setOpacity (1.0f);
+    }
+    else
+    {
+        g.setColour (skin::engrave());
+        g.drawEllipse (mark.reduced (1.0f), 1.0f);
+    }
+    x += markW + gapW;
+    cut (right, x, rw);
+}
+
+// --------------------------------------------------------------------------------------------
+// SC-666: the cathode ray tube. The graticule is 10 x 8 divisions; the trace is drawn with a soft
+// outer glow and a bright core, the way phosphor looks, and the beam intensity follows the Z axis.
+// --------------------------------------------------------------------------------------------
+void ModulePanel::paint666 (juce::Graphics& g)
+{
+    const auto& sc = spec.sections[0];
+    const auto face = juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h);
+    auto raw = [this] (const char* pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+    const bool on = raw ("power") > 0.5f;
+    const float intensity = raw ("intensity"), focus = raw ("focus");
+    // bezel and glass
+    g.setColour (juce::Colour (0xff17181c));
+    g.fillEllipse (face.expanded (face.getWidth() * 0.055f));
+    g.setColour (juce::Colour (0xff3a3d44));
+    g.drawEllipse (face.expanded (face.getWidth() * 0.035f), 2.5f);
+    juce::ColourGradient glass (juce::Colour (on ? 0xff0c2a16 : 0xff121416), face.getCentreX(), face.getCentreY(),
+                                juce::Colour (on ? 0xff041006 : 0xff0a0b0d), face.getX(), face.getBottom(), true);
+    g.setGradientFill (glass);
+    g.fillEllipse (face);
+    juce::Graphics::ScopedSaveState ss (g);
+    juce::Path clip; clip.addEllipse (face);
+    g.reduceClipRegion (clip);
+    // graticule
+    const auto grid = face.reduced (face.getWidth() * 0.085f);
+    g.setColour (juce::Colour (0xff2f7a4a).withAlpha (0.32f));
+    for (int i = 0; i <= 10; ++i)
+    {
+        const float x = grid.getX() + grid.getWidth() * (float) i / 10.0f;
+        g.drawLine (x, grid.getY(), x, grid.getBottom(), i == 5 ? 1.1f : 0.6f);
+    }
+    for (int i = 0; i <= 8; ++i)
+    {
+        const float y = grid.getY() + grid.getHeight() * (float) i / 8.0f;
+        g.drawLine (grid.getX(), y, grid.getRight(), y, i == 4 ? 1.1f : 0.6f);
+    }
+    if (! on || frame666 == nullptr || frame666->n <= 1) return;
+    const auto& fr = *frame666;
+    const float va = wc::M666::voltsPerDiv (raw ("va")), vb = wc::M666::voltsPerDiv (raw ("vb")), xg = wc::M666::voltsPerDiv (raw ("xgain"));
+    auto trace = [&] (bool second)
+    {
+        juce::Path p;
+        bool started = false;
+        for (int i = 0; i < fr.n; ++i)
+        {
+            const float sig = second ? fr.b[i] : fr.a[i];
+            const float div = second ? vb : va;
+            float x;
+            if (fr.xy && ! fr.dual) x = grid.getCentreX() + grid.getWidth() * dsp::clampf (fr.x[i] / (xg * 10.0f), -0.5f, 0.5f);
+            else x = grid.getX() + grid.getWidth() * dsp::clampf (fr.x[i], -0.05f, 1.05f);
+            const float y = grid.getCentreY() - grid.getHeight() * dsp::clampf (sig / (div * 8.0f), -0.6f, 0.6f);
+            if (! started) { p.startNewSubPath (x, y); started = true; }
+            else p.lineTo (x, y);
+        }
+        if (! started) return;
+        const juce::Colour core = second ? juce::Colour (0xffb8ff6a) : juce::Colour (0xff6fff9a);
+        const float glow = 0.35f + 0.5f * intensity;
+        const float w = 1.0f + 2.6f * (1.0f - focus);
+        g.setColour (core.withAlpha (0.10f * glow));
+        g.strokePath (p, juce::PathStrokeType (w * 4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (core.withAlpha (0.28f * glow));
+        g.strokePath (p, juce::PathStrokeType (w * 2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (core.withAlpha (juce::jlimit (0.3f, 1.0f, 0.55f + 0.45f * intensity)));
+        g.strokePath (p, juce::PathStrokeType (w, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    };
+    trace (false);
+    if (fr.dual) trace (true);
+}
+
+// --------------------------------------------------------------------------------------------
+// 291e: the alphanumeric display - stage, node and the exact values being edited
+// --------------------------------------------------------------------------------------------
+void ModulePanel::paint291 (juce::Graphics& g)
+{
+    const auto& sc = spec.sections[0];
+    auto rr = juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h);
+    g.setColour (juce::Colour (0xff6f8c76)); g.fillRoundedRectangle (rr, 3.0f);
+    g.setColour (juce::Colour (0xff2b3a2f)); g.drawRoundedRectangle (rr, 3.0f, 1.2f);
+    auto raw = [this] (const juce::String& pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+    const int e = juce::jlimit (1, 8, (int) std::lround (raw ("edit")));
+    const int nd = juce::jlimit (0, 2, (int) std::lround (raw ("node")));
+    const juce::String c = juce::String::charToString ((juce::juce_wchar) ('a' + nd));
+    const juce::String sf (e);
+    const float hz = wc::M291::freqHz (raw ("f_" + sf + "_" + c));
+    const float bw = raw ("bw_" + sf + "_" + c) * 100.0f, am = raw ("amp_" + sf + "_" + c) * 100.0f;
+    const float tt = wc::M291::stageTime (raw ("time_" + sf));
+    g.setColour (juce::Colour (0xff17231a));
+    g.setFont (WcLook::title (rr.getHeight() * 0.33f));
+    g.drawText ("ST" + sf + " " + c.toUpperCase() + "   " + (hz < 1000.0f ? juce::String (hz, 0) + "Hz" : juce::String (hz / 1000.0f, 2) + "kHz"),
+                rr.reduced (6.0f, 2.0f).removeFromTop (rr.getHeight() * 0.5f), juce::Justification::centredLeft);
+    g.setFont (WcLook::label (rr.getHeight() * 0.28f));
+    g.drawText ("BW" + juce::String (bw, 0) + "  AM" + juce::String (am, 0) + "  T" + (tt < 1.0f ? juce::String (tt * 1000.0f, 0) + "ms" : juce::String (tt, 2) + "s"),
+                rr.reduced (6.0f, 2.0f).removeFromBottom (rr.getHeight() * 0.5f), juce::Justification::centredLeft);
+}
+
 void ModulePanel::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     const bool silk = ! spec.lines.empty();        // modules drawn from a photo layout
-    gInk = spec.ink != 0 ? juce::Colour (spec.ink) : col::ink;
-    if (spec.bg != 0)
+    gInk = skin::ink (spec.ink);
     {
-        const juce::Colour b (spec.bg);
-        g.setGradientFill (juce::ColourGradient (b.brighter (0.15f), 0, 0, b.darker (0.25f), 0, r.getHeight(), false));
+        const auto hi = spec.bg != 0 || silk ? skin::panelHi (spec.bg) : (skin::neon() ? juce::Colour (0xff221a52) : col::panelHi);
+        const auto lo = spec.bg != 0 || silk ? skin::panelLo (spec.bg) : (skin::neon() ? juce::Colour (0xff0c0a22) : col::panelLo);
+        g.setGradientFill (juce::ColourGradient (hi, 0, 0, lo, 0, r.getHeight(), false));
     }
-    else   // anodised aluminium
-        g.setGradientFill (juce::ColourGradient (silk ? juce::Colour (0xffe3e5e8) : col::panelHi, 0, 0, silk ? juce::Colour (0xffc7cad0) : col::panelLo, 0, r.getHeight(), false));
     g.fillRect (r);
     if (typeOfInst (inst) == MT_252)
     {
@@ -775,9 +988,10 @@ void ModulePanel::paint (juce::Graphics& g)
         }
     }
     juce::Random rnd (inst * 977 + 3);
+    const float brush = skin::neon() ? 0.35f : 1.0f;
     for (int y = 0; y < getHeight(); y += 2)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.03f + 0.04f * rnd.nextFloat()));
+        g.setColour (juce::Colours::white.withAlpha (brush * (0.03f + 0.04f * rnd.nextFloat())));
         g.drawHorizontalLine (y, 0.0f, r.getWidth());
     }
     g.setColour (juce::Colours::black.withAlpha (0.45f));
@@ -795,8 +1009,6 @@ void ModulePanel::paint (juce::Graphics& g)
     {
         // our own modules (MIDI, Output): title, footer and rounded section frames
         drawItalic (g, spec.name, { 20.0f, 6.0f, r.getWidth() - 50.0f, 22.0f }, juce::Justification::centred, WcLook::title (15.0f), gInk);
-        drawItalic (g, juce::String ("CALABI YAU   ") + spec.model, { 20.0f, r.getHeight() - 20.0f, r.getWidth() - 40.0f, 14.0f },
-                    juce::Justification::centred, WcLook::title (9.5f), gInk);
         for (auto& sct : spec.sections)
         {
             auto sr = juce::Rectangle<float> (sct.x, sct.y, sct.w, sct.h);
@@ -807,7 +1019,7 @@ void ModulePanel::paint (juce::Graphics& g)
                 const auto f = WcLook::label (10.0f);
                 const float tw = juce::GlyphArrangement::getStringWidth (f, sct.title) + 12.0f;
                 auto tr = juce::Rectangle<float> (tw, 13.0f).withCentre ({ sr.getCentreX(), sr.getY() });
-                g.setGradientFill (juce::ColourGradient (col::panelHi, 0, 0, col::panelLo, 0, r.getHeight(), false));
+                g.setGradientFill (juce::ColourGradient (skin::neon() ? juce::Colour (0xff221a52) : col::panelHi, 0, 0, skin::neon() ? juce::Colour (0xff0c0a22) : col::panelLo, 0, r.getHeight(), false));
                 g.fillRect (tr);
                 drawItalic (g, sct.title, tr, juce::Justification::centred, f, gInk);
             }
@@ -832,9 +1044,9 @@ void ModulePanel::paint (juce::Graphics& g)
             g.setColour (gInk);
             g.drawEllipse (t.x - 8.0f, t.y - 8.0f, 16.0f, 16.0f, 1.2f);
         }
-        if (t.style == 4)   // title strip: white band with blue lettering
+        if (t.style == 4)   // title strip: a light band with the panel's lettering on it
         {
-            g.setColour (juce::Colour (0xfff2f3f5));
+            g.setColour (skin::neon() ? juce::Colour (0xff2b1f66) : juce::Colour (0xfff2f3f5));
             g.fillRect (juce::Rectangle<float> (4.0f, t.y - 8.0f, r.getWidth() - 8.0f, 16.0f));
         }
         drawItalic (g, txt, box, j, f, gInk);
@@ -858,6 +1070,8 @@ void ModulePanel::paint (juce::Graphics& g)
     for (auto& j : spec.jacks)
         if (juce::String (j.label).isNotEmpty())
             drawItalic (g, j.label, { j.x - 30.0f, j.y + 11.0f, 60.0f, 12.0f }, juce::Justification::centred, WcLook::label (9.0f), gInk);
+
+    drawEngravedFooter (g, spec, r.getWidth());
 }
 
 void ModulePanel::paintOverChildren (juce::Graphics& g)
@@ -879,22 +1093,53 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
     for (size_t i = 0; i < spec.leds.size(); ++i)
         led (spec.leds[i].x, spec.leds[i].y, juce::Colour (spec.leds[i].colour), i < ledCache.size() ? ledCache[i] : 0.0f);
     if (typeOfInst (inst) == MT_252) paint252 (g);
+    if (typeOfInst (inst) == MT_666 && ! spec.sections.empty()) paint666 (g);
+    if (typeOfInst (inst) == MT_291 && ! spec.sections.empty()) paint291 (g);
     if (typeOfInst (inst) == MT_250 && spec.sections.size() >= 2)
     {
-        auto raw = [this] (const char* pid) { return (int) std::lround (proc.apvts.getRawParameterValue (prefix + pid)->load()); };
-        const int le = raw ("loopend"), lt = raw ("loopto"), lc = raw ("loops"), step = raw ("setstep");
+        auto raw = [this] (const juce::String& pid) { auto* v = proc.apvts.getRawParameterValue (prefix + pid); return v != nullptr ? v->load() : 0.0f; };
+        auto ival = [&] (const juce::String& pid) { return (int) std::lround (raw (pid)); };
+        const int le = ival ("loopend"), lt = ival ("loopto"), lc = ival ("loops"), step = ival ("setstep");
+        const bool editing = raw ("editmode") > 0.5f;
+        const int st = juce::jlimit (1, 16, ival ("edit"));
+        const juce::String sf ("_" + juce::String (st));
         for (int k = 0; k < 2; ++k)
         {
             const auto& sc = spec.sections[(size_t) k];
             auto rr = juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h);
-            g.setColour (juce::Colour (0xff9fc4e8)); g.fillRoundedRectangle (rr, 2.0f);
+            g.setColour (juce::Colour (editing ? 0xffc9e4a8 : 0xff9fc4e8)); g.fillRoundedRectangle (rr, 2.0f);
             g.setColour (juce::Colour (0xff3a5a80)); g.drawRoundedRectangle (rr, 2.0f, 1.0f);
-            juce::String txt = k == 0 ? (le > 0 ? juce::String (le) + ">" + juce::String (lt) : juce::String ("--"))
-                                      : (le > 0 ? (lc == 0 ? juce::String ("oo") : juce::String (lc) + "x") : juce::String ("--"));
-            if (step == 1 && k == 0) txt = "to?";
-            if (step == 2 && k == 1) txt = "n?";
+            juce::String txt;
+            if (editing)
+            {
+                if (k == 0) txt = "S" + juce::String (st);
+                else
+                {
+                    const int rng = juce::jlimit (0, 3, ival ("trng" + sf));
+                    if (rng == 3)
+                    {
+                        static const char* notes[7] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4" };
+                        txt = notes[juce::jlimit (0, 6, (int) std::lround (raw ("t" + sf) * 6.0f))];
+                    }
+                    else
+                    {
+                        float lo, hi;
+                        wc::M250::timeRange (rng, lo, hi);
+                        float secs = lo * std::pow (hi / lo, raw ("t" + sf));
+                        if (raw ("tq" + sf) > 0.5f) secs = 0.01f * std::exp2 ((float) juce::jlimit (0, 9, (int) std::lround (std::log2 (secs / 0.01f))));
+                        txt = secs < 1.0f ? juce::String (secs * 1000.0f, 0) + "m" : juce::String (secs, 2) + "s";
+                    }
+                }
+            }
+            else
+            {
+                txt = k == 0 ? (le > 0 ? juce::String (le) + ">" + juce::String (lt) : juce::String ("--"))
+                             : (le > 0 ? (lc == 0 ? juce::String ("oo") : juce::String (lc) + "x") : juce::String ("--"));
+                if (step == 1 && k == 0) txt = "to?";
+                if (step == 2 && k == 1) txt = "n?";
+            }
             g.setColour (juce::Colour (0xff0d1f3a));
-            g.setFont (WcLook::title (12.0f));
+            g.setFont (WcLook::title (txt.length() > 4 ? 9.5f : 12.0f));
             g.drawText (txt, rr, juce::Justification::centred);
         }
     }
@@ -935,22 +1180,23 @@ void ModulePanel::updateLeds()
         euclid252 = eu; patt252 = pt;
         for (auto& sc : spec.sections) repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (3.0f).toNearestInt());
     }
+    rebindDynamic();
     if (typeOfInst (inst) == MT_250)
-    {
-        const int set = (int) std::lround (proc.apvts.getRawParameterValue (prefix + "set")->load());
-        if (set != set250)
-        {
-            set250 = set;
-            for (size_t i = 0; i < sliders.size(); ++i)
-                if (sliderIds[i].startsWith ("v1_"))
-                {
-                    const juce::String id = prefix + (set == 0 ? "v1_" : "v2_") + sliderIds[i].fromFirstOccurrenceOf ("_", false, false);
-                    attachments[i].reset();
-                    attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *sliders[i]);
-                    if (auto* p = proc.apvts.getParameter (id)) sliders[i]->setTooltip (p->getName (64));
-                }
-        }
         for (auto& sc : spec.sections) repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (2.0f).toNearestInt());
+    if (typeOfInst (inst) == MT_291 && ! spec.sections.empty())
+    {
+        const auto& sc = spec.sections[0];
+        repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (2.0f).toNearestInt());
+    }
+    if (typeOfInst (inst) == MT_666 && ! spec.sections.empty())
+    {
+        auto* m = proc.rack.m666 (subIndex (inst));
+        if (frame666 == nullptr) frame666 = std::make_unique<wc::M666::Frame>();
+        if (m->latest (*frame666, seq666))
+        {
+            const auto& sc = spec.sections[0];
+            repaint (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).expanded (4.0f).toNearestInt());
+        }
     }
     const auto type = typeOfInst (inst);
     if (! spec.leds.empty())
@@ -1048,6 +1294,15 @@ void ModulePanel::mouseDown (const juce::MouseEvent& e)
             repaint();
         }
         return;
+    }
+    if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_666 && ! spec.sections.empty())
+    {
+        const auto& sc = spec.sections[0];
+        if (juce::Rectangle<float> (sc.x, sc.y, sc.w, sc.h).contains (e.position))
+        {
+            proc.rack.m666 (subIndex (inst))->rearm.store (true);
+            return;
+        }
     }
     if (! e.mods.isPopupMenu() && typeOfInst (inst) == MT_242)
     {
@@ -1169,6 +1424,16 @@ void RackView::rebuild()
     cables.toFront (false);
     setZoom (zoom);
     if (auto* parent = getParentComponent()) parent->resized();
+}
+
+void RackView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    if (onZoomGesture != nullptr && (e.mods.isCtrlDown() || e.mods.isCommandDown()) && w.deltaY != 0.0f)
+    {
+        onZoomGesture (w.isReversed ? -w.deltaY : w.deltaY, e.position);
+        return;                                   // zoomed: the viewport must not scroll as well
+    }
+    Component::mouseWheelMove (e, w);             // otherwise it travels up to the viewport
 }
 
 void RackView::setZoom (float z)

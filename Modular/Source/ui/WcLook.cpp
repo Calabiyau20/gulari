@@ -3,6 +3,34 @@
 
 namespace wc::ui
 {
+namespace skin
+{
+int current = 0;
+// Neon Void: deep-space panels with electric violet frames and neon green lettering
+juce::Colour panelHi (juce::uint32 bg)
+{
+    if (! neon()) return bg != 0 ? juce::Colour (bg).brighter (0.15f) : juce::Colour (0xffe3e5e8);
+    return bg != 0 ? juce::Colour (bg).withMultipliedBrightness (0.35f).withMultipliedSaturation (1.4f) : juce::Colour (0xff221a52);
+}
+juce::Colour panelLo (juce::uint32 bg)
+{
+    if (! neon()) return bg != 0 ? juce::Colour (bg).darker (0.25f) : juce::Colour (0xffc7cad0);
+    return bg != 0 ? juce::Colour (bg).withMultipliedBrightness (0.18f).withMultipliedSaturation (1.4f) : juce::Colour (0xff0c0a22);
+}
+juce::Colour ink (juce::uint32 i)
+{
+    if (! neon()) return i != 0 ? juce::Colour (i) : col::ink;
+    return juce::Colour (0xff6ff0b4);
+}
+juce::Colour knobCap (juce::uint32 cap)
+{
+    if (! neon()) return juce::Colour (cap);
+    auto c = juce::Colour (cap);
+    return c.getBrightness() > 0.6f ? juce::Colour (0xff3b2f6e) : c.withMultipliedSaturation (1.3f);
+}
+juce::Colour engrave() { return neon() ? juce::Colour (0xffd8d2ea) : juce::Colour (0xff8d9097); }
+} // namespace skin
+
 juce::Colour cableColour (int index, bool banana)
 {
     static const juce::uint32 b[6] = { 0xffd8352a, 0xff1d1e22, 0xff2f6fd0, 0xffe7c234, 0xff2f9d55, 0xffeeeae2 };
@@ -50,7 +78,7 @@ WcLook::WcLook()
 void WcLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s)
 {
     const int style = (int) s.getProperties().getWithDefault ("style", 1);
-    const juce::Colour skirt ((juce::uint32) (juce::int64) s.getProperties().getWithDefault ("cap", (juce::int64) 0xff2c55b4));
+    const juce::Colour skirt (skin::knobCap ((juce::uint32) (juce::int64) s.getProperties().getWithDefault ("cap", (juce::int64) 0xff2c55b4)));
     const auto area = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
     const auto c = area.getCentre();
     const float kr = style == 0 ? 33.0f : (style == 1 ? 22.0f : 14.0f);       // skirt radius

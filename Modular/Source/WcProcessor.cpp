@@ -31,6 +31,7 @@ WcProcessor::WcProcessor()
       rack (apvts)
 {
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
+    license = wc::License::findAndValidate();
     loadBuiltinPatch (0);
 }
 
@@ -51,6 +52,9 @@ void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto bpm = pos->getBpm()) rack.m250()->hostBpm.store (*bpm, std::memory_order_relaxed);
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
     rack.beginBlock (n);
     auto* L = buffer.getWritePointer (0);
@@ -108,6 +112,7 @@ void WcProcessor::disconnectOutput (int inst, int outJack)
 void WcProcessor::setPresent (int inst, bool on)
 {
     if (! isRemovable (inst)) return;
+    if (on && ! canAddOscillator (inst)) return;      // demo mode: two oscillators
     present[(size_t) inst] = on;
     if (! on)
         cables.erase (std::remove_if (cables.begin(), cables.end(), [&] (const Cable& c) { return c.srcInst == inst || c.dstInst == inst; }), cables.end());
@@ -626,6 +631,13 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             if (s >= 0) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
         }
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
+    if (demo())   // demo mode keeps the first two oscillators of a patch and leaves the rest out
+    {
+        int osc = 0;
+        for (int i = 0; i < kNumInst; ++i)
+            if (present[(size_t) i] && (typeOfInst (i) == MT_259 || typeOfInst (i) == MT_258))
+                if (++osc > wc::License::kDemoMaxOscillators) present[(size_t) i] = false;
+    }
     cables.clear();
     for (auto ct : t.getChildWithName ("CABLES"))
     {
@@ -636,7 +648,7 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             si = oldSlot ((int) ct["si"]); di = oldSlot ((int) ct["di"]);
             if (version == 2 && di >= 0 && typeOfInst (di) == MT_281) dj = M281::inFromV2 (dj);   // 281 gained CYCLE inputs
         }
-        if (si >= 0 && di >= 0)
+        if (si >= 0 && di >= 0 && present[(size_t) si] && present[(size_t) di])
             cables.push_back ({ si, sj, di, dj, (int) ct["col"] });
     }
     colourCounter = (int) cables.size();
@@ -674,7 +686,7 @@ void WcProcessor::resetAll()
 
 void WcProcessor::loadPresetTree (const juce::ValueTree& t)
 {
-    if (! t.isValid()) return;
+    if (! t.isValid() || demo()) return;
     resetParams();
     rack.m252()->clearAll();
     auto pv = t.getChildWithName ("V");
@@ -725,10 +737,51 @@ void WcProcessor::marfLoad (int slot)
                     if (pr.hasProperty (rp->getParameterID())) rp->setValueNotifyingHost ((float) pr[rp->getParameterID()]);
 }
 
+// ------------------------------------------------------------------------------------------------
+// licensing: without a key file the rack holds two oscillators and keeps its presets to itself
+// ------------------------------------------------------------------------------------------------
+int WcProcessor::oscillatorsInRack() const
+{
+    int n = 0;
+    for (int i = 0; i < kNumInst; ++i)
+        if (present[(size_t) i] && (typeOfInst (i) == MT_259 || typeOfInst (i) == MT_258)) ++n;
+    return n;
+}
+
+bool WcProcessor::canAddOscillator (int inst) const
+{
+    if (! demo()) return true;
+    const auto t = typeOfInst (inst);
+    if (t != MT_259 && t != MT_258) return true;
+    return oscillatorsInRack() < wc::License::kDemoMaxOscillators;
+}
+
+void WcProcessor::recheckLicense (const juce::File& extra)
+{
+    license = wc::License::findAndValidate (extra);
+    sendChangeMessage();
+}
+
+void WcProcessor::loadFactoryAt (int index)
+{
+    if (demo() || factory.getNumChildren() == 0) return;
+    const int i = juce::jlimit (0, factory.getNumChildren() - 1, index);
+    factoryIndex = i;
+    loadPresetTree (factory.getChild (i));
+}
+
+void WcProcessor::stepFactory (int delta)
+{
+    if (demo() || factory.getNumChildren() == 0) return;
+    const int n = factory.getNumChildren();
+    loadFactoryAt (((factoryIndex < 0 ? (delta > 0 ? -1 : 0) : factoryIndex) + delta % n + n) % n);
+}
+
 void WcProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree root ("WCSTATE");
     root.setProperty ("zoom", uiZoom, nullptr);
+    root.setProperty ("skin", uiSkin, nullptr);
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (marfPresets.createCopy(), -1, nullptr);
@@ -742,7 +795,8 @@ void WcProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml == nullptr) return;
     auto root = juce::ValueTree::fromXml (*xml);
     if (! root.hasType ("WCSTATE")) return;
-    uiZoom = (float) root.getProperty ("zoom", 1.0f);
+    uiZoom = juce::jlimit (0.5f, 1.5f, (float) root.getProperty ("zoom", 1.0f));
+    uiSkin = juce::jlimit (0, 1, (int) root.getProperty ("skin", 0));
     auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid()) apvts.replaceState (params);
     patchFromTree (root.getChildWithName ("WCPATCH"));
@@ -762,6 +816,7 @@ juce::File WcProcessor::patchFolder() const
 
 bool WcProcessor::savePatchFile (const juce::File& f)
 {
+    if (demo()) return false;
     juce::ValueTree root ("WCSTATE");
     patchName = f.getFileNameWithoutExtension();
     root.addChild (apvts.copyState(), -1, nullptr);
@@ -773,6 +828,7 @@ bool WcProcessor::savePatchFile (const juce::File& f)
 
 bool WcProcessor::loadPatchFile (const juce::File& f)
 {
+    if (demo()) return false;
     auto xml = juce::XmlDocument::parse (f);
     if (xml == nullptr) return false;
     auto root = juce::ValueTree::fromXml (*xml);
