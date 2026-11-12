@@ -7,6 +7,25 @@ Este archivo junta lo que costó descubrir. Leerlo entero antes de empezar sale 
 redescubrirlo: casi todo lo que está acá se pagó con un bug en producción o con medio día de
 compilaciones.
 
+**Este repositorio es `Calabiyau20/gulari` y es público.** Dos plugins viven acá: **West Coast
+Modular** (el rack, `Modular/`) y **Synthgularity** (el sinte con oscilador granular). Por eso el
+directorio de build se llama `Synthgularity`.
+
+Como el repo es público, acá no va nada de la operación del negocio: ni cómo se emiten las
+licencias, ni qué productos están en camino, ni ninguna credencial. Eso está documentado aparte,
+en el repositorio privado de licencias. Lo único de licencias que corresponde acá es cómo las
+**valida** el plugin, que está más abajo y no es secreto: lleva solo la clave pública.
+
+### Los otros plugins de Calabi Yau
+
+Existen y comparten marca, manual de estilo y criterios de interfaz, pero cada uno tiene su propio
+repositorio y su propio contexto. Si el trabajo es sobre uno de ellos, este archivo no alcanza:
+**Calabi-Yau Resonator** y **The SingulariBass**.
+
+Lo que sí vale para todos: la interfaz sigue el manual de marca Calabi Yau (paleta Cosmos,
+Syncopate y Montserrat, marcos biselados), y **el isologo es siempre el PNG oficial, nunca el
+nombre escrito con una fuente**.
+
 ---
 
 ## Compilar y probar
