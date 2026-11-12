@@ -336,6 +336,12 @@ if(PG_BUILD_TESTS)
     target_compile_definitions(WcPresetGen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
     target_link_libraries(WcPresetGen PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
 
+    juce_add_console_app(WcPackGen PRODUCT_NAME "WcPackGen")
+    target_sources(WcPackGen PRIVATE Modular/tests/WcPackGen.cpp Modular/Source/WcParams.cpp Modular/Source/WcProcessor.cpp Modular/Source/WcLicense.cpp ${WC_DSP})
+    target_include_directories(WcPackGen PRIVATE Modular/Source)
+    target_compile_definitions(WcPackGen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 WC_HEADLESS=1 WC_NO_PLUGIN_ENTRY=1)
+    target_link_libraries(WcPackGen PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
+
     juce_add_console_app(WcUiSnapshot PRODUCT_NAME "WcUiSnapshot")
     target_sources(WcUiSnapshot PRIVATE Modular/tests/WcUiSnapshot.cpp ${WC_SOURCES})
     target_include_directories(WcUiSnapshot PRIVATE Modular/Source)
