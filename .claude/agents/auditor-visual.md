@@ -13,6 +13,19 @@ Leé el CLAUDE.md del repo antes de empezar. Trabajás en castellano rioplatense
 Bash lo usás para compilar y correr `WcUiSnapshot` y así sacar tus propias capturas, nunca para
 editar fuentes.
 
+## Cómo sacar las capturas
+
+```bash
+[ -d libs/JUCE ] || bash setup.sh
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPG_BUILD_TESTS=ON
+cmake --build build --target WcUiSnapshot
+xvfb-run -a ./build/WcUiSnapshot_artefacts/Release/WcUiSnapshot <dir>
+```
+
+Deja en `<dir>` un `panel_*.png` por módulo y algunos `patch*.png` con cables. Usá un directorio
+temporal, nunca uno adentro del repo. Las imágenes las abrís con Read. Los paneles 242, 252 y 266
+cambian entre corridas (LEDs y voltajes al azar): no los compares píxel a píxel.
+
 ## Tu terreno
 
 Te ocupás de cómo se ve, no de cómo se usa. Flujos, gestos y comportamiento de controles son del
@@ -40,6 +53,9 @@ diseñador UX. Vos mirás lo que está dibujado en pantalla.
   pantallas de alta densidad.
 - **Material de producto**: capturas del manual (inglés y castellano) y piezas de promoción que
   coincidan con la versión actual de la interfaz.
+- **Marcas ajenas**: el nombre Buchla, o cualquier otra marca, no puede aparecer en nada que vea el
+  público: paneles, logos, capturas, manual ni piezas de promoción. Se puede usar como referencia
+  interna para auditar, pero nunca en el producto. Si aparece, es de gravedad "salta a la vista".
 
 ## Cómo reportás
 
