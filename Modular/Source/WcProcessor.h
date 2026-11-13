@@ -5,7 +5,7 @@
 #include "rack/Rack.h"
 #include "WcLicense.h"
 
-class WcProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
+class WcProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster, private juce::Timer
 {
 public:
     WcProcessor();
@@ -80,6 +80,8 @@ public:
     // A mapped CC moves its parameter and goes no further (not to the MIDI module, not to the 218). While the
     // parameter's module is out of the rack the mapping sleeps: kept, and the CC goes on as if it were not there.
     // Waiting for a CC to learn is the editor's business; the processor only says which one came in last.
+    // processBlock touches no JUCE: it writes the raw value the modules read and marks the parameter; a timer here
+    // (it runs with the editor closed) passes it on to the parameter, the state tree, the knobs and the host.
     static bool isLearnableCc (int cc) noexcept { return cc >= 1 && cc <= 119 && cc != 6 && cc != 32 && cc != 38 && (cc < 98 || cc > 101); }
     // one to one: the parameter lets go of its old CC, and the CC of its old parameter (named in movedFrom).
     // false (and nothing changes) for a CC that cannot be learned or a parameter that does not exist.
@@ -93,6 +95,7 @@ public:
     void midiMapFromTree (const juce::ValueTree&);           // replaces the map (no MIDIMAP: an empty map)
     std::atomic<juce::uint32> lastLearnableCc { 0 };         // (count << 8) | cc of the last learnable CC in; 0 none yet
     std::array<std::atomic<juce::uint32>, 128> ccMoves {};   // how many times each mapped CC has moved its parameter
+    void flushMidiMoves();                                    // message thread: what the timer does (tests call it)
 
     juce::AudioProcessorValueTreeState apvts;
     wc::Rack rack;
@@ -108,6 +111,12 @@ private:
     std::vector<juce::RangedAudioParameter*> mapParam;        // every parameter, by index (made once)
     std::vector<int> mapInst;                                 // the module slot of each, -1: always in the rack
     std::vector<bool> mapStepped;
+    std::vector<std::atomic<float>*> mapRaw;                  // each parameter's raw value, what the modules read
+    std::vector<std::atomic<juce::uint64>> midiPending;       // one bit per parameter a CC moved (audio sets, timer takes)
+    std::vector<juce::uint32> midiGesture;                    // ms of the last CC of an open gesture, 0: none
+    int lastCcIn = -1;                                        // audio thread: the learnable CC before this one
+    void syncMidiMovesToTree (bool take);
+    void timerCallback() override { flushMidiMoves(); }
     bool applyMidiMap (const juce::MidiMessage&) noexcept;    // audio thread; true: the CC was taken
     void adoptMidiMap (const juce::ValueTree& patchRoot);     // a patch brings its map only into an empty one
     bool setCc (int cc, const juce::String& paramId, juce::String* movedFrom = nullptr);   // assignCc without telling the host

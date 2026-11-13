@@ -1192,6 +1192,7 @@ int main (int argc, char** argv)
             int at = 0;
             for (auto& m : msgs) midi.addEvent (m, at++);
             p.processBlock (buf, midi);
+            p.flushMidiMoves();                          // what the processor's timer does
         };
         auto norm = [] (WcProcessor& p, const char* id) { return p.apvts.getParameter (id)->getValue(); };
         auto cc = [] (int ch, int n, int v) { return juce::MidiMessage::controllerEvent (ch, n, v); };
@@ -1210,6 +1211,64 @@ int main (int argc, char** argv)
             const bool good = mapped && std::abs (before - 10.0f * 64.0f / 127.0f) < 1.0e-4f && mod (p) == before && std::abs (norm (p, "out_level") - 1.0f) < 1.0e-6f;
             std::printf ("  CC 1 -> out_level, CC 1 = 127: level %.3f (1), MOD out %.2f V (holds %.2f) %s\n", norm (p, "out_level"), mod (p), before, good ? "ok" : "BAD");
             if (! good) ok = false;
+        }
+        // the audio thread only writes the raw value (heard this block) and marks it: no listener, host or knob
+        // hears of it until the timer. Then the parameter, the knob, the host (one gesture, closed 250 ms after the
+        // last CC) and the saved state all have it, also when the state had been saved before (the adapter then
+        // has nothing to flush) and when the host saves before the timer.
+        {
+            struct Host : juce::AudioProcessorListener
+            {
+                int changes = 0, begins = 0, ends = 0;
+                void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override { ++changes; }
+                void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
+                void audioProcessorParameterChangeGestureBegin (juce::AudioProcessor*, int) override { ++begins; }
+                void audioProcessorParameterChangeGestureEnd (juce::AudioProcessor*, int) override { ++ends; }
+            } host;
+            WcProcessor p;
+            p.prepareToPlay (SR, 64);
+            p.loadBuiltinPatch (0);
+            setP (p, "out_level", 0.0f);
+            p.assignCc (1, "out_level");
+            juce::Slider knob;
+            juce::AudioProcessorValueTreeState::SliderAttachment att (p.apvts, "out_level", knob);
+            juce::MemoryBlock saved;
+            p.getStateInformation (saved);               // a save before: nothing left for the adapter to flush
+            p.addListener (&host);
+            auto block = [&] (int v) { juce::AudioBuffer<float> buf (2, 64); juce::MidiBuffer m; m.addEvent (cc (1, 1, v), 0); p.processBlock (buf, m); };
+            auto savedLevel = [&]
+            {
+                juce::MemoryBlock st;
+                p.getStateInformation (st);
+                WcProcessor q;
+                q.setStateInformation (st.getData(), (int) st.getSize());
+                return q.apvts.getRawParameterValue ("out_level")->load();
+            };
+            block (127);
+            const bool audioOnly = host.changes == 0 && p.apvts.getRawParameterValue ("out_level")->load() == 1.0f && knob.getValue() == 0.0;
+            const float early = savedLevel();            // the host saves before the timer
+            p.flushMidiMoves();
+            const bool passed = host.changes == 1 && host.begins == 1 && host.ends == 0 && norm (p, "out_level") == 1.0f && knob.getValue() == 1.0;
+            const float late = savedLevel();
+            block (0);
+            p.flushMidiMoves();
+            const bool oneGesture = host.begins == 1 && host.ends == 0 && savedLevel() == 0.0f;
+            juce::Thread::sleep (300);
+            p.flushMidiMoves();
+            const bool closed = host.ends == 1;
+            p.removeListener (&host);
+            std::printf ("  CC from the audio thread: raw value at once, nobody told %s; after the timer: parameter, knob, host %s; saved %.2f before the timer, %.2f after (1) %s; one gesture %s, closed after 250 ms %s\n",
+                         audioOnly ? "ok" : "BAD", passed ? "ok" : "BAD", early, late, early == 1.0f && late == 1.0f ? "ok" : "BAD", oneGesture ? "ok" : "BAD", closed ? "ok" : "BAD");
+            if (! audioOnly || ! passed || early != 1.0f || late != 1.0f || ! oneGesture || ! closed) ok = false;
+
+            // a 14-bit controller sends n and n + 32: a learn is offered n; CC 33 on its own is offered
+            auto offered = [&] (std::initializer_list<juce::MidiMessage> msgs) { send (p, msgs); return (int) (p.lastLearnableCc.load() & 0xffu); };
+            const int pair = offered ({ cc (1, 7, 64), cc (1, 39, 3) });
+            const int lone = offered ({ cc (1, 74, 1), cc (1, 33, 5) });
+            const int lone2 = offered ({ cc (1, 33, 6) });
+            const bool fourteen = pair == 7 && lone2 == 33;
+            std::printf ("  14-bit CC 7 + 39: offered %d (7); CC 33 alone after CC 74: %d then %d (33) %s\n", pair, lone, lone2, fourteen ? "ok" : "BAD");
+            if (! fourteen) ok = false;
         }
         // a mapping to a module out of the rack sleeps: CC 1 still reaches MOD, and the parameter stays put; the
         // module back in the rack, the mapping wakes up. A 259 C mapping sleeps in demo (no third oscillator).

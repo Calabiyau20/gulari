@@ -48,12 +48,16 @@ WcProcessor::WcProcessor()
         mapParam.push_back (rp);
         mapInst.push_back (inst);
         mapStepped.push_back (rp != nullptr && rp->getNormalisableRange().interval > 0.0f);
+        mapRaw.push_back (rp != nullptr ? apvts.getRawParameterValue (rp->getParameterID()) : nullptr);
     }
+    midiPending = std::vector<std::atomic<juce::uint64>> ((mapParam.size() + 63) / 64);
+    midiGesture.assign (mapParam.size(), 0);
     license = wc::License::findAndValidate();
     loadBuiltinPatch (0);
+    startTimerHz (30);
 }
 
-WcProcessor::~WcProcessor() = default;
+WcProcessor::~WcProcessor() { stopTimer(); }
 
 bool WcProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
@@ -80,7 +84,8 @@ void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     auto it = midi.cbegin();
     for (int i = 0; i < n; ++i)
     {
-        // MIDI is applied at its exact sample position
+        // MIDI goes in at its sample position; a learned CC writes its parameter, which the modules read in
+        // beginBlock: it is heard from the next block on
         while (it != midi.cend() && (*it).samplePosition <= i)
         {
             const auto msg = (*it).getMessage();
@@ -106,7 +111,10 @@ bool WcProcessor::applyMidiMap (const juce::MidiMessage& m) noexcept
     if (! m.isController()) return false;
     const int cc = m.getControllerNumber();
     if (! isLearnableCc (cc)) return false;
-    lastLearnableCc.store (((lastLearnableCc.load (std::memory_order_relaxed) + 0x100u) & ~0xffu) | (juce::uint32) cc, std::memory_order_release);
+    // a 14-bit controller sends n and then n + 32 (its LSB): a learn takes n
+    const bool lsb = cc >= 33 && cc <= 63 && lastCcIn == cc - 32;
+    lastCcIn = cc;
+    if (! lsb) lastLearnableCc.store (((lastLearnableCc.load (std::memory_order_relaxed) + 0x100u) & ~0xffu) | (juce::uint32) cc, std::memory_order_release);
     const int idx = midiMap[(size_t) cc].load (std::memory_order_acquire);
     if (idx < 0 || idx >= (int) mapParam.size() || mapParam[(size_t) idx] == nullptr) return false;
     const int inst = mapInst[(size_t) idx];
@@ -114,9 +122,43 @@ bool WcProcessor::applyMidiMap (const juce::MidiMessage& m) noexcept
     auto* p = mapParam[(size_t) idx];
     float v = (float) m.getControllerValue() / 127.0f;        // linear over the knob, a jump (no pickup)
     if (mapStepped[(size_t) idx]) v = p->convertTo0to1 (p->convertFrom0to1 (v));
-    p->setValueNotifyingHost (v);
+    mapRaw[(size_t) idx]->store (p->convertFrom0to1 (v), std::memory_order_relaxed);   // the sound, this block
+    midiPending[(size_t) idx / 64].fetch_or (juce::uint64 (1) << (idx % 64), std::memory_order_release);   // the rest, on the timer
     ccMoves[(size_t) cc].fetch_add (1, std::memory_order_relaxed);
     return true;
+}
+
+// The raw value already holds what the CC wrote, so the parameter's adapter sees no change when the parameter
+// gets it and does not flush it to the state tree: copyState would save the old value. It goes there by hand.
+void WcProcessor::syncMidiMovesToTree (bool take)
+{
+    const auto now = juce::Time::getMillisecondCounter() | 1u;   // 0 means no gesture
+    for (size_t w = 0; w < midiPending.size(); ++w)
+    {
+        const auto bits = take ? midiPending[w].exchange (0, std::memory_order_acquire) : midiPending[w].load (std::memory_order_acquire);
+        for (size_t b = 0; b < 64; ++b)
+            if ((bits >> b) & 1u)
+            {
+                const size_t i = w * 64 + b;
+                auto* p = mapParam[i];
+                const float plain = mapRaw[i]->load (std::memory_order_relaxed);
+                if (take)
+                {
+                    if (midiGesture[i] == 0) p->beginChangeGesture();
+                    midiGesture[i] = now;
+                    p->setValueNotifyingHost (p->convertTo0to1 (plain));
+                }
+                apvts.state.getChildWithProperty ("id", p->getParameterID()).setProperty ("value", plain, nullptr);
+            }
+    }
+}
+
+void WcProcessor::flushMidiMoves()
+{
+    syncMidiMovesToTree (true);
+    const auto now = juce::Time::getMillisecondCounter() | 1u;
+    for (size_t i = 0; i < midiGesture.size(); ++i)   // a gesture ends 250 ms after its last CC
+        if (midiGesture[i] != 0 && now - midiGesture[i] >= 250u) { mapParam[i]->endChangeGesture(); midiGesture[i] = 0; }
 }
 
 bool WcProcessor::assignCc (int cc, const juce::String& id, juce::String* movedFrom)
@@ -927,6 +969,7 @@ void WcProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::ValueTree root ("WCSTATE");
     root.setProperty ("zoom", uiZoom, nullptr);
     root.setProperty ("skin", uiSkin, nullptr);
+    syncMidiMovesToTree (false);                      // a CC the timer has not passed on yet
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (marfPresets.createCopy(), -1, nullptr);
@@ -966,6 +1009,7 @@ bool WcProcessor::savePatchFile (const juce::File& f)
     if (demo()) return false;
     juce::ValueTree root ("WCSTATE");
     patchName = f.getFileNameWithoutExtension();
+    syncMidiMovesToTree (false);
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (rack.m252()->toTree(), -1, nullptr);
