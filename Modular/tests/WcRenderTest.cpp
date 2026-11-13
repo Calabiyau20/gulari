@@ -1208,6 +1208,26 @@ int main (int argc, char** argv)
         for (auto& s : fails) std::printf ("  %s\n", s.toRawUTF8());
         if (bad != 0) ok = false;
 
+        // and the texts are rounded: juce::String (x, 0) does not round, so "141 ms" came out "141.421 ms". Two
+        // decimals at most; 277 Time Scale is the one text with three ("0.050 s (x4 long)").
+        int ugly = 0;
+        juce::StringArray uglies;
+        for (auto* par : p.getParameters())
+        {
+            auto* f = dynamic_cast<juce::RangedAudioParameter*> (par);   // getText is public here
+            if (dynamic_cast<juce::AudioParameterFloat*> (par) == nullptr || f->getParameterID() == "dl_time") continue;
+            for (int i = 0; i <= 100; ++i)
+            {
+                const auto text = f->getText ((float) i / 100.0f, 64);
+                const auto frac = text.fromFirstOccurrenceOf (".", false, false).initialSectionContainingOnly ("0123456789");
+                if (frac.length() <= 2) continue;
+                if (++ugly <= 8) uglies.add (f->getParameterID() + " \"" + text + "\"");
+            }
+        }
+        std::printf ("value texts: %d with more than two decimals %s\n", ugly, ugly == 0 ? "ok" : "BAD");
+        for (auto& s : uglies) std::printf ("  %s\n", s.toRawUTF8());
+        if (ugly != 0) ok = false;
+
         // fixed cases: what a person types
         struct Case { const char* id; const char* text; const char* shown; float want; float tol; int limited; };   // want: plain; NAN = not a value
         const Case cases[] = {

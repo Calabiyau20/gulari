@@ -29,6 +29,10 @@ struct Readback
 // a text function and its readback, made together
 struct Fmt { FA attr; Readback rb; };
 
+// x with that many decimals. juce::String (x, 0) does not round: 0 decimals means "as many as it takes", and a
+// text meant as "141 ms" came out "141.421 ms".
+static juce::String fixed (double x, int decimals) { return decimals > 0 ? juce::String (x, decimals) : juce::String (juce::roundToInt (x)); }
+
 namespace
 {
 struct Entry
@@ -304,14 +308,14 @@ static Fmt hzAttr (bool canBeLow)
     {
         juce::ignoreUnused (canBeLow);
         const float hz = coarseHz (v, false);
-        return hz < 1000.0f ? juce::String (hz, hz < 100.0f ? 1 : 0) + " Hz" : juce::String (hz / 1000.0f, 2) + " kHz";
+        return hz < 1000.0f ? fixed (hz, hz < 100.0f ? 1 : 0) + " Hz" : juce::String (hz / 1000.0f, 2) + " kHz";
     }), { Unit::Hz, [] (float v) { return 27.5 * std::exp2 (8.0 * v); } } };
 }
 static Fmt unitAttr (const char* unit, int dec = 2)
 {
     Unit k; double f;
     unitOf (normalised (unit), k, f);
-    return { FA().withStringFromValueFunction ([unit, dec] (float v, int) { return juce::String (v, dec) + unit; }),
+    return { FA().withStringFromValueFunction ([unit, dec] (float v, int) { return fixed (v, dec) + unit; }),
              { k, [f] (float v) { return v * f; } } };
 }
 // readbacks of the usual shapes: a * b^v and a + b * v
@@ -360,7 +364,7 @@ static void add281 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     const Fmt timeAttr { FA().withStringFromValueFunction ([] (float v, int)
     {
         const float t = 0.001f * std::pow (10.0f, 4.0f * v);
-        return t < 1.0f ? juce::String (t * 1000.0f, t < 0.01f ? 1 : 0) + " ms" : juce::String (t, 2) + " s";
+        return t < 1.0f ? fixed (t * 1000.0f, t < 0.01f ? 1 : 0) + " ms" : juce::String (t, 2) + " s";
     }), expRb (Unit::Sec, 0.001, 10000.0) };
     const char* ch = "ABCD";
     for (int k = 1; k <= 4; ++k)
@@ -420,10 +424,10 @@ static void add245 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
     for (int k = 1; k <= 4; ++k)
         g->addChild (std::make_unique<APB> (juce::ParameterID (p + "sw" + juce::String (k), 1), n + "Stage Switch " + juce::String (k), true));
     g->addChild (flt (juce::ParameterID (p + "time", 1), n + "Pulser Time", NR (0.0f, 1.0f), 0.55f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float t = 0.002f * std::pow (5000.0f, v); return t < 1.0f ? juce::String (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s"; }), expRb (Unit::Sec, 0.002, 5000.0) }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float t = 0.002f * std::pow (5000.0f, v); return t < 1.0f ? fixed (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s"; }), expRb (Unit::Sec, 0.002, 5000.0) }));
     g->addChild (flt (juce::ParameterID (p + "tcv", 1), n + "Pulser Time CV", NR (-1.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "len", 1), n + "Pulse Length", NR (0.0f, 1.0f), 0.5f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (v * 100.0f, 0) + " %"; }), linRb (Unit::Pct, 0.0, 100.0) }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return fixed (v * 100.0f, 0) + " %"; }), linRb (Unit::Pct, 0.0, 100.0) }));
     l.add (std::move (g));
 }
 
@@ -442,7 +446,7 @@ static void add242 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
         {
             if (v > 0.92f) return juce::String ("off");
             const float t = 0.002f * std::pow (5000.0f, v / 0.92f);
-            return t < 1.0f ? juce::String (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s";
+            return t < 1.0f ? fixed (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s";
         }), { Unit::Sec, [] (float v) { return 0.002 * std::pow (5000.0, v / 0.92); }, 0.0f, 0.92f, "off", 1.0f } }));
     g->addChild (flt (juce::ParameterID (p + "cv", 1), n + "Period CV", NR (-1.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "row", 1), n + "Edit Row", NR (1.0f, 4.0f, 1.0f), 2.0f));
@@ -452,7 +456,7 @@ static void add242 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
 
 static Fmt voltAttr (float scale, int dec = 2)
 {
-    return { FA().withStringFromValueFunction ([scale, dec] (float v, int) { return juce::String (v * scale, dec) + " V"; }), linRb (Unit::Volt, 0.0, scale) };
+    return { FA().withStringFromValueFunction ([scale, dec] (float v, int) { return fixed (v * scale, dec) + " V"; }), linRb (Unit::Volt, 0.0, scale) };
 }
 
 static void add257 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
@@ -477,7 +481,7 @@ static void add258 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     const Fmt hz { FA().withStringFromValueFunction ([] (float v, int)
     {
         const float f = 5.0f * std::pow (4000.0f, v);
-        return f < 1000.0f ? juce::String (f, f < 100.0f ? 1 : 0) + " Hz" : juce::String (f / 1000.0f, 2) + " kHz";
+        return f < 1000.0f ? fixed (f, f < 100.0f ? 1 : 0) + " Hz" : juce::String (f / 1000.0f, 2) + " kHz";
     }), expRb (Unit::Hz, 5.0, 4000.0) };
     const float defHz[2] = { 130.81f, 196.0f };
     for (int o = 1; o <= 2; ++o)
@@ -518,7 +522,7 @@ static void add230 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
         g->addChild (flt (juce::ParameterID (p + "sens" + k, 1), n + k + " Sensitivity", NR (0.0f, 1.0f), 0.4f,
             Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (-20.0f + 50.0f * v, 1) + " dB"; }), linRb (Unit::dB, -20.0, 50.0) }));
         g->addChild (flt (juce::ParameterID (p + "decay" + k, 1), n + k + " Decay", NR (0.0f, 1.0f), 0.35f,
-            Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float t = 0.01f * std::pow (300.0f, v); return t < 1.0f ? juce::String (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s"; }), expRb (Unit::Sec, 0.01, 300.0) }));
+            Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float t = 0.01f * std::pow (300.0f, v); return t < 1.0f ? fixed (t * 1000.0f, 0) + " ms" : juce::String (t, 2) + " s"; }), expRb (Unit::Sec, 0.01, 300.0) }));
         g->addChild (flt (juce::ParameterID (p + "thr" + k, 1), n + k + " Pulse Threshold", NR (0.0f, 1.0f), 0.3f, voltAttr (10.0f, 1)));
         g->addChild (std::make_unique<APB> (juce::ParameterID (p + "mode" + k, 1), n + k + " Sustained (off = Transient)", false));
     }
@@ -584,7 +588,7 @@ static void add296 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
                   { Unit::dB, [] (float v) { return -36.0 + 42.0 * v; }, 0.02f, 1.0f, "off", 0.0f } }));
     g->addChild (choice (juce::ParameterID (p + "decay", 1), n + "Env. Decay Time", juce::StringArray { "short", "combo", "long" }, 1));
     g->addChild (flt (juce::ParameterID (p + "freq", 1), n + "Program Frequency", NR (0.0f, 1.0f), 0.5f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float hz = 100.0f * std::pow (100.0f, v); return hz < 1000.0f ? juce::String (hz, 0) + " Hz" : juce::String (hz / 1000.0f, 1) + " kHz"; }), expRb (Unit::Hz, 100.0, 100.0) }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { const float hz = 100.0f * std::pow (100.0f, v); return hz < 1000.0f ? fixed (hz, 0) + " Hz" : juce::String (hz / 1000.0f, 1) + " kHz"; }), expRb (Unit::Hz, 100.0, 100.0) }));
     g->addChild (flt (juce::ParameterID (p + "fcv", 1), n + "Program Frequency CV", NR (-1.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "width", 1), n + "Program Width", NR (0.0f, 1.0f), 1.0f));
     g->addChild (flt (juce::ParameterID (p + "pre_even", 1), n + "Even Pre-emphasis", NR (0.0f, 1.0f), 0.0f));
@@ -714,7 +718,7 @@ static Fmt secsAttr (float (*fn) (float))
     return { FA().withStringFromValueFunction ([fn] (float v, int)
     {
         const float s = fn (v);
-        return s < 1.0f ? juce::String (s * 1000.0f, s < 0.01f ? 1 : 0) + " ms" : juce::String (s, 2) + " s";
+        return s < 1.0f ? fixed (s * 1000.0f, s < 0.01f ? 1 : 0) + " ms" : juce::String (s, 2) + " s";
     }), { Unit::Sec, [fn] (float v) { return (double) fn (v); } } };
 }
 static Fmt hz31Attr()
@@ -722,7 +726,7 @@ static Fmt hz31Attr()
     return { FA().withStringFromValueFunction ([] (float v, int)
     {
         const float hz = 31.0f * std::pow (2.0f, 7.0f * v);
-        return hz < 1000.0f ? juce::String (hz, 0) + " Hz" : juce::String (hz / 1000.0f, 2) + " kHz";
+        return hz < 1000.0f ? fixed (hz, 0) + " Hz" : juce::String (hz / 1000.0f, 2) + " kHz";
     }), expRb (Unit::Hz, 31.0, 128.0) };
 }
 static float t284 (float k) { return 0.002f * std::pow (5000.0f, k); }
@@ -825,7 +829,7 @@ static void add666 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     g->addChild (flt (juce::ParameterID (p + "level", 1), n + "Trigger Level", NR (-1.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "time", 1), n + "Time / Div", NR (0.0f, 1.0f), 0.5f,
         Fmt { FA().withStringFromValueFunction ([] (float v, int)
-        { const float s = 0.0001f * std::pow (10000.0f, v); return s < 0.001f ? juce::String (s * 1.0e6f, 0) + " us" : (s < 1.0f ? juce::String (s * 1000.0f, 1) + " ms" : juce::String (s, 2) + " s"); }),
+        { const float s = 0.0001f * std::pow (10000.0f, v); return s < 0.001f ? fixed (s * 1.0e6f, 0) + " us" : (s < 1.0f ? juce::String (s * 1000.0f, 1) + " ms" : juce::String (s, 2) + " s"); }),
               expRb (Unit::Sec, 0.0001, 10000.0) }));
     g->addChild (choice (juce::ParameterID (p + "mode", 1), n + "Mode", juce::StringArray { "AUTO", "NORM", "SINGLE", "X-Y" }, 0));
     g->addChild (choice (juce::ParameterID (p + "coupling", 1), n + "Coupling", juce::StringArray { "AC", "DC", "GND" }, 1));
