@@ -23,6 +23,7 @@ struct Readback
     float lo = 0.0f, hi = 0.0f;             // plain values that number covers, when it is not the whole range
     const char* word = nullptr;             // the rest of the range is shown as this word ("off")
     float wordValue = 0.0f;
+    static Readback of (Unit u) { Readback r; r.unit = u; return r; }   // the number is the plain value itself
 };
 
 // a text function and its readback, made together
@@ -682,7 +683,7 @@ static void add252 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
     const juce::String p ("rg_"), n ("252 ");
     auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("rg_grp", "252", "|");
     g->addChild (flt (juce::ParameterID (p + "bpm", 1), n + "Master BPM", NR (20.0f, 300.0f, 1.0f), 120.0f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v)) + " BPM"; }), { Unit::Bpm } }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v)) + " BPM"; }), Readback::of (Unit::Bpm) }));
     g->addChild (flt (juce::ParameterID (p + "pdur", 1), n + "Pulse Duration", NR (0.0f, 1.0f), 0.1f));
     g->addChild (choice (juce::ParameterID (p + "sync", 1), n + "Sync", juce::StringArray { "free", "on 1", "on cycl" }, 1));
     g->addChild (std::make_unique<APB> (juce::ParameterID (p + "play", 1), n + "Play", true));
@@ -691,13 +692,13 @@ static void add252 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
     {
         const juce::String kk (k), nm = n + (k == 1 ? juce::String ("Master") : "Clock " + kk);
         g->addChild (flt (juce::ParameterID (p + "clk" + kk, 1), nm + " Ring", NR (0.0f, 11.0f, 1.0f), k == 1 ? 11.0f : 0.0f,
-            Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (rings[juce::jlimit (0, 11, (int) std::lround (v))]); }), { Unit::Label } }));
+            Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (rings[juce::jlimit (0, 11, (int) std::lround (v))]); }), Readback::of (Unit::Label) }));
         g->addChild (std::make_unique<APB> (juce::ParameterID (p + "dt" + kk, 1), nm + " Delta-t", false));
         g->addChild (flt (juce::ParameterID (p + "dts" + kk, 1), nm + " Delta-t Scale", NR (0.5f, 3.0f), 1.0f,
-            Fmt { FA().withStringFromValueFunction ([] (float v, int) { return "x" + juce::String (v, 2); }), { Unit::Times } }));
+            Fmt { FA().withStringFromValueFunction ([] (float v, int) { return "x" + juce::String (v, 2); }), Readback::of (Unit::Times) }));
     }
     g->addChild (flt (juce::ParameterID (p + "ring", 1), n + "Edit Ring (beats/cycl)", NR (0.0f, 10.0f, 1.0f), 10.0f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (rings[juce::jlimit (0, 10, (int) std::lround (v)) + 1]); }), { Unit::Label } }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (rings[juce::jlimit (0, 10, (int) std::lround (v)) + 1]); }), Readback::of (Unit::Label) }));
     g->addChild (flt (juce::ParameterID (p + "cell", 1), n + "Cursor Cell", NR (0.0f, 15.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "pattern", 1), n + "Pattern #", NR (0.0f, 16.0f, 1.0f), 0.0f));
     g->addChild (flt (juce::ParameterID (p + "layer", 1), n + "Display", NR (0.0f, 3.0f, 1.0f), 0.0f));
@@ -801,7 +802,7 @@ static void add291 (juce::AudioProcessorValueTreeState::ParameterLayout& l)
         g->addChild (flt (juce::ParameterID (p + "time_" + sn, 1), n + "Stage " + sn + " Time", NR (0.0f, 1.0f), 0.5f, secsAttr (t291)));
     }
     g->addChild (flt (juce::ParameterID (p + "node", 1), n + "Node", NR (0.0f, 2.0f, 1.0f), 0.0f,
-        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String::charToString ((juce::juce_wchar) ('A' + juce::jlimit (0, 2, (int) std::lround (v)))); }), { Unit::Label } }));
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String::charToString ((juce::juce_wchar) ('A' + juce::jlimit (0, 2, (int) std::lround (v)))); }), Readback::of (Unit::Label) }));
     g->addChild (flt (juce::ParameterID (p + "edit", 1), n + "Edit Stage", NR (1.0f, 8.0f, 1.0f), 1.0f));
     g->addChild (std::make_unique<APB> (juce::ParameterID (p + "play", 1), n + "Play", false));
     g->addChild (flt (juce::ParameterID (p + "index", 1), n + "Modulation Index", NR (0.0f, 1.0f), 0.0f));
