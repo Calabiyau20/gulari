@@ -184,6 +184,8 @@ public:
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)
     float jackValue (int inst, int outJack) const noexcept { return outVal[(size_t) inst][(size_t) outJack]; }
+    // audio thread: is the slot in the rack as the engine runs it now
+    bool isLive (int inst) const noexcept { return live.present[(size_t) inst]; }
 
 private:
     struct Patch

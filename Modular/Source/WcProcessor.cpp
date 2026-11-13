@@ -31,6 +31,24 @@ WcProcessor::WcProcessor()
       rack (apvts)
 {
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
+    // MIDI Learn: each parameter, its module (by the longest id prefix) and whether it moves in steps
+    for (auto& m : midiMap) m.store (-1);
+    for (auto* prm : getParameters())
+    {
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm);
+        int inst = -1;
+        size_t best = 0;
+        if (rp != nullptr)
+            for (int i = 0; i < kNumInst; ++i)
+            {
+                const auto pre = instPrefix (i);
+                if (pre.isNotEmpty() && (size_t) pre.length() > best && rp->getParameterID().startsWith (pre)) { inst = i; best = (size_t) pre.length(); }
+            }
+        if (inst == kInstMidi || inst == kInstOutput) inst = -1;
+        mapParam.push_back (rp);
+        mapInst.push_back (inst);
+        mapStepped.push_back (rp != nullptr && rp->getNormalisableRange().interval > 0.0f);
+    }
     license = wc::License::findAndValidate();
     loadBuiltinPatch (0);
 }
@@ -63,12 +81,138 @@ void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     for (int i = 0; i < n; ++i)
     {
         // MIDI is applied at its exact sample position
-        while (it != midi.cend() && (*it).samplePosition <= i) { rack.handleMidi ((*it).getMessage()); ++it; }
+        while (it != midi.cend() && (*it).samplePosition <= i)
+        {
+            const auto msg = (*it).getMessage();
+            if (! applyMidiMap (msg)) rack.handleMidi (msg);   // a learned CC stops here
+            ++it;
+        }
         rack.tick();
         L[i] = rack.outL();
         if (R != nullptr) R[i] = rack.outR();
     }
-    for (; it != midi.cend(); ++it) rack.handleMidi ((*it).getMessage());
+    for (; it != midi.cend(); ++it)
+    {
+        const auto msg = (*it).getMessage();
+        if (! applyMidiMap (msg)) rack.handleMidi (msg);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// MIDI Learn
+// ------------------------------------------------------------------------------------------------
+bool WcProcessor::applyMidiMap (const juce::MidiMessage& m) noexcept
+{
+    if (! m.isController()) return false;
+    const int cc = m.getControllerNumber();
+    if (! isLearnableCc (cc)) return false;
+    lastLearnableCc.store (((lastLearnableCc.load (std::memory_order_relaxed) + 0x100u) & ~0xffu) | (juce::uint32) cc, std::memory_order_release);
+    const int idx = midiMap[(size_t) cc].load (std::memory_order_acquire);
+    if (idx < 0 || idx >= (int) mapParam.size() || mapParam[(size_t) idx] == nullptr) return false;
+    const int inst = mapInst[(size_t) idx];
+    if (inst >= 0 && ! rack.isLive (inst)) return false;     // asleep: its module is out of the rack
+    auto* p = mapParam[(size_t) idx];
+    float v = (float) m.getControllerValue() / 127.0f;        // linear over the knob, a jump (no pickup)
+    if (mapStepped[(size_t) idx]) v = p->convertTo0to1 (p->convertFrom0to1 (v));
+    p->setValueNotifyingHost (v);
+    ccMoves[(size_t) cc].fetch_add (1, std::memory_order_relaxed);
+    return true;
+}
+
+bool WcProcessor::assignCc (int cc, const juce::String& id, juce::String* movedFrom)
+{
+    if (! setCc (cc, id, movedFrom)) return false;
+    midiMapChanged();
+    return true;
+}
+
+bool WcProcessor::setCc (int cc, const juce::String& id, juce::String* movedFrom)
+{
+    if (movedFrom != nullptr) movedFrom->clear();
+    auto* p = apvts.getParameter (id);
+    if (! isLearnableCc (cc) || p == nullptr) return false;
+    const int idx = p->getParameterIndex();
+    if (idx < 0 || idx >= (int) mapParam.size()) return false;
+    const int had = midiMap[(size_t) cc].load();
+    if (movedFrom != nullptr && had >= 0 && had != idx && mapParam[(size_t) had] != nullptr) *movedFrom = mapParam[(size_t) had]->getParameterID();
+    for (auto& slot : midiMap) if (slot.load() == idx) slot.store (-1);
+    midiMap[(size_t) cc].store (idx, std::memory_order_release);
+    return true;
+}
+
+void WcProcessor::forgetCc (const juce::String& id)
+{
+    const int cc = ccOf (id);
+    if (cc < 0) return;
+    midiMap[(size_t) cc].store (-1, std::memory_order_release);
+    midiMapChanged();
+}
+
+int WcProcessor::ccOf (const juce::String& id) const
+{
+    auto* p = apvts.getParameter (id);
+    if (p == nullptr) return -1;
+    const int idx = p->getParameterIndex();
+    for (int cc = 0; cc < 128; ++cc) if (midiMap[(size_t) cc].load() == idx) return cc;
+    return -1;
+}
+
+juce::String WcProcessor::paramOfCc (int cc) const
+{
+    if (cc < 0 || cc >= 128) return {};
+    const int idx = midiMap[(size_t) cc].load();
+    return idx >= 0 && idx < (int) mapParam.size() && mapParam[(size_t) idx] != nullptr ? mapParam[(size_t) idx]->getParameterID() : juce::String();
+}
+
+bool WcProcessor::ccIsLive (int cc) const
+{
+    if (cc < 0 || cc >= 128) return false;
+    const int idx = midiMap[(size_t) cc].load();
+    if (idx < 0 || idx >= (int) mapInst.size()) return false;
+    return mapInst[(size_t) idx] < 0 || present[(size_t) mapInst[(size_t) idx]];
+}
+
+bool WcProcessor::midiMapEmpty() const
+{
+    for (auto& slot : midiMap) if (slot.load() >= 0) return false;
+    return true;
+}
+
+juce::ValueTree WcProcessor::midiMapToTree() const
+{
+    juce::ValueTree t ("MIDIMAP");
+    for (int cc = 0; cc < 128; ++cc)
+    {
+        const auto id = paramOfCc (cc);
+        if (id.isEmpty()) continue;
+        juce::ValueTree m ("MAP");
+        m.setProperty ("cc", cc, nullptr);
+        m.setProperty ("param", id, nullptr);
+        t.addChild (m, -1, nullptr);
+    }
+    return t;
+}
+
+void WcProcessor::midiMapFromTree (const juce::ValueTree& t)
+{
+    for (auto& slot : midiMap) slot.store (-1, std::memory_order_release);
+    if (t.hasType ("MIDIMAP"))
+        for (auto m : t)
+            if (m.hasType ("MAP")) setCc ((int) m.getProperty ("cc", -1), m.getProperty ("param").toString());   // unknown ids and CCs are left out
+}
+
+// A patch (file, factory, built-in) keeps the CCs the person has set up; only into an empty map does a patch
+// bring its own.
+void WcProcessor::adoptMidiMap (const juce::ValueTree& root)
+{
+    const auto t = root.getChildWithName ("MIDIMAP");
+    if (t.isValid() && t.getNumChildren() > 0 && midiMapEmpty()) midiMapFromTree (t);
+}
+
+void WcProcessor::midiMapChanged()
+{
+    // the map is saved with the project: tell the host there is something new to save
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -698,6 +842,7 @@ void WcProcessor::loadPresetTree (const juce::ValueTree& t)
     patchFromTree (t.getChildWithName ("WCPATCH"));
     auto rg = t.getChildWithName ("RG252");
     if (rg.isValid()) rack.m252()->fromTree (rg);
+    adoptMidiMap (t);
     patchName = t["name"].toString();
     sendChangeMessage();
 }
@@ -786,6 +931,7 @@ void WcProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (marfPresets.createCopy(), -1, nullptr);
     root.addChild (rack.m252()->toTree(), -1, nullptr);
+    if (! midiMapEmpty()) root.addChild (midiMapToTree(), -1, nullptr);
     if (auto xml = root.createXml()) copyXmlToBinary (*xml, destData);
 }
 
@@ -804,6 +950,7 @@ void WcProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (mp.isValid()) marfPresets = mp.createCopy();
     auto rg = root.getChildWithName ("RG252");
     if (rg.isValid()) rack.m252()->fromTree (rg);
+    midiMapFromTree (root.getChildWithName ("MIDIMAP"));   // the project's map replaces ours; none in it: empty
 }
 
 juce::File WcProcessor::patchFolder() const
@@ -822,6 +969,7 @@ bool WcProcessor::savePatchFile (const juce::File& f)
     root.addChild (apvts.copyState(), -1, nullptr);
     root.addChild (patchToTree(), -1, nullptr);
     root.addChild (rack.m252()->toTree(), -1, nullptr);
+    if (! midiMapEmpty()) root.addChild (midiMapToTree(), -1, nullptr);
     auto xml = root.createXml();
     return xml != nullptr && xml->writeTo (f);
 }
@@ -837,6 +985,7 @@ bool WcProcessor::loadPatchFile (const juce::File& f)
     if (params.isValid()) apvts.replaceState (params);
     patchFromTree (root.getChildWithName ("WCPATCH"));
     { auto rg = root.getChildWithName ("RG252"); if (rg.isValid()) rack.m252()->fromTree (rg); else rack.m252()->clearAll(); }
+    adoptMidiMap (root);
     patchName = f.getFileNameWithoutExtension();
     sendChangeMessage();
     return true;

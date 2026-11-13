@@ -1182,6 +1182,147 @@ int main (int argc, char** argv)
         std::printf ("  demo mode allows %d oscillators and no preset load / save\n", wc::License::kDemoMaxOscillators);
     }
 
+    // ---- MIDI Learn: a learned CC moves its parameter and stops there; a sleeping one goes on ----
+    {
+        std::printf ("MIDI LEARN\n");
+        auto send = [] (WcProcessor& p, std::initializer_list<juce::MidiMessage> msgs)
+        {
+            juce::AudioBuffer<float> buf (2, 64);
+            juce::MidiBuffer midi;
+            int at = 0;
+            for (auto& m : msgs) midi.addEvent (m, at++);
+            p.processBlock (buf, midi);
+        };
+        auto norm = [] (WcProcessor& p, const char* id) { return p.apvts.getParameter (id)->getValue(); };
+        auto cc = [] (int ch, int n, int v) { return juce::MidiMessage::controllerEvent (ch, n, v); };
+        auto mod = [] (WcProcessor& p) { return p.rack.jackValue (kInstMidi, MidiInterface::Out_Mod); };
+
+        // CC 1 mapped to out_level: CC 1 = 127 (on channel 3: omni) takes the level to 1 and the MOD output holds
+        {
+            WcProcessor p;
+            p.prepareToPlay (SR, 64);
+            p.loadBuiltinPatch (0);
+            setP (p, "out_level", 0.0f);
+            send (p, { cc (1, 1, 64) });                 // not mapped yet: it reaches the MIDI module
+            const float before = mod (p);
+            const bool mapped = p.assignCc (1, "out_level");
+            send (p, { cc (3, 1, 127) });
+            const bool good = mapped && std::abs (before - 10.0f * 64.0f / 127.0f) < 1.0e-4f && mod (p) == before && std::abs (norm (p, "out_level") - 1.0f) < 1.0e-6f;
+            std::printf ("  CC 1 -> out_level, CC 1 = 127: level %.3f (1), MOD out %.2f V (holds %.2f) %s\n", norm (p, "out_level"), mod (p), before, good ? "ok" : "BAD");
+            if (! good) ok = false;
+        }
+        // a mapping to a module out of the rack sleeps: CC 1 still reaches MOD, and the parameter stays put; the
+        // module back in the rack, the mapping wakes up. A 259 C mapping sleeps in demo (no third oscillator).
+        {
+            WcProcessor p;
+            p.prepareToPlay (SR, 64);
+            p.loadBuiltinPatch (0);
+            setP (p, "fa_att1", 500.0f);
+            const float att = norm (p, "fa_att1");
+            const bool absent = ! p.isPresent (kInst281);
+            p.assignCc (1, "fa_att1");
+            send (p, { cc (1, 1, 127) });
+            const bool asleep = absent && std::abs (mod (p) - 10.0f) < 1.0e-4f && norm (p, "fa_att1") == att && ! p.ccIsLive (1);
+            p.setPresent (kInst281, true);
+            send (p, { cc (1, 1, 0) });
+            const bool awake = p.ccIsLive (1) && norm (p, "fa_att1") == 0.0f && std::abs (mod (p) - 10.0f) < 1.0e-4f;
+            bool demoAsleep = true;
+            if (p.demo())
+            {
+                setP (p, "c_timbre", 0.0f);
+                p.setPresent (kInst259 + 1, true);       // two oscillators: the most demo mode allows
+                p.setPresent (kInst259 + 2, true);       // refused
+                p.assignCc (2, "c_timbre");
+                send (p, { cc (1, 2, 127) });
+                demoAsleep = ! p.isPresent (kInst259 + 2) && norm (p, "c_timbre") == 0.0f && p.ccOf ("c_timbre") == 2;
+            }
+            std::printf ("  asleep (281 out of the rack): MOD out %.2f V, attack kept %s; 281 in: CC 1 = 0 moves it %s; 259 C in demo asleep %s\n",
+                         mod (p), asleep ? "ok" : "BAD", awake ? "ok" : "BAD", demoAsleep ? "ok" : "BAD");
+            if (! asleep || ! awake || ! demoAsleep) ok = false;
+        }
+        // only CC 1-119, without 6, 32, 38 and 98-101 (data entry, bank LSB, NRPN / RPN); one CC per parameter
+        {
+            WcProcessor p;
+            juce::StringArray wrong;
+            for (int n : { 0, 6, 32, 38, 98, 99, 100, 101, 120, 121, 123, 127, -1, 128 })
+                if (p.assignCc (n, "a_timbre")) wrong.add (juce::String (n));
+            for (int n : { 1, 7, 31, 33, 37, 39, 97, 102, 119 })
+                if (! WcProcessor::isLearnableCc (n)) wrong.add ("not " + juce::String (n));
+            const bool none = wrong.isEmpty() && p.midiMapEmpty();
+            // CC 0 and 120 coming in are not offered to a learn either
+            p.prepareToPlay (SR, 64);
+            const auto last = p.lastLearnableCc.load();
+            send (p, { cc (1, 0, 5), cc (1, 120, 0) });
+            const bool notOffered = p.lastLearnableCc.load() == last;
+            send (p, { cc (1, 74, 5) });
+            const bool offered = (p.lastLearnableCc.load() & 0xffu) == 74 && p.lastLearnableCc.load() != last;
+            std::printf ("  CCs that cannot be learned: %s; not offered to a learn %s, CC 74 offered %s\n",
+                         none ? "refused ok" : ("TAKEN " + wrong.joinIntoString (" ")).toRawUTF8(), notOffered ? "ok" : "BAD", offered ? "ok" : "BAD");
+            if (! none || ! notOffered || ! offered) ok = false;
+
+            // CC 74 was 259 A Timbre's: learned on 245 Time, it moves there; and a parameter keeps one CC only
+            juce::String moved;
+            p.assignCc (74, "a_timbre");
+            p.assignCc (74, "sv_time", &moved);
+            const bool moves = moved == "a_timbre" && p.ccOf ("a_timbre") < 0 && p.ccOf ("sv_time") == 74;
+            const auto movedFrom = moved;
+            p.assignCc (75, "sv_time", &moved);
+            const bool single = moved.isEmpty() && p.ccOf ("sv_time") == 75 && p.paramOfCc (74).isEmpty();
+            std::printf ("  CC 74 learned on another control: moved from \"%s\" %s; one CC per parameter %s\n",
+                         movedFrom.toRawUTF8(), moves ? "ok" : "BAD", single ? "ok" : "BAD");
+            if (! moves || ! single) ok = false;
+            // a stepped parameter lands on a step: CC 64 on a three-way lever is its middle
+            p.assignCc (20, "la_mode1");
+            p.setPresent (kInst292, true);
+            send (p, { cc (1, 20, 70) });
+            const bool step = norm (p, "la_mode1") == 0.5f;
+            std::printf ("  CC 70 on a three-way lever: %.3f (0.5) %s\n", norm (p, "la_mode1"), step ? "ok" : "BAD");
+            if (! step) ok = false;
+        }
+        // saved: with the project (it replaces the map; a project without MIDIMAP leaves it empty) and in a patch
+        // (a patch keeps the map there is; only an empty map takes the patch's)
+        {
+            WcProcessor a;
+            a.assignCc (74, "sv_time");
+            a.assignCc (1, "out_level");
+            juce::MemoryBlock state;
+            a.getStateInformation (state);
+            WcProcessor b;
+            b.assignCc (20, "a_timbre");
+            b.setStateInformation (state.getData(), (int) state.getSize());
+            const bool project = b.ccOf ("sv_time") == 74 && b.ccOf ("out_level") == 1 && b.ccOf ("a_timbre") < 0;
+            WcProcessor none;
+            juce::MemoryBlock plain;
+            none.getStateInformation (plain);
+            const bool noNode = ! juce::String::fromUTF8 ((const char*) plain.getData(), (int) plain.getSize()).contains ("MIDIMAP");
+            b.setStateInformation (plain.getData(), (int) plain.getSize());
+            const bool emptied = b.midiMapEmpty();
+            std::printf ("  project: map comes back %s, replaces the one there was %s; without MIDIMAP: empty %s (and none written %s)\n",
+                         project ? "ok" : "BAD", project ? "ok" : "BAD", emptied ? "ok" : "BAD", noNode ? "ok" : "BAD");
+            if (! project || ! emptied || ! noNode) ok = false;
+
+            // patch files need a license; this test has no key, so it lends the processors one
+            const auto file = outDir.getChildFile ("midimap.wcpatch");
+            a.license.status = wc::License::Status::Licensed;
+            const bool saved = a.savePatchFile (file) && file.loadFileAsString().contains ("<MAP cc=\"74\" param=\"sv_time\"/>");
+            WcProcessor c;
+            c.license.status = wc::License::Status::Licensed;
+            const bool loaded = c.loadPatchFile (file);
+            const bool adopted = loaded && c.ccOf ("sv_time") == 74 && c.ccOf ("out_level") == 1;
+            WcProcessor d;
+            d.license.status = wc::License::Status::Licensed;
+            d.assignCc (30, "a_timbre");
+            d.loadPatchFile (file);
+            const bool kept = d.ccOf ("a_timbre") == 30 && d.ccOf ("sv_time") < 0 && d.paramOfCc (74).isEmpty();
+            d.loadBuiltinPatch (3);
+            const bool builtinKeeps = d.ccOf ("a_timbre") == 30;
+            std::printf ("  patch: saved %s, into an empty map adopted %s, an existing map kept %s, built-in patch keeps it %s\n",
+                         saved ? "ok" : "BAD", adopted ? "ok" : "BAD", kept ? "ok" : "BAD", builtinKeeps ? "ok" : "BAD");
+            if (! saved || ! adopted || ! kept || ! builtinKeeps) ok = false;
+            file.deleteFile();
+        }
+    }
+
     // ---- typed values: every float parameter reads its own text back ----
     // "440 Hz" typed in the host or in the value editor must land on 440 Hz. For each float parameter and 101
     // positions, getValueForText (getText (v)) has to come back to v within what the text shows.
