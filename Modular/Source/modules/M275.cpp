@@ -74,7 +74,7 @@ void M275::prepare (double sampleRate)
     tank[0].prepare (fs, 0.0f);
     tank[1].prepare (fs, 2.3f);
     for (auto& d : darken) d.set (2500.0f, fs);
-    for (auto& r : sMix) r.snap (0.0f);
+    for (auto& r : sMix) r = 0.0f;
     rampLen = juce::jmax (1, (int) (0.012f * fs));
     lastTreb[0] = lastTreb[1] = lastBass[0] = lastBass[1] = 99.0f;
     reset();
@@ -118,8 +118,9 @@ void M275::tick (const float* in, float* out) noexcept
         const float wet = 1.6f * tank[c].process (eq);
         float m = mix[c] + (isPatched (ci) ? in[ci] / 10.0f : 0.0f);
         m = dsp::clampf (m, 0.0f, 1.0f);
-        sMix[c].to (m, 64);
-        const float mm = sMix[c].next();
+        // the same arithmetic the old linear Ramp did when re-aimed every sample (bit for bit): a one-pole, not a ramp
+        sMix[c] += (m - sMix[c]) / 64.0f;
+        const float mm = sMix[c];
         const float dark = darken[c].process (eq);
         const float dry = recede[c] ? (1.0f - 0.8f * mm) * (eq + (dark - eq) * mm) : eq;
         const float vc = dry + mm * wet;

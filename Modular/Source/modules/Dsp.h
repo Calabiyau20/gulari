@@ -104,22 +104,26 @@ struct Decimator4
     void reset() noexcept { buf.fill (0.0f); pos = 0; }
 };
 
-// smoothed control value: linear ramp to a target over a fixed number of samples
+// smoothed control value: raised-cosine ramp to a target over a fixed number of samples (no corner where it starts
+// or lands, so a jump leaves far less above a few kHz than a straight line); a new target starts from where it is
 struct Ramp
 {
-    float v = 0.0f, target = 0.0f, step = 0.0f;
-    int left = 0;
-    void snap (float x) noexcept { v = target = x; left = 0; step = 0.0f; }
-    void to (float x, int len) noexcept
+    float v = 0.0f, target = 0.0f, from = 0.0f;
+    int left = 0, len = 1;
+    void snap (float x) noexcept { v = from = target = x; left = 0; }
+    void to (float x, int n) noexcept
     {
-        if (x == target && left == 0) return;
-        target = x;
-        left = std::max (1, len);
-        step = (target - v) / (float) left;
+        if (x == target) return;   // the same target keeps the ramp on course: restarting it never lands with short blocks
+        from = v; target = x;
+        left = len = std::max (1, n);
     }
     float next() noexcept
     {
-        if (left > 0) { v += step; if (--left == 0) v = target; }
+        if (left > 0)
+        {
+            if (--left == 0) v = target;
+            else v = from + (target - from) * (0.5f - 0.5f * std::cos (kPi * (float) (len - left) / (float) len));
+        }
         return v;
     }
 };

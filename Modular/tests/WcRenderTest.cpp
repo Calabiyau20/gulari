@@ -1231,6 +1231,22 @@ int main (int argc, char** argv)
         }
     }
 
+    // ---- the ramp lands in 12 ms with short blocks re-sending the same target, and it is curved ----
+    {
+        dsp::Ramp r; r.snap (0.0f);
+        const int len = 576;                              // 12 ms at 48 kHz
+        float quarter = 0.0f;
+        for (int n = 0; n < len; n += 32)
+        {
+            r.to (1.0f, len);                             // every block re-sends the knob, unchanged
+            for (int i = 0; i < 32; ++i) { const float v = r.next(); if (n + i + 1 == len / 4) quarter = v; }
+        }
+        // a raised cosine is at (1 - cos (pi / 4)) / 2 = 0.146 a quarter of the way; a straight line at 0.25
+        const bool good = r.v == 1.0f && r.left == 0 && std::abs (quarter - 0.1464f) < 0.002f;
+        std::printf ("RAMP blocks of 32, same target: %.6f after %d samples (want 1), %.4f at a quarter (want 0.1464) %s\n", r.v, len, quarter, good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
     // ---- MIDI Learn: a learned CC moves its parameter and stops there; a sleeping one goes on ----
     {
         std::printf ("MIDI LEARN\n");

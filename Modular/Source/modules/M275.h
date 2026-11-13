@@ -46,6 +46,6 @@ private:
     bool recede[2] {}, hot[2] {};
     Tank tank[2];
     dsp::OnePoleLP darken[2];
-    dsp::Ramp sMix[2];
+    float sMix[2] {};   // one-pole on the mix (knob + c.v.), 64 samples
 };
 } // namespace wc
