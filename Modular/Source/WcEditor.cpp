@@ -133,6 +133,7 @@ WcEditor::~WcEditor()
 bool WcEditor::keyPressed (const juce::KeyPress& k)
 {
     if (k == juce::KeyPress::escapeKey && rack.learning()) { rack.cancelLearn(); return true; }
+    if (k == juce::KeyPress::escapeKey && rack.movingPanel() != nullptr) { rack.cancelModuleDrag(); return true; }
     return false;
 }
 
@@ -282,7 +283,7 @@ void WcEditor::addModuleMenu()
     addType (kInst666, kMax666, "SC-666 Oscilloscope");
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
     {
-        if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) proc.setPresent (r - 1, true);
+        if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) rack.addModule (r - 1);
     });
 }
 

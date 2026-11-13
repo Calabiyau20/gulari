@@ -6,6 +6,7 @@
 #include "modules/M281.h"
 #include "modules/MidiInterface.h"
 #include "ui/RackView.h"
+#include <set>
 #if JUCE_LINUX
  #include <dlfcn.h>
 #endif
@@ -752,6 +753,286 @@ int main (int argc, char** argv)
         }
         std::printf ("%s\n", sizes.toRawUTF8());
         if (! good) return 1;
+    }
+
+    // ---- rows: the strip, moving a module, auto-scroll, old patches where they always were ----
+    {
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        const auto left = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+        auto at = [] (juce::Component& c, juce::Point<float> screen, juce::ModifierKeys mods)   // an event at a screen point
+        {
+            const auto pos = c.getLocalPoint (nullptr, screen);
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, 1, false);
+        };
+        struct Rig
+        {
+            WcProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> ed;
+            wc::ui::RackView* rv = nullptr;
+            juce::Viewport* vp = nullptr;
+            wc::ui::ValueReadout* ro = nullptr;
+            Rig (int w, int h, const std::function<void (WcProcessor&)>& setup)
+            {
+                proc.license.status = wc::License::Status::Licensed;
+                proc.prepareToPlay (48000.0, 512);
+                setup (proc);
+                ed.reset (proc.createEditor());
+                ed->setSize (w, h);
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+                std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+                {
+                    if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+                    if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+                    if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+                    for (auto* ch : c.getChildren()) walk (*ch);
+                };
+                walk (*ed);
+            }
+            std::vector<wc::ui::ModulePanel*> panels() const
+            {
+                std::vector<wc::ui::ModulePanel*> v;
+                for (auto* c : rv->content.getChildren()) if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (c)) v.push_back (p);
+                return v;
+            }
+            wc::ui::ModulePanel* panel (int inst) const { for (auto* p : panels()) if (p->inst == inst) return p; return nullptr; }
+            juce::Point<float> screen (juce::Point<float> contentPt) const { return rv->content.localPointToGlobal (contentPt); }
+            juce::String rowsText() const
+            {
+                juce::String t;
+                for (auto& r : proc.layout()) { t << "["; for (int i : r) t << wc::instKey (i) << " "; t = t.trimEnd() + "] "; }
+                return t.trimEnd();
+            }
+        };
+        // grabs a module by its strip and drags it through content points (the last one is where it is let go)
+        auto drag = [&] (Rig& r, int inst, std::vector<juce::Point<float>> pts, bool release = true)
+        {
+            auto* g = r.panel (inst)->grip.get();
+            const auto start = g->localPointToGlobal (juce::Point<float> (30.0f, 11.0f));
+            g->mouseDown (at (*g, start, left));
+            for (auto pt : pts) g->mouseDrag (at (*g, r.screen (pt), left));
+            if (release) g->mouseUp (at (*g, r.screen (pts.back()), left));
+            pump (5);
+        };
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto shot = [&] (Rig& r, const juce::String& name, juce::Rectangle<int> area = {})
+        {
+            const auto img = r.ed->createComponentSnapshot (area.isEmpty() ? r.ed->getLocalBounds() : area, true, 1.0f);
+            auto f = shots.getChildFile (name);
+            f.deleteFile();
+            juce::FileOutputStream os (f);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        juce::StringArray bad;
+        auto check = [&] (bool ok, const juce::String& what) { if (! ok) bad.add (what); };
+
+        // 1. the strip takes no control: it lies under every child of its panel (the "x" on top), and no child of any
+        //    panel reaches into it, but on the 296, whose DECAY lever and top jacks start at 15 and 21 units
+        {
+            Rig r (1400, 900, [] (WcProcessor& p) { for (int i = 1; i < wc::kInstOutput; ++i) p.setPresent (i, true); });
+            juce::StringArray hit;
+            int over = 0;
+            for (auto* pn : r.panels())
+            {
+                const auto strip = pn->grip->getBounds();
+                check (strip == juce::Rectangle<int> (0, 0, pn->getWidth(), 22), "strip of " + wc::instName (pn->inst));
+                if (pn->getIndexOfChildComponent (pn->grip.get()) != 0) { ++over; check (false, "the strip of " + wc::instName (pn->inst) + " over a control"); }
+                if (wc::typeOfInst (pn->inst) == wc::MT_296) continue;
+                for (auto* c : pn->getChildren())
+                    if (c != pn->grip.get() && dynamic_cast<juce::TextButton*> (c) == nullptr && c->isVisible() && c->getBounds().intersects (strip))
+                        hit.addIfNotAlreadyThere (wc::instName (pn->inst) + " " + c->getBounds().toString());
+            }
+            check (hit.isEmpty(), "controls in the strip: " + hit.joinIntoString (", "));
+            std::printf ("rows, strip: %d panels, under every control %s, free of them but on the 296 %s\n", (int) r.panels().size(),
+                         over == 0 ? "ok" : "BAD", hit.isEmpty() ? "ok" : "BAD");
+        }
+
+        // 2. patches without LAYOUT (factory library, built-ins, a fresh rack) open where they always did, to the pixel
+        {
+            Rig r (1400, 900, [] (WcProcessor&) {});
+            int checked = 0, wrong = 0, oneRow = 0;
+            juce::String firstWrong;
+            auto same = [&] (const juce::String& what)
+            {
+                pump (2);
+                int x = 6, y = 6, rows = 1;   // the layout of before, as RackView::rebuild did it
+                for (auto* pn : r.panels())
+                {
+                    const int w = pn->getWidth();
+                    if (x + w > 1336 && x > 6) { x = 6; y += 448; ++rows; }
+                    if (pn->getPosition() != juce::Point<int> (x, y)) { if (wrong++ == 0) firstWrong = what + " " + wc::instName (pn->inst); }
+                    x += w + 6;
+                }
+                if ((int) r.proc.layout().size() != juce::jmax (2, rows)) { if (wrong++ == 0) firstWrong = what + " rows"; }
+                if (rows == 1) ++oneRow;
+                ++checked;
+            };
+            for (int i = 0; i < r.proc.factory.getNumChildren(); ++i) { r.proc.loadFactoryAt (i); same ("factory " + juce::String (i)); }
+            for (int i = 0; i < WcProcessor::builtinPatchNames().size(); ++i) { r.proc.loadBuiltinPatch (i); same ("built-in " + juce::String (i)); }
+            r.proc.resetAll(); same ("reset");
+            check (checked == 324 && wrong == 0, "old layout: " + juce::String (wrong) + " wrong, first " + firstWrong);
+            std::printf ("rows, old patches: %d laid out as before (%d of one row, with an empty second), %d wrong %s\n", checked, oneRow, wrong, wrong == 0 && checked == 324 ? "ok" : "BAD");
+            r.proc.loadBuiltinPatch (0);
+            pump (20);
+            shot (r, "rows_old_patch_one_row.png");
+        }
+
+        // 3. moving a module keeps the cables and the sound (bit for bit) and makes no panel again
+        {
+            WcProcessor ref;
+            ref.prepareToPlay (48000.0, 512);
+            ref.loadBuiltinPatch (1);
+            Rig r (1400, 1300, [] (WcProcessor& p) { p.loadBuiltinPatch (1); });
+            auto render = [] (WcProcessor& p, int blocks, bool note, std::vector<float>& outv)
+            {
+                for (int b = 0; b < blocks; ++b)
+                {
+                    juce::AudioBuffer<float> buf (2, 512);
+                    juce::MidiBuffer midi;
+                    if (note && b == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 100), 0);
+                    p.processBlock (buf, midi);
+                    for (int c = 0; c < 2; ++c) outv.insert (outv.end(), buf.getReadPointer (c), buf.getReadPointer (c) + 512);
+                }
+            };
+            std::vector<float> a, b;
+            render (ref, 30, true, a); render (r.proc, 30, true, b);
+            const auto cablesBefore = r.proc.getCables();
+            const auto panelsBefore = r.panels();
+            std::set<wc::ui::ModulePanel*> before (panelsBefore.begin(), panelsBefore.end());
+            // 259 A down to the empty second row
+            drag (r, wc::kInst259, { { 300.0f, 120.0f }, { 400.0f, 600.0f }, { 420.0f, 640.0f } }, false);
+            const bool hole = r.rv->movingPanel() == r.panel (wc::kInst259);
+            shot (r, "rows_drag_into_empty_row.png", { 0, 52, 1400, 1100 });
+            auto* g = r.panel (wc::kInst259)->grip.get();
+            g->mouseUp (at (*g, r.screen ({ 420.0f, 640.0f }), left));
+            pump (20);
+            render (ref, 60, false, a); render (r.proc, 60, false, b);
+            const auto panelsAfter = r.panels();
+            const bool samePanels = std::set<wc::ui::ModulePanel*> (panelsAfter.begin(), panelsAfter.end()) == before;
+            bool sameCables = cablesBefore.size() == r.proc.getCables().size();
+            for (size_t i = 0; sameCables && i < cablesBefore.size(); ++i)
+            {
+                const auto &x = cablesBefore[i], &y = r.proc.getCables()[i];
+                sameCables = x.srcInst == y.srcInst && x.srcJack == y.srcJack && x.dstInst == y.dstInst && x.dstJack == y.dstJack && x.colour == y.colour;
+            }
+            const bool sameAudio = a.size() == b.size() && std::memcmp (a.data(), b.data(), a.size() * sizeof (float)) == 0;
+            const bool moved = r.proc.layout().size() == 2 && r.proc.layout()[1] == std::vector<int> { wc::kInst259 }
+                               && r.panel (wc::kInst259)->getPosition() == juce::Point<int> (6, 454);
+            check (hole && moved && samePanels && sameCables && sameAudio, "move: hole " + juce::String ((int) hole) + " moved " + juce::String ((int) moved)
+                   + " panels " + juce::String ((int) samePanels) + " cables " + juce::String ((int) sameCables) + " audio " + juce::String ((int) sameAudio));
+            std::printf ("rows, move 259 A to row 2: %s, same panels %s, same cables %s, audio bit for bit %s %s\n", r.rowsText().toRawUTF8(),
+                         samePanels ? "yes" : "NO", sameCables ? "yes" : "NO", sameAudio ? "yes" : "NO", hole && moved && samePanels && sameCables && sameAudio ? "ok" : "BAD");
+
+            // LAYOUT comes back with the state, and the other way round
+            juce::MemoryBlock st;
+            r.proc.getStateInformation (st);
+            WcProcessor back;
+            back.setStateInformation (st.getData(), (int) st.getSize());
+            check (back.layout() == r.proc.layout(), "state round trip of the rows");
+        }
+
+        // 4. a full row refuses the module (red bar, the readout says why); below the last row there is always room
+        {
+            Rig r (1400, 1500, [] (WcProcessor& p)
+            {
+                p.loadBuiltinPatch (0);
+                for (int i : { wc::kInst248, wc::kInst218, wc::kInst666, wc::kInst281, wc::kInst292 }) p.setPresent (i, true, 0);
+            });
+            const auto rows0 = r.rowsText();
+            check (! WcProcessor::rowHasRoom (r.proc.layout()[0], WcProcessor::panelWidth (wc::kInst292)), "row 1 is not full: " + rows0);
+            // the 292 (row 2) onto row 1, between the MIDI and the 259
+            drag (r, wc::kInst292, { { 200.0f, 600.0f }, { 186.0f, 200.0f } }, false);
+            const bool refusedShown = r.ro->isUp() && r.ro->current().value == "Row 1 is full" && r.ro->current().warn;
+            shot (r, "rows_full_row.png", { 0, 52, 1400, 1100 });
+            auto* g = r.panel (wc::kInst292)->grip.get();
+            g->mouseUp (at (*g, r.screen ({ 186.0f, 200.0f }), left));
+            pump (10);
+            const bool refused = r.rowsText() == rows0 && ! r.ro->isUp();
+            // under the last row: the provisional one
+            drag (r, wc::kInst292, { { 200.0f, 600.0f }, { 300.0f, 1000.0f } }, false);
+            shot (r, "rows_provisional_row.png", { 0, 52, 1400, 1448 });
+            g = r.panel (wc::kInst292)->grip.get();
+            g->mouseUp (at (*g, r.screen ({ 300.0f, 1000.0f }), left));
+            pump (10);
+            const bool fresh = r.proc.layout().size() == 3 && r.proc.layout()[2] == std::vector<int> { wc::kInst292 }
+                               && r.panel (wc::kInst292)->getPosition() == juce::Point<int> (6, 902);
+            check (refusedShown && refused && fresh, "full row " + juce::String ((int) refusedShown) + juce::String ((int) refused) + ", new row " + juce::String ((int) fresh) + ": " + r.rowsText());
+            std::printf ("rows, full row refused %s, new row below the last %s: %s\n", refusedShown && refused ? "ok" : "BAD", fresh ? "ok" : "BAD", r.rowsText().toRawUTF8());
+            // the 281 next to the 292: row 2 is left empty and stays, with its "x" (three rows: it can go); at 50 % too
+            drag (r, wc::kInst281, { { 200.0f, 600.0f }, { 600.0f, 1050.0f } });
+            const bool kept = r.rowsText() == "[midi a out mf kb s1] [] [la fa]";
+            shot (r, "rows_empty_row_x.png", { 0, 52, 1400, 1448 });
+            r.rv->setZoom (0.5f); pump (20);
+            shot (r, "rows_empty_row_x_zoom50.png", { 0, 52, 1400, 800 });
+            r.rv->setZoom (1.0f); pump (20);
+            juce::TextButton* rowX = nullptr;
+            for (auto* c : r.rv->content.getChildren())
+                if (auto* tb = dynamic_cast<juce::TextButton*> (c)) if (tb->isVisible() && tb->isEnabled()) rowX = tb;
+            if (rowX != nullptr && rowX->onClick != nullptr) rowX->onClick();
+            pump (20);
+            const bool gone = r.rowsText() == "[midi a out mf kb s1] [la fa]" && r.panel (wc::kInst292)->getPosition() == juce::Point<int> (6, 454);
+            check (kept && gone, "empty row kept " + juce::String ((int) kept) + ", its x " + juce::String ((int) gone) + ": " + r.rowsText());
+            std::printf ("rows, an emptied row stays %s, its x takes it away %s\n", kept ? "ok" : "BAD", gone ? "ok" : "BAD");
+            // the OUTPUT on its way between the 292 and the 281: the hole opens there and the 281 steps aside
+            drag (r, wc::kInstOutput, { { 900.0f, 300.0f }, { 300.0f, 640.0f } }, false);
+            shot (r, "rows_drag_hole.png", { 0, 52, 1400, 1000 });
+            r.rv->cancelModuleDrag();
+            { auto* go = r.panel (wc::kInstOutput)->grip.get(); go->mouseUp (at (*go, r.screen ({ 300.0f, 640.0f }), left)); }
+            check (r.rowsText() == "[midi a out mf kb s1] [la fa]", "cancel moved something: " + r.rowsText());
+            // the strip under the mouse, Classic and Neon Void
+            auto* g259 = r.panel (wc::kInst259)->grip.get();
+            g259->mouseEnter (at (*g259, g259->localPointToGlobal (juce::Point<float> (60.0f, 11.0f)), {}));
+            const auto near = r.ed->getLocalArea (r.panel (wc::kInst259), juce::Rectangle<int> (-40, -20, 720, 140));
+            shot (r, "rows_strip_hover.png", near);
+            wc::ui::skin::current = 1;
+            r.ed->repaint(); pump (20);
+            shot (r, "rows_strip_hover_neon.png", near);
+            drag (r, wc::kInst292, { { 200.0f, 600.0f }, { 700.0f, 200.0f } }, false);
+            shot (r, "rows_full_row_neon.png", { 0, 52, 1400, 1100 });
+            r.rv->cancelModuleDrag();
+            wc::ui::skin::current = 0;
+            g259->mouseExit (at (*g259, { -5.0f, -5.0f }, {}));
+        }
+
+        // 5. a cable dragged to the edge of the view scrolls it (or rows of 4008 could not be patched); a module too
+        {
+            Rig r (1400, 700, [] (WcProcessor& p) { p.loadBuiltinPatch (0); });
+            auto* jack = r.rv->findJack (wc::kInst259, true, wc::M259::Out_Sine);
+            const auto vb = r.vp->getScreenBounds().toFloat();
+            const auto x0 = r.vp->getViewPosition();
+            jack->mouseDown (at (*jack, jack->getScreenBounds().toFloat().getCentre(), left));
+            for (int i = 0; i < 10; ++i) jack->mouseDrag (at (*jack, { vb.getRight() - 10.0f, vb.getCentreY() }, left));
+            const auto x1 = r.vp->getViewPosition();
+            for (int i = 0; i < 10; ++i) jack->mouseDrag (at (*jack, { vb.getCentreX(), vb.getBottom() + 30.0f }, left));
+            const auto x2 = r.vp->getViewPosition();
+            const int cables = (int) r.proc.getCables().size();
+            jack->mouseUp (at (*jack, { vb.getCentreX(), vb.getBottom() + 30.0f }, left));
+            const bool cableScroll = x1.x - x0.x == 200 && x2.y > x1.y && (int) r.proc.getCables().size() == cables;
+            // a module, the same way; Esc-like cancel puts it back
+            const auto rows0 = r.rowsText();
+            r.vp->setViewPosition (0, 0);
+            auto* g = r.panel (wc::kInst259)->grip.get();
+            g->mouseDown (at (*g, g->localPointToGlobal (juce::Point<float> (30.0f, 11.0f)), left));
+            for (int i = 0; i < 10; ++i) g->mouseDrag (at (*g, { vb.getRight() - 10.0f, vb.getCentreY() }, left));
+            const bool moduleScroll = r.vp->getViewPositionX() == 200;
+            r.rv->cancelModuleDrag();
+            g->mouseUp (at (*g, { vb.getRight() - 10.0f, vb.getCentreY() }, left));
+            const bool back = r.rowsText() == rows0 && r.rv->movingPanel() == nullptr && r.panel (wc::kInst259)->getPosition() == juce::Point<int> (188, 6);
+            // "+ MODULE" with the second row in view: the 230 goes at its end, the readout says so
+            r.vp->setViewPosition (0, 448);
+            r.rv->addModule (wc::kInst230);
+            pump (30);
+            const bool added = r.rowsText() == "[midi a out] [ef]" && r.ro->isUp() && r.ro->current().value == "Added at the end of row 2";
+            check (added, "+ MODULE: " + r.rowsText() + " / " + r.ro->current().value);
+            std::printf ("rows, + MODULE with row 2 in view: %s, \"%s\" %s\n", r.rowsText().toRawUTF8(), r.ro->current().value.toRawUTF8(), added ? "ok" : "BAD");
+            check (cableScroll && moduleScroll && back, "auto-scroll: cable " + x0.toString() + " -> " + x1.toString() + " -> " + x2.toString()
+                   + ", module " + juce::String ((int) moduleScroll) + ", back " + juce::String ((int) back));
+            std::printf ("rows, auto-scroll: cable %d px right then down %d px %s, module %s, cancel puts it back %s\n", x1.x - x0.x, x2.y - x1.y,
+                         cableScroll ? "ok" : "BAD", moduleScroll ? "ok" : "BAD", back ? "ok" : "BAD");
+        }
+        if (! bad.isEmpty()) { std::printf ("rows: BAD: %s\n", bad.joinIntoString ("; ").toRawUTF8()); return 1; }
     }
 
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one

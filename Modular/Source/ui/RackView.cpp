@@ -132,6 +132,7 @@ void JackComp::mouseDown (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu()) { rack.jackMenu (*this); return; }
     rack.beginDrag (*this, e);
+    beginDragAutoRepeat (16);   // drags arrive while the mouse rests at the edge, so the view keeps scrolling
 }
 void JackComp::mouseDrag (const juce::MouseEvent& e) { if (! e.mods.isPopupMenu()) rack.dragMove (e); }
 void JackComp::mouseUp (const juce::MouseEvent& e) { if (! e.mods.isPopupMenu()) rack.endDrag (e); }
@@ -509,6 +510,10 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
 {
     prefix = instPrefix (i);
     setSize ((int) spec.width, (int) spec.height);
+    // the strip goes under every child: the "x" stays on top of it, and so do the 296's top jacks, 1 unit into it
+    grip = std::make_unique<ModuleGrip> (rack, *this);
+    grip->setBounds (0, 0, getWidth(), ModuleGrip::kHeight);
+    addAndMakeVisible (*grip);
     for (auto& c : spec.controls)
     {
         if (c.style == CtrlStyle::Prog)
@@ -1543,6 +1548,11 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
         }
     }
     paintMidi (g);   // last, over every display of the panel
+    if (rack.movingPanel() == this)
+    {
+        g.setColour (col::midi);
+        g.drawRect (getLocalBounds().toFloat(), 2.0f);
+    }
 }
 
 void ModulePanel::updateLeds()
@@ -1704,6 +1714,60 @@ void ModulePanel::mouseDown (const juce::MouseEvent& e)
 }
 
 // =================================================================================================
+// ModuleGrip
+// =================================================================================================
+ModuleGrip::ModuleGrip (RackView& rv, ModulePanel& p) : rack (rv), panel (p)
+{
+    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+    setTooltip ("Drag to move this module. Cables stay patched and the sound keeps playing.");
+}
+
+void ModuleGrip::paint (juce::Graphics& g)
+{
+    if (moving || (! hover && ! pressed)) return;   // nothing at rest: the panel images stay the same
+    // shortcut: alphas from the spec, the visual auditor still has to tune them on both finishes
+    g.setColour (juce::Colours::white.withAlpha (pressed ? 0.16f : (skin::neon() ? 0.14f : 0.10f)));
+    g.fillRect (getLocalBounds());
+}
+
+void ModuleGrip::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu()) { panel.mouseDown (e.getEventRelativeTo (&panel)); return; }   // "Remove ..."
+    pressed = true;
+    moving = false;
+    downAt = e.getScreenPosition().toFloat();
+    beginDragAutoRepeat (16);
+    repaint();
+}
+
+void ModuleGrip::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! pressed || e.mods.isPopupMenu()) return;
+    if (! moving)
+    {
+        if (e.getScreenPosition().toFloat().getDistanceFrom (downAt) < 4.0f) return;   // a click, or a double click: nothing
+        moving = true;
+        rack.beginModuleDrag (panel, panel.getLocalPoint (nullptr, downAt));
+        repaint();
+    }
+    rack.moduleDragMove (e);
+}
+
+void ModuleGrip::mouseUp (const juce::MouseEvent&)
+{
+    if (moving) rack.endModuleDrag();
+    pressed = moving = false;
+    repaint();
+}
+
+bool ModuleGrip::readoutText (ReadoutText& t)
+{
+    if (message.name.isEmpty() || juce::Time::getMillisecondCounter() > messageUntil) return false;
+    t = message;
+    return true;
+}
+
+// =================================================================================================
 // CableLayer
 // =================================================================================================
 static void drawCable (juce::Graphics& g, juce::Point<float> a, juce::Point<float> b, juce::Colour c, bool banana, float alpha, float floorY)
@@ -1743,12 +1807,16 @@ static void drawCable (juce::Graphics& g, juce::Point<float> a, juce::Point<floa
 
 void CableLayer::paint (juce::Graphics& g)
 {
+    const auto* moving = rack.movingPanel();
     for (auto& c : rack.proc.getCables())
     {
         auto* a = rack.findJack (c.srcInst, true, c.srcJack);
         auto* b = rack.findJack (c.dstInst, false, c.dstJack);
         if (a == nullptr || b == nullptr) continue;
-        drawCable (g, rack.jackCentre (*a), rack.jackCentre (*b), cableColour (c.colour, a->kind == JackKind::Banana), a->kind == JackKind::Banana, rack.cableAlpha, (float) getHeight() - 4.0f);
+        // while a module moves, its own cords stay as they are and the others step back
+        const bool own = moving == nullptr || c.srcInst == moving->inst || c.dstInst == moving->inst;
+        const float alpha = own ? rack.cableAlpha : juce::jmin (rack.cableAlpha, 0.35f);
+        drawCable (g, rack.jackCentre (*a), rack.jackCentre (*b), cableColour (c.colour, a->kind == JackKind::Banana), a->kind == JackKind::Banana, alpha, (float) getHeight() - 4.0f);
     }
     if (rack.dragFrom != nullptr)
         drawCable (g, rack.jackCentre (*rack.dragFrom), rack.dragPos, cableColour (rack.dragColour, rack.dragFrom->kind == JackKind::Banana),
@@ -1783,41 +1851,103 @@ void RackView::changeListenerCallback (juce::ChangeBroadcaster*)
     std::vector<int> have;
     for (auto& pnl : panels) have.push_back (pnl->inst);
     if (want != have) rebuild();
+    else layoutPanels();   // the order of the rows may have changed: the panels move, nothing is made again
+    if (revealInst >= 0 && proc.isPresent (revealInst)) reveal (revealInst);
+    revealInst = -1;
     cables.repaint();
     for (auto& pnl : panels) for (auto& j : pnl->jacks) juce::ignoreUnused (j);
 }
 
 void RackView::rebuild()
 {
+    cancelModuleDrag();
     panels.clear();
-    // order on the rails: MIDI, the 259s, OUTPUT; rows wrap at ~1330 units
-    std::vector<int> order;
-    order.push_back (kInstMidi);
-    for (int i = 1; i < kInstOutput; ++i) if (proc.isPresent (i)) order.push_back (i);   // 281s, 259s, 292s
-    order.push_back (kInstOutput);
-    const int gap = 6, maxW = 1336, rowH = 430;
-    int x = gap, y = gap, rowW = 0;
-    for (int inst : order)
+    // made in slot order, as changeListenerCallback compares them; where they go comes from the rows
+    for (int inst = 0; inst < kNumInst; ++inst)
     {
+        if (! proc.isPresent (inst)) continue;
         auto p = std::make_unique<ModulePanel> (*this, proc, inst);
-        if (x + p->getWidth() > maxW && x > gap) { x = gap; y += rowH + 18; }
-        p->setTopLeftPosition (x, y);
-        x += p->getWidth() + gap;
-        rowW = juce::jmax (rowW, x);
         content.addAndMakeVisible (*p);
         panels.push_back (std::move (p));
     }
-    contentSize = { juce::jmax (rowW, 800), y + rowH + 64 };   // room under the last row for the cords to hang
+    layoutPanels();
+    cables.toFront (false);
+    if (auto* parent = getParentComponent()) parent->resized();
+}
+
+ModulePanel* RackView::panelOf (int inst) const
+{
+    for (auto& p : panels) if (p->inst == inst) return p.get();
+    return nullptr;
+}
+
+void RackView::layoutPanels()
+{
+    using P = WcProcessor;
+    auto rows = proc.layout();
+    const auto real = rows.size();
+    int fromRow = -1, fromIndex = 0;
+    if (moving != nullptr)
+    {
+        for (size_t r = 0; r < rows.size(); ++r)
+            for (size_t i = 0; i < rows[r].size(); ++i)
+                if (rows[r][i] == moving->inst) { fromRow = (int) r; fromIndex = (int) i; }
+        for (auto& r : rows) r.erase (std::remove (r.begin(), r.end(), moving->inst), r.end());
+        // the hole: where it would land, or (a full row, outside the view) where it came from
+        const int r = dropOk ? dropRow : fromRow, i = dropOk ? dropIndex : fromIndex;
+        if (r >= 0)
+        {
+            if (r == (int) rows.size()) rows.emplace_back();
+            rows[(size_t) r].insert (rows[(size_t) r].begin() + juce::jlimit (0, (int) rows[(size_t) r].size(), i), moving->inst);
+        }
+    }
+    int widest = 0;
+    for (size_t r = 0; r < rows.size(); ++r)
+    {
+        int x = P::kGap;
+        const int y = P::kGap + P::kRowPitch * (int) r;
+        for (int inst : rows[r])
+        {
+            const int w = P::panelWidth (inst);
+            if (moving != nullptr && inst == moving->inst) hole = { (float) x, (float) y, (float) w, 430.0f };
+            else if (auto* p = panelOf (inst)) p->setTopLeftPosition (x, y);
+            x += w + P::kGap;
+        }
+        widest = juce::jmax (widest, x);
+    }
+    // a drag shows one more row under the last (the provisional one); room under the last row for the cords to hang
+    const int shown = (int) real + (moving != nullptr ? 1 : 0);
+    contentSize = { juce::jmax (P::kRowLimit + P::kGap, widest), P::kRowPitch * shown + 52 };
     content.setSize (contentSize.x, contentSize.y);
     cables.setBounds (content.getLocalBounds());
+
+    // the "x" of an empty row (hidden while a module moves)
+    while (rowRemove.size() < real)
+    {
+        const int r = (int) rowRemove.size();
+        auto b = std::make_unique<juce::TextButton> ("x");
+        b->onClick = [this, r] { proc.removeRow (r); };
+        content.addChildComponent (*b);
+        rowRemove.push_back (std::move (b));
+    }
+    rowRemove.resize (real);
+    for (size_t r = 0; r < real; ++r)
+    {
+        auto& b = *rowRemove[r];
+        const bool canGo = real > 2;
+        b.setEnabled (canGo);
+        b.setTooltip (canGo ? "Remove this empty row" : "The rack keeps at least two rows");
+        b.setBounds (12, P::kGap + P::kRowPitch * (int) r + 27, 18, 18);
+        b.setVisible (moving == nullptr && proc.layout()[r].empty());
+    }
     cables.toFront (false);
     setZoom (zoom);
-    if (auto* parent = getParentComponent()) parent->resized();
+    repaint();
 }
 
 void RackView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
-    if (onZoomGesture != nullptr && (e.mods.isCtrlDown() || e.mods.isCommandDown()) && w.deltaY != 0.0f)
+    if (onZoomGesture != nullptr && moving == nullptr && (e.mods.isCtrlDown() || e.mods.isCommandDown()) && w.deltaY != 0.0f)
     {
         onZoomGesture (w.isReversed ? -w.deltaY : w.deltaY, e.position);
         return;                                   // zoomed: the viewport must not scroll as well
@@ -1839,6 +1969,15 @@ juce::Point<int> RackView::preferredSize() const
 
 void RackView::resized() {}
 
+static void dashedRect (juce::Graphics& g, juce::Rectangle<float> r, float width)
+{
+    juce::Path p, d;
+    p.addRectangle (r);
+    const float dashes[] = { 6.0f, 4.0f };
+    juce::PathStrokeType (width).createDashedStroke (d, p, dashes, 2);
+    g.fillPath (d);
+}
+
 void RackView::paint (juce::Graphics& g)
 {
     g.fillAll (col::bg);
@@ -1848,6 +1987,40 @@ void RackView::paint (juce::Graphics& g)
     {
         g.fillRect (0, y, getWidth(), (int) (6.0f * zoom));
         g.fillRect (0, y + (int) (436.0f * zoom), getWidth(), (int) (8.0f * zoom));
+    }
+    // the rows, in content units (under the panels and the cords)
+    using P = WcProcessor;
+    g.addTransform (juce::AffineTransform::scale (zoom));
+    const float line = juce::jmax (1.5f, 1.0f / zoom);   // never under a screen pixel
+    const auto& rows = proc.layout();
+    auto top = [] (int r) { return (float) (P::kGap + P::kRowPitch * r); };
+    g.setFont (WcLook::label (12.0f));
+    for (size_t r = 0; r < rows.size(); ++r)
+        if (rows[r].empty() && ! (moving != nullptr && dropOk && dropRow == (int) r))
+        {
+            g.setColour (col::text.withAlpha (0.5f));
+            g.drawText (juce::String (juce::CharPointer_UTF8 ("EMPTY ROW \xc2\xb7 drag a module here by its top edge")),
+                        juce::Rectangle<float> (40.0f, top ((int) r) + 36.0f - 8.0f, 600.0f, 16.0f), juce::Justification::centredLeft);
+        }
+    if (moving == nullptr) return;
+    const int fresh = (int) rows.size();   // the provisional row
+    const bool into = dropOk && dropRow == fresh;
+    g.setColour (into ? col::midi.withAlpha (0.8f) : col::text.withAlpha (0.35f));
+    dashedRect (g, { (float) P::kGap, top (fresh), (float) (P::kRowLimit - P::kGap), 430.0f }, line);
+    if (! into) g.drawText ("NEW ROW", juce::Rectangle<float> (24.0f, top (fresh) + 36.0f - 8.0f, 200.0f, 16.0f), juce::Justification::centredLeft);
+    g.setColour (col::midi.withAlpha (0.8f));
+    dashedRect (g, hole, line);
+    if (! dropOk && dropRow >= 0)   // a full row: a red bar where it would have gone, the row stays closed
+    {
+        int x = P::kGap, i = 0;
+        for (int inst : rows[(size_t) dropRow])
+        {
+            if (inst == moving->inst) continue;
+            if (i++ == dropIndex) break;
+            x += P::panelWidth (inst) + P::kGap;
+        }
+        g.setColour (col::ledRed);
+        g.fillRect ((float) x - 5.0f, top (dropRow), 4.0f, 430.0f);
     }
 }
 
@@ -2187,9 +2360,20 @@ void RackView::beginDrag (JackComp& j, const juce::MouseEvent& e)
     cables.repaint();
 }
 
+void RackView::autoScroll (const juce::MouseEvent& e)
+{
+    // 40 screen px at the edge; as many px per 16 ms as the mouse is into it, 20 at most (~1250 px/s); past it, 20
+    if (auto* vp = findParentComponentOfClass<juce::Viewport>())
+    {
+        const auto p = vp->getLocalPoint (nullptr, e.getScreenPosition()).roundToInt();
+        vp->autoScroll (p.x, p.y, 40, 20);
+    }
+}
+
 void RackView::dragMove (const juce::MouseEvent& e)
 {
     if (dragFrom == nullptr) return;
+    autoScroll (e);
     dragPos = content.getLocalPoint (nullptr, e.getScreenPosition()).toFloat();
     cables.repaint();
 }
@@ -2213,6 +2397,124 @@ void RackView::endDrag (const juce::MouseEvent& e)
     }
     for (auto& p : panels) for (auto& jc : p->jacks) jc->repaint();
     cables.repaint();
+}
+
+// ---- moving a module ----
+void RackView::beginModuleDrag (ModulePanel& p, juce::Point<float> grabInPanel)
+{
+    cancelModuleDrag();
+    moving = &p;
+    grab = grabInPanel;
+    dropRow = -1; dropOk = false; heldMsg = 0;
+    p.setAlpha (0.85f);
+    p.toBehind (&cables);   // over the other panels, under the cords
+    p.repaint();
+}
+
+void RackView::moduleDragMove (const juce::MouseEvent& e)
+{
+    if (moving == nullptr) return;
+    using P = WcProcessor;
+    autoScroll (e);
+    const auto screen = e.getScreenPosition().toFloat();
+    const auto pt = content.getLocalPoint (nullptr, screen);   // the content moves under the mouse while it scrolls
+    moving->setTopLeftPosition ((pt - grab).roundToInt());
+    const auto& rows = proc.layout();
+    auto* vp = findParentComponentOfClass<juce::Viewport>();
+    const bool inside = vp == nullptr || vp->getScreenBounds().toFloat().contains (screen);
+    dropRow = inside ? juce::jlimit (0, (int) rows.size(), (int) std::floor ((pt.y + 3.0f) / (float) P::kRowPitch)) : -1;
+    dropIndex = 0;
+    dropOk = false;
+    if (dropRow >= 0)
+    {
+        // counted on the row packed without the module, or the hole would make the place shake
+        static const std::vector<int> none;
+        const auto& row = dropRow < (int) rows.size() ? rows[(size_t) dropRow] : none;
+        int x = P::kGap, from = -1;
+        for (int inst : row)
+        {
+            if (inst == moving->inst) { from = 0; continue; }
+            const int w = P::panelWidth (inst);
+            if ((float) x + (float) w * 0.5f < pt.x) ++dropIndex;
+            x += w + P::kGap;
+        }
+        dropOk = from == 0 || P::rowHasRoom (row, P::panelWidth (moving->inst), moving->inst);
+    }
+    // the readout says why it would not land; a good place needs no words
+    const int msg = dropRow < 0 ? 1 : (dropOk ? 0 : 2 + dropRow);
+    if (readout != nullptr && msg != heldMsg)
+    {
+        const auto name = instName (moving->inst);
+        if (msg == 0) readout->release();
+        else if (msg == 1) readout->hold (*moving->grip, { name, "Release to put it back", {}, false });
+        else readout->hold (*moving->grip, { name, "Row " + juce::String (dropRow + 1) + " is full", "Drop it on another row, or below the last one", true });
+    }
+    heldMsg = msg;
+    layoutPanels();
+    cables.repaint();
+}
+
+void RackView::endModuleDrag()
+{
+    if (moving == nullptr) return;
+    const int inst = moving->inst, r = dropRow, i = dropIndex;
+    const bool ok = dropOk && r >= 0;
+    cancelModuleDrag();
+    if (ok) proc.moveModule (inst, r, i);   // the order only, and the host is told; then the panels are placed
+    layoutPanels();
+}
+
+void RackView::cancelModuleDrag()
+{
+    if (moving == nullptr) return;
+    moving->setAlpha (1.0f);
+    moving->repaint();
+    moving = nullptr;
+    dropRow = -1; dropOk = false;
+    if (readout != nullptr && heldMsg != 0) readout->release();
+    heldMsg = 0;
+    layoutPanels();
+    cables.repaint();
+}
+
+int RackView::rowAtViewCentre() const
+{
+    auto* vp = findParentComponentOfClass<juce::Viewport>();
+    if (vp == nullptr) return -1;
+    const float y = ((float) vp->getViewPositionY() + (float) vp->getViewHeight() * 0.5f) / zoom;
+    return juce::jlimit (0, (int) proc.layout().size() - 1, (int) std::floor ((y + 3.0f) / (float) WcProcessor::kRowPitch));
+}
+
+void RackView::addModule (int inst)
+{
+    revealInst = inst;   // the panel comes with the change message: then it is shown
+    proc.setPresent (inst, true, rowAtViewCentre());
+    if (! proc.isPresent (inst)) revealInst = -1;   // refused (demo): nothing to show
+}
+
+// the view moves as little as it takes to show the whole new module (wider than the view: its left edge 24 px in)
+void RackView::reveal (int inst)
+{
+    auto* p = panelOf (inst);
+    auto* vp = findParentComponentOfClass<juce::Viewport>();
+    if (p == nullptr || vp == nullptr) return;
+    const auto b = p->getBounds().toFloat() * zoom;
+    const auto view = vp->getViewArea().toFloat();
+    auto along = [] (float lo, float len, float vLo, float vLen)
+    {
+        if (len > vLen) return lo - 24.0f;
+        if (lo < vLo) return lo;
+        if (lo + len > vLo + vLen) return lo + len - vLen;
+        return vLo;
+    };
+    vp->setViewPosition (juce::roundToInt (along (b.getX(), b.getWidth(), view.getX(), view.getWidth())),
+                         juce::roundToInt (along (b.getY(), b.getHeight(), view.getY(), view.getHeight())));
+    int row = 0;
+    for (size_t r = 0; r < proc.layout().size(); ++r)
+        for (int i : proc.layout()[r]) if (i == inst) row = (int) r;
+    p->grip->message = { instName (inst), "Added at the end of row " + juce::String (row + 1), "Drag its top edge to move it", false };
+    p->grip->messageUntil = juce::Time::getMillisecondCounter() + (juce::uint32) kMovedMs;
+    if (readout != nullptr) readout->flash (*p->grip, p->grip->message.note, false, kMovedMs);
 }
 
 void RackView::jackMenu (JackComp& j)

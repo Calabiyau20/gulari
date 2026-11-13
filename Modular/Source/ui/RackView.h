@@ -140,6 +140,33 @@ private:
     int editStage() const;
 };
 
+class ModulePanel;
+
+// The top strip of a panel (22 units, as wide as the panel): drag it to move the module. A child of the panel, so it
+// gets the mouse before the 218, 242, 252 and 666 keep every click of their own. It paints nothing at rest (the panel
+// images stay as they are). A right click is the panel's own menu.
+class ModuleGrip : public juce::Component, public juce::SettableTooltipClient, public ReadoutSource
+{
+public:
+    ModuleGrip (RackView& rv, ModulePanel& p);
+    void paint (juce::Graphics&) override;
+    void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    bool readoutText (ReadoutText&) override;
+    juce::Rectangle<float> readoutAnchor() override { return getLocalBounds().toFloat(); }
+    ReadoutText message;              // what the readout says over the strip ("Added at the end of row 2") ...
+    juce::uint32 messageUntil = 0;    // ... until then
+    static constexpr int kHeight = 22;
+private:
+    RackView& rack;
+    ModulePanel& panel;
+    juce::Point<float> downAt;        // screen
+    bool hover = false, pressed = false, moving = false;
+};
+
 class ModulePanel : public juce::Component
 {
 public:
@@ -156,6 +183,7 @@ public:
     juce::Component* controlFor (const juce::String& paramId) const;   // the knob, fader, lever or button showing it
     const int inst;
     std::vector<std::unique_ptr<JackComp>> jacks;
+    std::unique_ptr<ModuleGrip> grip;
 private:
     RackView& rack;
     WcProcessor& proc;
@@ -229,6 +257,16 @@ public:
     void dragMove (const juce::MouseEvent& e);
     void endDrag (const juce::MouseEvent& e);
     bool isDragging() const { return dragFrom != nullptr; }
+    void autoScroll (const juce::MouseEvent& e);   // a drag near or past the edge of the view scrolls it
+
+    // moving a module by its top strip. Until the drop nothing changes but what is on screen; the drop changes only
+    // the order of the rows (WcProcessor::moveModule): no rebuild, no setPatch, the audio is not touched.
+    void beginModuleDrag (ModulePanel& p, juce::Point<float> grabInPanel);
+    void moduleDragMove (const juce::MouseEvent& e);
+    void endModuleDrag();
+    void cancelModuleDrag();                       // Esc, a rebuild: back where it was
+    const ModulePanel* movingPanel() const { return moving; }
+    void addModule (int inst);                     // "+ MODULE": at the end of the row in the middle of the view
     bool canDropOn (const JackComp& j) const;
     void jackMenu (JackComp& j);
 
@@ -274,7 +312,18 @@ public:
 
 private:
     std::vector<std::unique_ptr<ModulePanel>> panels;
+    std::vector<std::unique_ptr<juce::TextButton>> rowRemove;   // the "x" of each row, shown on the empty ones
     CableLayer cables { *this };
+    ModulePanel* moving = nullptr;             // the module being moved
+    juce::Point<float> grab;                   // where its strip was taken, in the panel
+    int dropRow = -1, dropIndex = 0;           // where it would land (-1: outside the view); index in the row without it
+    bool dropOk = false;                       // false: the row is full, or outside
+    int heldMsg = 0, revealInst = -1;
+    juce::Rectangle<float> hole;               // where it lands (or goes back to), content units
+    void layoutPanels();                       // places the panels from the rows (and the drag)
+    ModulePanel* panelOf (int inst) const;
+    void reveal (int inst);
+    int rowAtViewCentre() const;
     float zoom = 1.0f;
     juce::Point<int> contentSize { 800, 450 };
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
