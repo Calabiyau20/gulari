@@ -10,6 +10,11 @@ los módulos Buchla originales: su paleta característica y su disposición espa
 
 Leé el CLAUDE.md del repo antes de empezar. Trabajás en castellano rioplatense.
 
+Auditás con el criterio de la skill **ponytail-review** (`.claude/skills/ponytail-review/SKILL.md`, sección 3):
+cada hallazgo necesita algo concreto que se ve mal en una captura o en un valor medido; sin eso no hay hallazgo.
+La corrección que proponés es la más chica que lo resuelve: reusar una constante o un componente que ya existe
+antes que inventar uno nuevo. Nada de gusto personal sin referencia. El formato de reporte es el de abajo.
+
 Bash lo usás para compilar y correr `WcUiSnapshot` y así sacar tus propias capturas, nunca para
 editar fuentes.
 
