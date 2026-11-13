@@ -15,6 +15,7 @@
 #include "../modules/M291.h"
 #include "../modules/M666.h"
 #include "WcData.h"
+#include "../WcParams.h"
 
 namespace wc::ui
 {
@@ -32,6 +33,16 @@ static juce::String jackTip (const JackSpec& j)
     if (l == "wave") t << ": program - 0-3.3 V saw, 3.3-6.7 V square, above: triangle (remote / both)";
     t << "\nDrag to patch. Right-click to disconnect.";
     return t;
+}
+
+// what the menus print next to "Type a value..."
+static juce::String typeShortcut()
+{
+   #if JUCE_MAC
+    return "Cmd+Click";
+   #else
+    return "Ctrl+Click";
+   #endif
 }
 
 // italic silkscreen: the 200-series panels are lettered in lowercase italics
@@ -119,14 +130,29 @@ void JackComp::mouseUp (const juce::MouseEvent& e) { if (! e.mods.isPopupMenu())
 // ParamSwitch
 // =================================================================================================
 ParamSwitch::ParamSwitch (juce::RangedAudioParameter& p, int n, const juce::String& l, juce::Colour t)
-    : param (p), positions (n), tip (t), attach (p, [this] (float v) { value = juce::roundToInt (v); repaint(); })
+    : param (p), positions (n), tip (t), attach (p, [this] (float v)
+      {
+          value = juce::roundToInt (v);
+          repaint();
+          if (auto* r = RackView::readoutFor (*this)) r->refresh();
+      })
 {
     topIsOne = dynamic_cast<juce::AudioParameterBool*> (&p) != nullptr;
     if (l.isNotEmpty()) labels = juce::StringArray::fromTokens (l, "|", "");
     attach.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip (p.getName (64) + (l.isNotEmpty() ? ": " + l.replace ("|", " / ") : juce::String()) + "  (click a position)");
+    // no tooltip: the value readout names the parameter and its position
 }
+
+bool ParamSwitch::readoutText (ReadoutText& t)
+{
+    t.name = param.getName (64);
+    t.value = param.getCurrentValueAsText();
+    return true;
+}
+void ParamSwitch::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
+void ParamSwitch::mouseMove (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this); }
+void ParamSwitch::mouseExit (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this); }
 
 // chrome bat-handle toggle, vertical, labels printed to its right
 void ParamSwitch::paint (juce::Graphics& g)
@@ -176,6 +202,11 @@ void ParamSwitch::paint (juce::Graphics& g)
 
 void ParamSwitch::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())   // the menu, and the lever stays where it is
+    {
+        if (auto* rv = findParentComponentOfClass<RackView>()) rv->paramMenu (*this, param.getParameterID(), false);
+        return;
+    }
     const float rel = (float) e.y / (float) getHeight();
     int pos;
     if (positions == 3) pos = rel < 0.38f ? 0 : (rel > 0.62f ? 2 : 1);
@@ -185,15 +216,34 @@ void ParamSwitch::mouseDown (const juce::MouseEvent& e)
 }
 
 ParamButton::ParamButton (juce::RangedAudioParameter& p)
-    : param (p), attach (p, [this] (float v) { value = v; repaint(); })
+    : param (p), attach (p, [this] (float v)
+      {
+          value = v;
+          repaint();
+          if (auto* r = RackView::readoutFor (*this)) r->refresh();
+      })
 {
     attach.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip (p.getName (64) + " - click to change");
 }
 
-void ParamButton::mouseDown (const juce::MouseEvent&)
+bool ParamButton::readoutText (ReadoutText& t)
 {
+    t.name = param.getName (64);
+    t.value = param.getCurrentValueAsText();
+    return true;
+}
+void ParamButton::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
+void ParamButton::mouseMove (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this); }
+void ParamButton::mouseExit (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this); }
+
+void ParamButton::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())   // the menu, and the value stays
+    {
+        if (auto* rv = findParentComponentOfClass<RackView>()) rv->paramMenu (*this, param.getParameterID(), false);
+        return;
+    }
     down = true;
     const int steps = juce::jmax (2, param.getNumSteps());
     const float hi = param.convertFrom0to1 (1.0f), lo = param.convertFrom0to1 (0.0f);
@@ -229,6 +279,141 @@ void PushButton::paint (juce::Graphics& g)
 }
 
 // =================================================================================================
+// WcKnob
+// =================================================================================================
+WcKnob::WcKnob (SliderStyle st) : juce::Slider (st, NoTextBox)
+{
+    // none of JUCE's own gestures: no velocity mode, no Alt+click to default, no popup value (the readout shows it)
+    setVelocityModeParameters (1.0, 1, 0.0, false);
+    setPopupDisplayEnabled (false, false, nullptr);
+    setScrollWheelEnabled (false);
+}
+
+juce::Point<float> WcKnob::screen (const juce::MouseEvent& e) const
+{
+    return localPointToGlobal (e.position);   // through the zoom transform: what the hand moved on the screen
+}
+
+int WcKnob::numValues() const
+{
+    const double iv = getInterval();
+    return iv > 0.0 ? juce::roundToInt ((getMaximum() - getMinimum()) / iv) + 1 : 0;
+}
+
+bool WcKnob::readoutText (ReadoutText& t)
+{
+    if (describe != nullptr) { if (! describe (t)) return false; }
+    else
+    {
+        if (param == nullptr) return false;
+        t.name = param->getName (64);
+        t.value = param->getCurrentValueAsText();
+    }
+    if (stepsNote.isNotEmpty()) t.note = stepsNote;
+    return true;
+}
+
+juce::Rectangle<float> WcKnob::readoutAnchor()
+{
+    const auto b = getLocalBounds().toFloat();
+    if (! isRotary())   // a fader: its cap
+        return { b.getCentreX() - 11.0f, getPositionOfValue (getValue()) - 7.0f, 22.0f, 14.0f };
+    const int style = (int) getProperties().getWithDefault ("style", 1);
+    const float kr = style == 0 ? 33.0f : (style == 1 ? 22.0f : 14.0f);   // the skirt, as WcLook draws it
+    return juce::Rectangle<float> (2.0f * kr, 2.0f * kr).withCentre (b.getCentre());
+}
+
+void WcKnob::mouseDown (const juce::MouseEvent& e)
+{
+    menuClick = e.mods.isPopupMenu();
+    if (menuClick) { if (onMenu != nullptr) onMenu(); return; }   // the menu, never a drag
+    if (! isEnabled()) return;
+    raw = valueToProportionOfLength (getValue());
+    down = last = screen (e);
+    typing = e.mods.isCommandDown() && onType != nullptr;   // decided on release: still (< 4 px) types, moved drags
+    gesture = false;
+    stepsNote.clear();
+    if (auto* r = RackView::readoutFor (*this)) r->dragStart (*this);
+}
+
+void WcKnob::mouseDrag (const juce::MouseEvent& e)
+{
+    if (menuClick || ! isEnabled()) return;
+    const auto p = screen (e);
+    const auto d = p - last;
+    last = p;
+    const bool fine = e.mods.isShiftDown();
+    if (isRotary())
+        raw += (double) (d.x - d.y) / (fine ? kTurnPx * 10.0 : kTurnPx);
+    else
+    {
+        // a fader runs under the hand: its own length on the screen is the whole travel
+        const float scale = (localPointToGlobal (juce::Point<float> (0.0f, 1.0f)) - localPointToGlobal (juce::Point<float> (0.0f, 0.0f))).getDistanceFromOrigin();
+        const double len = juce::jmax (1.0, (double) std::abs (getPositionOfValue (getMaximum()) - getPositionOfValue (getMinimum())) * scale);
+        raw -= (double) d.y / (fine ? len * 10.0 : len);
+    }
+    raw = juce::jlimit (0.0, 1.0, raw);
+    if (typing)
+    {
+        if (p.getDistanceFrom (down) < 4.0f) return;
+        typing = false;   // it moved: a drag after all
+    }
+    // Alt: steps of 10 % of the travel (Shift+Alt: 1 %). A stepped control with 11 values or fewer has them already.
+    double q = raw;
+    const int n = numValues();
+    stepsNote.clear();
+    if (e.mods.isAltDown() && (n == 0 || n > 11))
+    {
+        const double grid = fine ? 100.0 : 10.0;
+        q = std::round (raw * grid) / grid;
+        stepsNote = fine ? "1 % steps" : "10 % steps";
+    }
+    const double v = proportionOfLengthToValue (q);
+    if (! juce::approximatelyEqual (v, getValue()))
+    {
+        if (param != nullptr && ! gesture) { param->beginChangeGesture(); gesture = true; }
+        setValue (v, juce::sendNotificationSync);
+    }
+    else if (auto* r = RackView::readoutFor (*this)) r->refresh();
+}
+
+void WcKnob::mouseUp (const juce::MouseEvent& e)
+{
+    if (menuClick) { menuClick = false; return; }
+    if (gesture && param != nullptr) param->endChangeGesture();
+    gesture = false;
+    stepsNote.clear();
+    if (auto* r = RackView::readoutFor (*this)) r->dragEnd (*this, getLocalBounds().contains (e.getPosition()));
+    if (typing) { typing = false; if (onType != nullptr) onType(); }
+}
+
+void WcKnob::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu()) juce::Slider::mouseDoubleClick (e);   // back to the default
+}
+
+void WcKnob::mouseEnter (const juce::MouseEvent& e)
+{
+    juce::Slider::mouseEnter (e);
+    if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this);
+}
+void WcKnob::mouseMove (const juce::MouseEvent& e)
+{
+    juce::Slider::mouseMove (e);
+    if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this);
+}
+void WcKnob::mouseExit (const juce::MouseEvent& e)
+{
+    juce::Slider::mouseExit (e);
+    if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this);
+}
+
+void WcKnob::valueChanged()
+{
+    if (auto* r = RackView::readoutFor (*this)) if (r->targetComponent() == this) r->refresh();
+}
+
+// =================================================================================================
 // ProgSwitch (248)
 // =================================================================================================
 ProgSwitch::ProgSwitch (WcProcessor& p, const juce::String& pre, const juce::String& f, int v, bool h, juce::Colour t)
@@ -253,6 +438,7 @@ void ProgSwitch::set (const juce::String& id, float plain)
 
 void ProgSwitch::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu()) return;   // the right button does nothing here
     const bool first = horiz ? e.position.x < (float) getWidth() * 0.5f : e.position.y < (float) getHeight() * 0.5f;   // up / left
     dir = first ? 1 : -1;
     repaint();
@@ -478,16 +664,20 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         }
         if (c.suffix[0] == '@')
         {
-            auto fk = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+            auto fk = std::make_unique<WcKnob> (juce::Slider::RotaryHorizontalVerticalDrag);
             const int size = c.style == CtrlStyle::BigKnob ? 74 : (c.style == CtrlStyle::Knob ? 54 : 38);
             fk->getProperties().set ("style", c.style == CtrlStyle::BigKnob ? 0 : (c.style == CtrlStyle::Knob ? 1 : 2));
             fk->getProperties().set ("cap", (juce::int64) c.colour);
             fk->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
-            fk->setScrollWheelEnabled (false);
             fk->setRange (0.0, 1.0);
             fk->setValue (juce::String (c.suffix) == "@phase" ? 0.5 : 0.0, juce::dontSendNotification);
             fk->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
             const juce::String nm (c.suffix);
+            // double click = the menu's reset: no change / on the beat / even; the phase has no reset
+            if (nm != "@phase") fk->setDoubleClickReturnValue (true, nm == "@offset" ? 0.5 : 0.0, juce::ModifierKeys());
+            fk->describe = [this, nm] (ReadoutText& t) { return describe252 (nm, t); };
+            fk->onMenu = [this, nm] { menu252 (nm); };
+            if (nm == "@cv") fk->onType = [this, nm] { type252 (nm); };
             fk->setTooltip (nm == "@cv" ? "C.V. value of the selected output for the cursor cell (fully left = --, no change)"
                             : nm == "@offset" ? "Behind / ahead: moves the cursor cell earlier (left) or later (right)"
                             : nm == "@subc" ? "Cell subdivide: spacing of the subdivided pulses (0 even .. 1 bunched late)"
@@ -522,35 +712,29 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         }
         if (c.style == CtrlStyle::Fader)
         {
-            auto f = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::NoTextBox);
+            auto f = std::make_unique<WcKnob> (juce::Slider::LinearVertical);
             const int len = c.scale2 != nullptr ? juce::String (c.scale2).getIntValue() : 120;
             f->setBounds ((int) c.x - 13, (int) c.y - len / 2, 26, len);
-            f->setScrollWheelEnabled (false);
-            f->setPopupDisplayEnabled (true, true, nullptr);
-            f->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
-            f->setTooltip (param->getName (64));
             addAndMakeVisible (*f);
             attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, resolveId (c.suffix), *f));
             sliders.push_back (std::move (f));
             sliderIds.push_back (c.suffix);
             boundIds.push_back (resolveId (c.suffix));
+            bindKnob (sliders.size() - 1);
             continue;
         }
-        auto s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+        auto s = std::make_unique<WcKnob> (juce::Slider::RotaryHorizontalVerticalDrag);
         const int size = c.style == CtrlStyle::BigKnob ? 74 : (c.style == CtrlStyle::Knob ? 54 : 38);
         s->getProperties().set ("style", c.style == CtrlStyle::BigKnob ? 0 : (c.style == CtrlStyle::Knob ? 1 : 2));
         s->getProperties().set ("cap", (juce::int64) c.colour);
         s->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
         s->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
-        s->setScrollWheelEnabled (false);
-        s->setPopupDisplayEnabled (true, true, nullptr);
-        s->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
-        s->setTooltip (param->getName (64));
         addAndMakeVisible (*s);
         attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, resolveId (c.suffix), *s));
         sliders.push_back (std::move (s));
         sliderIds.push_back (c.suffix);
         boundIds.push_back (resolveId (c.suffix));
+        bindKnob (sliders.size() - 1);
     }
     int nIn = 0, nOut = 0;
     for (auto& j : spec.jacks)
@@ -630,10 +814,26 @@ void ModulePanel::rebindDynamic()
         if (id == boundIds[i]) continue;
         boundIds[i] = id;
         attachments[i].reset();
-        if (proc.apvts.getParameter (id) == nullptr) continue;
-        attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *sliders[i]);
-        sliders[i]->setTooltip (proc.apvts.getParameter (id)->getName (64));
+        if (proc.apvts.getParameter (id) != nullptr)
+            attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *sliders[i]);
+        bindKnob (i);
     }
+}
+
+// After the attachment: the attachment sets JUCE's double click with Alt+click as a shortcut to the default, which
+// made Alt+click a reset. Here the default is a double click only. A dynamic knob with no parameter has no
+// readout and no menu.
+void ModulePanel::bindKnob (size_t i)
+{
+    auto& k = *sliders[i];
+    k.param = attachments[i] != nullptr ? proc.apvts.getParameter (boundIds[i]) : nullptr;
+    k.paramId = k.param != nullptr ? boundIds[i] : juce::String();
+    if (k.param != nullptr) k.setDoubleClickReturnValue (true, k.param->convertFrom0to1 (k.param->getDefaultValue()), juce::ModifierKeys());
+    else k.setDoubleClickReturnValue (false, 0.0);
+    auto* kp = &k;
+    k.onMenu = [this, kp] { if (kp->param != nullptr) rack.paramMenu (*kp, kp->paramId, true); };
+    k.onType = [this, kp] { if (kp->param != nullptr) rack.typeValue (*kp, kp->paramId); };
+    if (rack.readout != nullptr && rack.readout->targetComponent() == kp) rack.readout->refresh();
 }
 
 int ModulePanel::cursor252() const
@@ -696,6 +896,114 @@ void ModulePanel::free252 (const juce::String& name, double v)
         }
     }
     repaint();
+}
+
+// The 252 cell knobs are not host parameters: they edit the cursor cell, so they carry their own texts and menu.
+static const char* title252 (const juce::String& nm)
+{
+    return nm == "@cv" ? "Cell: C.V. value" : nm == "@offset" ? "Cell: behind / ahead" : nm == "@subc" ? "Cell: subdivide spacing" : "Cell: phase";
+}
+
+static juce::String text252 (const juce::String& nm, double v)
+{
+    if (nm == "@cv") return v < 0.02 ? juce::String ("-- (no change)") : juce::String ((v - 0.02) / 0.98 * 10.0, 2) + " V";
+    if (nm == "@offset")
+    {
+        const int n = juce::roundToInt ((v * 2.0 - 1.0) * 100.0);
+        return n == 0 ? juce::String ("0 %") : (n > 0 ? "+" + juce::String (n) + " % (ahead)" : juce::String (n) + " % (behind)");
+    }
+    if (nm == "@subc") return juce::String (v, 2);
+    return "rotate";
+}
+
+bool ModulePanel::describe252 (const juce::String& nm, ReadoutText& t) const
+{
+    auto it = freeKnobs.find (nm);
+    if (it == freeKnobs.end()) return false;
+    t.name = title252 (nm);
+    t.value = text252 (nm, it->second->getValue());
+    return true;
+}
+
+void ModulePanel::menu252 (const juce::String& nm)
+{
+    auto* k = freeKnobs[nm].get();
+    const double reset = nm == "@offset" ? 0.5 : 0.0;
+    juce::PopupMenu m;
+    m.setLookAndFeel (&k->getLookAndFeel());
+    m.addSectionHeader (title252 (nm));
+    if (nm == "@cv")
+    {
+        juce::PopupMenu::Item it ("Type a value...");
+        it.itemID = 1;
+        it.shortcutKeyDescription = typeShortcut();
+        m.addItem (it);
+    }
+    if (nm != "@phase")
+    {
+        juce::PopupMenu::Item it ("Reset to default");
+        it.itemID = 2;
+        it.isEnabled = std::abs (k->getValue() - reset) > 1.0e-5;
+        it.shortcutKeyDescription = nm == "@cv" ? juce::String ("--") : text252 (nm, reset);
+        m.addItem (it);
+    }
+    m.addSeparator();
+    m.addSectionHeader ("Knob position");
+    for (int i = 0; i < 5; ++i)
+    {
+        juce::PopupMenu::Item it (juce::String (i * 25) + " %");
+        it.itemID = 10 + i;
+        it.isTicked = std::abs (k->getValue() - i * 0.25) < 1.0e-4;
+        it.shortcutKeyDescription = text252 (nm, i * 0.25);
+        m.addItem (it);
+    }
+    m.addSeparator();
+    m.addItem (200, "MIDI Learn (cell knobs are not host parameters)", false);
+    rack.menuOpen = true;
+    juce::Component::SafePointer<ModulePanel> self (this);
+    juce::Component::SafePointer<RackView> rv (&rack);
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, rv, nm, reset] (int r)
+    {
+        if (rv != nullptr) rv->menuOpen = false;
+        if (self == nullptr || r == 0) return;
+        auto* knob = self->freeKnobs[nm].get();
+        if (r == 1) self->type252 (nm);
+        else if (r == 2) knob->setValue (reset, juce::sendNotificationSync);
+        else if (r >= 10 && r <= 14) knob->setValue ((r - 10) * 0.25, juce::sendNotificationSync);
+    });
+}
+
+// 252 C.V.: "6.4", "6.4 V", "--" (no change), or a % of the knob
+void ModulePanel::type252 (const juce::String& nm)
+{
+    if (rack.readout == nullptr) return;
+    auto* k = freeKnobs[nm].get();
+    ValueEdit ed;
+    ed.name = title252 (nm);
+    ed.text = text252 (nm, k->getValue()).upToFirstOccurrenceOf (" (", false, false);
+    ed.example = "6.4 V or --";
+    juce::Component::SafePointer<ModulePanel> self (this);
+    ed.apply = [self, nm] (const juce::String& text, juce::String& limited) -> bool
+    {
+        auto t = text.toLowerCase().removeCharacters (" ").replace (",", ".");
+        double v;
+        int side = 0;
+        if (t == "--" || t == "-") v = 0.0;
+        else
+        {
+            const bool pct = t.endsWithChar ('%');
+            if (pct || t.endsWithChar ('v')) t = t.dropLastCharacters (1);
+            if (t.isEmpty() || ! t.containsOnly ("+-0123456789.") || ! t.containsAnyOf ("0123456789")) return false;
+            const double x = t.getDoubleValue();
+            if (pct) { side = x < 0.0 ? -1 : (x > 100.0 ? 1 : 0); v = juce::jlimit (0.0, 1.0, x / 100.0); }
+            else { side = x < 0.0 ? -1 : (x > 10.0 + 1.0e-6 ? 1 : 0); v = 0.02 + 0.98 * juce::jlimit (0.0, 10.0, x) / 10.0; }
+        }
+        if (self == nullptr) return true;
+        self->freeKnobs[nm]->setValue (v, juce::sendNotificationSync);
+        if (side != 0) limited = "Limited to " + text252 (nm, side > 0 ? 1.0 : 0.02) + (side > 0 ? " (max)" : " (min)");
+        return true;
+    };
+    rack.readout->edit (*k, std::move (ed));
 }
 
 void ModulePanel::action252 (const juce::String& id)
@@ -1467,6 +1775,125 @@ void RackView::paint (juce::Graphics& g)
 void RackView::timerCallback()
 {
     for (auto& p : panels) p->updateLeds();
+    if (readout != nullptr) readout->refresh();   // a value moved by the host or a preset, under the mouse
+}
+
+ValueReadout* RackView::readoutFor (juce::Component& c)
+{
+    auto* rv = c.findParentComponentOfClass<RackView>();
+    return rv != nullptr ? rv->readout : nullptr;
+}
+
+static int numValuesOf (const juce::RangedAudioParameter& p)
+{
+    const auto& r = p.getNormalisableRange();
+    return r.interval > 0.0f ? juce::roundToInt ((r.end - r.start) / r.interval) + 1 : 0;
+}
+
+// Right click on a knob, fader, lever or panel button. Everything is done through the parameter id.
+juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, bool knob)
+{
+    auto* p = &p0;
+    const int n = numValuesOf (*p);
+    const bool list = n > 1 && (n <= 12 || ! knob);
+    juce::PopupMenu m;
+    m.addSectionHeader (p->getName (64));
+    if (knob)
+    {
+        juce::PopupMenu::Item it ("Type a value...");
+        it.itemID = 1;
+        it.shortcutKeyDescription = typeShortcut();
+        m.addItem (it);
+    }
+    {
+        juce::PopupMenu::Item it ("Reset to default");
+        it.itemID = 2;
+        it.isEnabled = std::abs (p->getValue() - p->getDefaultValue()) > 1.0e-5f;
+        it.shortcutKeyDescription = p->getText (p->getDefaultValue(), 64);
+        m.addItem (it);
+    }
+    m.addSeparator();
+    if (list)
+    {
+        m.addSectionHeader ("Values");
+        for (int k = 0; k < juce::jmin (n, 64); ++k)
+        {
+            const float v = (float) k / (float) (n - 1);
+            juce::PopupMenu::Item it (p->getText (v, 64));
+            it.itemID = 20 + k;
+            it.isTicked = std::abs (p->getValue() - v) < 0.5f / (float) (n - 1);
+            m.addItem (it);
+        }
+    }
+    else if (knob)
+    {
+        m.addSectionHeader ("Knob position");
+        for (int k = 0; k < 5; ++k)
+        {
+            const float v = p->convertTo0to1 (p->convertFrom0to1 ((float) k * 0.25f));
+            juce::PopupMenu::Item it (juce::String (k * 25) + " %");
+            it.itemID = 10 + k;
+            it.isTicked = std::abs (p->getValue() - v) < 1.0e-4f;
+            it.shortcutKeyDescription = p->getText (v, 64);
+            m.addItem (it);
+        }
+    }
+    m.addSeparator();
+    m.addItem (200, "MIDI Learn", false);        // MIDI Learn comes in the next part of this delivery
+    m.addItem (202, "Forget MIDI CC", false);
+    return m;
+}
+
+void RackView::paramMenu (juce::Component& c, const juce::String& id, bool knob)
+{
+    auto* p = proc.apvts.getParameter (id);
+    if (p == nullptr) return;
+    const int n = numValuesOf (*p);
+    auto m = buildParamMenu (*p, knob);
+    m.setLookAndFeel (&c.getLookAndFeel());
+    menuOpen = true;
+    if (readout != nullptr) readout->refresh();
+    juce::Component::SafePointer<RackView> self (this);
+    juce::Component::SafePointer<juce::Component> ctl (&c);
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, ctl, id, n] (int r)
+    {
+        if (self == nullptr) return;
+        self->menuOpen = false;
+        auto* prm = self->proc.apvts.getParameter (id);
+        if (prm == nullptr || r == 0) return;
+        auto set = [prm] (float v) { prm->beginChangeGesture(); prm->setValueNotifyingHost (v); prm->endChangeGesture(); };
+        if (r == 1) { if (ctl != nullptr) self->typeValue (*ctl, id); }
+        else if (r == 2) set (prm->getDefaultValue());
+        else if (r >= 10 && r <= 14) set (prm->convertTo0to1 (prm->convertFrom0to1 ((float) (r - 10) * 0.25f)));
+        else if (r >= 20 && r < 20 + n && n > 1) set ((float) (r - 20) / (float) (n - 1));
+    });
+}
+
+// Ctrl+click (Cmd on a Mac) or "Type a value...": the readout turns into a field over the control
+void RackView::typeValue (juce::Component& c, const juce::String& id)
+{
+    auto* p = proc.apvts.getParameter (id);
+    if (p == nullptr || readout == nullptr) return;
+    ValueEdit ed;
+    ed.name = p->getName (64);
+    ed.text = p->getCurrentValueAsText();
+    ed.example = wc::valueTextExample (*p);
+    auto* pr = &proc;
+    const auto shown = ed.text;
+    ed.apply = [pr, id, shown] (const juce::String& text, juce::String& limited) -> bool
+    {
+        auto* prm = pr->apvts.getParameter (id);
+        if (prm == nullptr) return true;
+        const auto v = wc::parseValueText (*prm, text, shown);
+        if (! v) return false;
+        const float norm = prm->convertTo0to1 (v->plain);
+        prm->beginChangeGesture();      // one gesture for the host
+        prm->setValueNotifyingHost (norm);
+        prm->endChangeGesture();
+        if (v->limited != 0) limited = "Limited to " + prm->getText (norm, 64) + (v->limited > 0 ? " (max)" : " (min)");
+        return true;
+    };
+    readout->edit (c, std::move (ed));
 }
 
 JackComp* RackView::findJack (int inst, bool output, int index) const

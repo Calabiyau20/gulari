@@ -109,6 +109,12 @@ WcEditor::WcEditor (WcProcessor& p)
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, col::accent.withAlpha (0.25f));
     addAndMakeVisible (keyboard);
 
+    // the value readout: a child of the editor, so it does not scale with the rack
+    addChildComponent (readout);
+    readout.suppressed = [this] { return rack.readoutSuppressed(); };
+    readout.visibleArea = [this] { return viewport.getBounds(); };
+    rack.readout = &readout;
+
     proc.addChangeListener (this);
     refreshPatchMenu();
     setResizable (true, true);
@@ -118,6 +124,7 @@ WcEditor::WcEditor (WcProcessor& p)
 
 WcEditor::~WcEditor()
 {
+    rack.readout = nullptr;
     proc.removeChangeListener (this);
     setLookAndFeel (nullptr);
 }

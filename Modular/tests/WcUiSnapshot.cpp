@@ -3,7 +3,25 @@
 #include "WcEditor.h"
 #include "modules/M250.h"
 #include "modules/M259.h"
+#include "modules/M281.h"
 #include "ui/RackView.h"
+#if JUCE_LINUX
+ #include <dlfcn.h>
+#endif
+
+// Xvfb runs without a window manager, so a popup menu window asks for a window-manager atom that does not exist and
+// Xlib's default handler ends the program. A plugin's host (or JUCE, in a standalone app) installs its own handler;
+// this console test has to do it itself.
+static void quietXErrors()
+{
+   #if JUCE_LINUX
+    using Handler = int (*) (void*, void*);
+    using SetHandler = Handler (*) (Handler);
+    if (auto* lib = dlopen ("libX11.so.6", RTLD_LAZY))
+        if (auto set = (SetHandler) dlsym (lib, "XSetErrorHandler"))
+            set ([] (void*, void*) { return 0; });
+   #endif
+}
 
 int main (int argc, char** argv)
 {
@@ -161,6 +179,354 @@ int main (int argc, char** argv)
             if (! wraps || ! lamps) return 1;
         }
     }
+    // ---- knobs, readout, menu, typing a value ----
+    {
+        WcProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        for (int i : { wc::kInst259, wc::kInst292, wc::kInst248, wc::kInst281, wc::kInst207, wc::kInst252 }) proc.setPresent (i, true);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        quietXErrors();
+
+        wc::ui::RackView* rv = nullptr;
+        wc::ui::ValueReadout* ro = nullptr;
+        juce::Viewport* vp = nullptr;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+            if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+            if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+            for (auto* ch : c.getChildren()) walk (*ch);
+        };
+        walk (*ed);
+        if (rv == nullptr || ro == nullptr || vp == nullptr) { std::printf ("knobs: NO rack / readout / viewport\n"); return 1; }
+        auto panelOf = [&] (int inst) -> wc::ui::ModulePanel*
+        {
+            wc::ui::ModulePanel* found = nullptr;
+            std::function<void (juce::Component&)> f = [&] (juce::Component& c)
+            {
+                if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (&c)) if (p->inst == inst) found = p;
+                for (auto* ch : c.getChildren()) f (*ch);
+            };
+            f (*rv);
+            return found;
+        };
+        auto knobOf = [&] (int inst, const juce::String& id) -> wc::ui::WcKnob*
+        {
+            if (auto* p = panelOf (inst))
+                for (auto* ch : p->getChildren())
+                    if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch)) if (k->paramId == id) return k;
+            return nullptr;
+        };
+        // a control found by the parameter name its readout shows
+        auto controlNamed = [&] (int inst, const juce::String& name) -> juce::Component*
+        {
+            if (auto* p = panelOf (inst))
+                for (auto* ch : p->getChildren())
+                    if (auto* src = dynamic_cast<wc::ui::ReadoutSource*> (ch))
+                    {
+                        wc::ui::ReadoutText t;
+                        if (src->readoutText (t) && t.name == name) return ch;
+                    }
+            return nullptr;
+        };
+        auto mouse = [] (juce::Component& c, juce::Point<float> pos, juce::ModifierKeys mods, int clicks = 1)
+        {
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, clicks, false);
+        };
+        auto norm = [&proc] (const char* id) { return proc.apvts.getParameter (id)->getValue(); };
+        auto setNorm = [&proc] (const char* id, float v) { proc.apvts.getParameter (id)->setValueNotifyingHost (v); };
+        bool good = true;
+
+        // H4: a right click opens the menu (or nothing) and never moves the control under it
+        {
+            const auto right = juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier);
+            juce::StringArray moved;
+            auto rightClick = [&] (juce::Component* c, juce::Point<float> at, const juce::String& what, std::function<juce::String()> state)
+            {
+                if (c == nullptr) { moved.add (what + " (missing)"); return; }
+                const auto before = state();
+                c->mouseDown (mouse (*c, at, right));
+                const auto held = state();          // a momentary button acts while it is held
+                c->mouseUp (mouse (*c, at, right));
+                pump (30);
+                juce::PopupMenu::dismissAllActiveMenus();
+                pump (30);
+                if (held != before || state() != before) moved.add (what);
+            };
+            auto all = [&proc] { juce::String s; for (auto* p : proc.getParameters()) s << p->getValue() << ","; return s; };
+            // a 292 lever, low half (would set "Gate"), and high half
+            setNorm ("la_mode1", 0.5f);
+            auto* lever = controlNamed (wc::kInst292, "292 A 1 Mode");
+            rightClick (lever, { 12.0f, lever != nullptr ? (float) lever->getHeight() - 2.0f : 0.0f }, "292 lever", [&] { return juce::String (norm ("la_mode1")); });
+            rightClick (lever, { 12.0f, 2.0f }, "292 lever (top)", [&] { return juce::String (norm ("la_mode1")); });
+            auto* button = controlNamed (wc::kInst259, "259 A MO Range");
+            rightClick (button, { 14.0f, 14.0f }, "259 range button", all);
+            juce::Component* prog = nullptr, *push = nullptr;
+            if (auto* p = panelOf (wc::kInst248)) for (auto* ch : p->getChildren()) if (dynamic_cast<wc::ui::ProgSwitch*> (ch) != nullptr && prog == nullptr) prog = ch;
+            rightClick (prog, { 10.0f, 4.0f }, "248 programming lever", all);
+            if (auto* p = panelOf (wc::kInst281)) for (auto* ch : p->getChildren()) if (dynamic_cast<wc::ui::PushButton*> (ch) != nullptr && push == nullptr) push = ch;
+            rightClick (push, { 13.0f, 13.0f }, "281 push button", [&] { return juce::String ((int) proc.rack.m281 (0)->manual[0].load()); });
+            auto* knob = knobOf (wc::kInst259, "a_timbre");
+            setNorm ("a_timbre", 0.37f);
+            rightClick (knob, { 20.0f, 20.0f }, "259 knob", [&] { return juce::String (norm ("a_timbre")); });
+            if (knob != nullptr)   // and a right drag does not turn it either
+            {
+                knob->mouseDown (mouse (*knob, { 20.0f, 20.0f }, right));
+                knob->mouseDrag (mouse (*knob, { 80.0f, -40.0f }, right));
+                knob->mouseUp (mouse (*knob, { 80.0f, -40.0f }, right));
+                pump (30); juce::PopupMenu::dismissAllActiveMenus(); pump (30);
+                if (std::abs (norm ("a_timbre") - 0.37f) > 1.0e-6f) moved.add ("259 knob (right drag)");
+            }
+            std::printf ("right click: lever, panel button, programming lever, push button, knob %s\n",
+                         moved.isEmpty() ? "unchanged  ok" : ("MOVED: " + moved.joinIntoString (", ")).toRawUTF8());
+            if (! moved.isEmpty()) good = false;
+            if (rv->menuOpen) { std::printf ("right click: the menu flag stayed on  BAD\n"); good = false; }
+        }
+
+        // H1: Alt+click without moving must not send the knob to its default (JUCE's Alt+click shortcut)
+        auto* knob = knobOf (wc::kInst259, "a_timbre");
+        if (knob == nullptr) { std::printf ("knobs: NO 259 timbre knob\n"); return 1; }
+        {
+            const auto alt = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier);
+            setNorm ("a_timbre", 0.37f);
+            const auto c = knob->getLocalBounds().toFloat().getCentre();
+            knob->mouseDown (mouse (*knob, c, alt));
+            knob->mouseUp (mouse (*knob, c, alt));
+            const bool kept = std::abs (norm ("a_timbre") - 0.37f) < 1.0e-6f;
+            std::printf ("alt+click without moving: timbre %.3f (was 0.370) %s\n", norm ("a_timbre"), kept ? "ok" : "BAD");
+            if (! kept) good = false;
+        }
+
+        // 125 screen pixels with Alt are half a turn at any zoom: 0.5, in a 10 % step
+        {
+            juce::String got;
+            bool same = true;
+            for (float z : { 0.25f, 1.0f, 2.0f })
+            {
+                rv->setZoom (z);
+                pump (10);
+                setNorm ("a_timbre", 0.0f);
+                const auto alt = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier);
+                const auto c = knob->getLocalBounds().toFloat().getCentre();
+                knob->mouseDown (mouse (*knob, c, alt));
+                for (int s = 1; s <= 5; ++s) knob->mouseDrag (mouse (*knob, c + juce::Point<float> (125.0f / z * (float) s / 5.0f, 0.0f), alt));
+                knob->mouseUp (mouse (*knob, c + juce::Point<float> (125.0f / z, 0.0f), alt));
+                got << juce::String (norm ("a_timbre"), 3) << " ";
+                if (std::abs (norm ("a_timbre") - 0.5f) > 1.0e-4f) same = false;
+            }
+            // and without Alt, the same 125 px is still half a turn; with Shift a tenth of that
+            rv->setZoom (1.0f);
+            pump (10);
+            const auto c = knob->getLocalBounds().toFloat().getCentre();
+            auto dragBy = [&] (juce::ModifierKeys m, float px)
+            {
+                setNorm ("a_timbre", 0.0f);
+                knob->mouseDown (mouse (*knob, c, m));
+                knob->mouseDrag (mouse (*knob, c + juce::Point<float> (px / 2.0f, 0.0f), m));
+                knob->mouseDrag (mouse (*knob, c + juce::Point<float> (px / 2.0f, -px / 2.0f), m));   // up counts as right
+                knob->mouseUp (mouse (*knob, c + juce::Point<float> (px / 2.0f, -px / 2.0f), m));
+                return norm ("a_timbre");
+            };
+            const float plain = dragBy (juce::ModifierKeys::leftButtonModifier, 125.0f);
+            const float fine = dragBy (juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier), 125.0f);
+            const bool drags = std::abs (plain - 0.5f) < 1.0e-3f && std::abs (fine - 0.05f) < 1.0e-3f;
+            std::printf ("125 px with Alt at zoom 0.25 / 1 / 2: %s%s; plain %.3f, shift %.3f %s\n", got.toRawUTF8(), same ? "ok" : "BAD",
+                         plain, fine, drags ? "ok" : "BAD");
+            if (! same || ! drags) good = false;
+        }
+
+        // a fader: a click in the slot away from the cap does not jump
+        {
+            auto* f = knobOf (wc::kInst207, "mx_lvl_a");
+            setNorm ("mx_lvl_a", 0.8f);
+            bool kept = f != nullptr;
+            if (f != nullptr)
+            {
+                const juce::Point<float> slot ((float) f->getWidth() * 0.5f, (float) f->getHeight() - 4.0f);
+                f->mouseDown (mouse (*f, slot, juce::ModifierKeys::leftButtonModifier));
+                f->mouseUp (mouse (*f, slot, juce::ModifierKeys::leftButtonModifier));
+                kept = std::abs (norm ("mx_lvl_a") - 0.8f) < 1.0e-6f;
+            }
+            std::printf ("fader: click in the slot keeps %.3f (was 0.800) %s\n", norm ("mx_lvl_a"), kept ? "ok" : "BAD");
+            if (! kept) good = false;
+        }
+
+        // the readout: a hover shows after 400 ms, not before, outside the zoom
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto save = [&] (const juce::Image& img, const juce::String& name)
+        {
+            auto file = shots.getChildFile (name);
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        auto bring = [&] (juce::Component& c)   // scroll the viewport so the control is in sight
+        {
+            const auto r = rv->getLocalArea (&c, c.getLocalBounds());
+            vp->setViewPosition (juce::jmax (0, r.getCentreX() - 300), juce::jmax (0, r.getCentreY() - 220));
+            pump (20);
+        };
+        auto crop = [&] (juce::Component& c, juce::Rectangle<int> extra)
+        {
+            auto area = ed->getLocalArea (&c, c.getLocalBounds()).getUnion (ro->isVisible() ? ro->getBounds() : juce::Rectangle<int>());
+            area = area.getUnion (extra).expanded (40).getIntersection (ed->getLocalBounds());
+            return ed->createComponentSnapshot (area, true, 2.0f);
+        };
+        auto* freq = knobOf (wc::kInst259, "a_po_freq");
+        if (freq == nullptr) { std::printf ("knobs: NO 259 frequency knob\n"); return 1; }
+        juce::String sizes;
+        for (float z : { 0.5f, 1.5f })
+        {
+            rv->setZoom (z);
+            pump (20);
+            bring (*freq);
+            if (auto* t = ro->targetComponent()) ro->hoverExit (*t);   // the mouse leaves whatever it was on
+            pump (900);   // cold: nothing up for a while
+            freq->mouseEnter (mouse (*freq, freq->getLocalBounds().toFloat().getCentre(), {}));
+            pump (200);
+            const bool early = ro->isUp();
+            pump (500);
+            const bool shown = ro->isUp() && ro->targetComponent() == freq && ro->current().value.endsWith ("Hz");
+            const auto b = ro->getBounds();
+            const auto knobArea = ed->getLocalArea (freq, freq->readoutAnchor().toNearestInt());
+            const bool clear = ! b.intersects (knobArea);
+            sizes << "zoom " << juce::String (z, 2) << ": " << b.getWidth() << "x" << b.getHeight() << " \"" << ro->current().value << "\"  ";
+            std::printf ("readout at zoom %.2f: %s at 200 ms, %s at 700 ms, %dx%d, %s the knob %s\n", z, early ? "UP" : "hidden",
+                         shown ? "up" : "NOT up", b.getWidth(), b.getHeight(), clear ? "clear of" : "OVER",
+                         (! early && shown && clear && b.getHeight() == 44) ? "ok" : "BAD");
+            if (early || ! shown || ! clear || b.getHeight() != 44) good = false;
+            save (crop (*freq, {}), "readout_zoom" + juce::String (juce::roundToInt (z * 100)) + ".png");
+            freq->mouseExit (mouse (*freq, { -5.0f, -5.0f }, {}));
+            if (ro->isUp()) { std::printf ("readout: still up after leaving the knob  BAD\n"); good = false; }
+        }
+        rv->setZoom (1.0f);
+        pump (20);
+        bring (*freq);
+
+        // the menu: what it offers, and a capture of it open
+        {
+            auto m = wc::ui::RackView::buildParamMenu (*proc.apvts.getParameter ("a_po_freq"), true);
+            juce::StringArray items;
+            bool midiOff = true;
+            for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+            {
+                auto& i = it.getItem();
+                if (i.isSectionHeader) items.add ("[" + i.text + "]");
+                else if (i.itemID != 0) items.add (juce::String (i.itemID) + ":" + i.text + (i.isEnabled ? "" : "(off)"));
+                if (i.itemID >= 200 && i.isEnabled) midiOff = false;
+            }
+            const auto list = items.joinIntoString (" ");
+            const bool shape = list.startsWith ("[259 A Principal Frequency] 1:Type a value... 2:Reset to default(off) [Knob position] 10:0 % 11:25 % 12:50 % 13:75 % 14:100 %")
+                               && midiOff;
+            std::printf ("menu: %s %s\n", list.toRawUTF8(), shape ? "ok" : "BAD");
+            if (! shape) good = false;
+            auto sw = wc::ui::RackView::buildParamMenu (*proc.apvts.getParameter ("la_mode1"), false);
+            juce::StringArray swItems;
+            for (juce::PopupMenu::MenuItemIterator it (sw); it.next();) if (it.getItem().itemID > 0 && it.getItem().itemID < 100) swItems.add (it.getItem().text);
+            const bool values = swItems.joinIntoString ("|") == "Reset to default|LoPass|Combo|Gate";
+            std::printf ("menu of a lever: %s %s\n", swItems.joinIntoString (" | ").toRawUTF8(), values ? "ok" : "BAD");
+            if (! values) good = false;
+
+            setNorm ("a_po_freq", 0.43f);
+            freq->mouseDown (mouse (*freq, freq->getLocalBounds().toFloat().getCentre(), juce::ModifierKeys::rightButtonModifier));
+            freq->mouseUp (mouse (*freq, freq->getLocalBounds().toFloat().getCentre(), juce::ModifierKeys::rightButtonModifier));
+            // no pumping: without a window manager this process is never the foreground one, so the menu closes on its first timer
+            juce::Component* menu = nullptr;
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                if (auto* c = juce::Desktop::getInstance().getComponent (i)) if (c->isVisible() && c != ed.get()) menu = c;
+            const bool suppressed = rv->menuOpen && ! ro->isUp();
+            if (menu != nullptr)
+            {
+                // the menu is a window of its own: drawn here next to the knob, as it opens under the mouse
+                auto menuImg = menu->createComponentSnapshot (menu->getLocalBounds(), true, 2.0f);
+                const auto knobArea = ed->getLocalArea (freq, freq->getLocalBounds());
+                const juce::Rectangle<int> at (knobArea.getCentreX(), knobArea.getCentreY(), menu->getWidth(), menu->getHeight());
+                auto base = crop (*freq, at);
+                const auto area = ed->getLocalArea (freq, freq->getLocalBounds()).getUnion (at).expanded (40).getIntersection (ed->getLocalBounds());
+                juce::Graphics g (base);
+                g.drawImageAt (menuImg, (at.getX() - area.getX()) * 2, (at.getY() - area.getY()) * 2);
+                save (base, "menu_open.png");
+            }
+            std::printf ("menu open: %s, readout %s %s\n", menu != nullptr ? "shown" : "NOT shown", suppressed ? "held back" : "NOT held back",
+                         menu != nullptr && suppressed ? "ok" : "BAD");
+            if (menu == nullptr || ! suppressed) good = false;
+            juce::PopupMenu::dismissAllActiveMenus();
+            pump (60);
+        }
+
+        // typing a value: a bad text keeps the field open with the error, a good one applies, too much is limited
+        {
+            setNorm ("a_po_freq", 0.43f);
+            const float before = norm ("a_po_freq");
+            rv->typeValue (*freq, "a_po_freq");
+            const bool opened = ro->isEditing() && ro->field.getText() == proc.apvts.getParameter ("a_po_freq")->getCurrentValueAsText();
+            ro->field.setText ("250 ms");
+            ro->commitEdit (true);
+            pump (30);   // the field's own change notice comes late: the error has to survive it
+            const bool refused = ro->isEditing() && ro->showsError() && ro->current().note.startsWith ("Not a value for this control - try 440 Hz")
+                                 && std::abs (norm ("a_po_freq") - before) < 1.0e-6f && ro->getHeight() == 64;
+            save (crop (*freq, {}), "type_value_error.png");
+            ro->field.setText ("1,2k");
+            ro->commitEdit (true);
+            const float hz = wc::coarseHz (proc.apvts.getParameter ("a_po_freq")->convertFrom0to1 (norm ("a_po_freq")), false);
+            const bool applied = ! ro->isEditing() && std::abs (hz - 1200.0f) < 0.5f;
+            rv->typeValue (*freq, "a_po_freq");
+            ro->field.setText ("20 kHz");
+            ro->commitEdit (true);
+            const bool limited = ! ro->isEditing() && ro->isUp() && ro->current().warn && ro->current().note == "Limited to 7.04 kHz (max)"
+                                 && std::abs (norm ("a_po_freq") - 1.0f) < 1.0e-6f;
+            pump (20);
+            save (crop (*freq, {}), "type_value_limited.png");
+            rv->typeValue (*freq, "a_po_freq");
+            ro->field.setText ("440");
+            ro->cancelEdit();                      // Esc
+            const bool cancelled = ! ro->isEditing() && std::abs (norm ("a_po_freq") - 1.0f) < 1.0e-6f;
+            // Ctrl / Cmd + click without moving opens it as well
+            const auto cmd = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::commandModifier);
+            const auto c = freq->getLocalBounds().toFloat().getCentre();
+            freq->mouseDown (mouse (*freq, c, cmd));
+            freq->mouseDrag (mouse (*freq, c + juce::Point<float> (2.0f, 0.0f), cmd));
+            freq->mouseUp (mouse (*freq, c + juce::Point<float> (2.0f, 0.0f), cmd));
+            const bool cmdClick = ro->isEditing() && std::abs (norm ("a_po_freq") - 1.0f) < 1.0e-6f;
+            ro->cancelEdit();
+            std::printf ("type a value: opens %s, \"250 ms\" on a frequency %s, \"1,2k\" -> %.1f Hz %s, \"20 kHz\" %s, Esc %s, Ctrl+click %s %s\n",
+                         opened ? "ok" : "BAD", refused ? "refused" : "NOT refused", hz, applied ? "ok" : "BAD", limited ? "limited" : "NOT limited",
+                         cancelled ? "cancels" : "BAD", cmdClick ? "opens" : "BAD",
+                         (opened && refused && applied && limited && cancelled && cmdClick) ? "ok" : "BAD");
+            if (! (opened && refused && applied && limited && cancelled && cmdClick)) good = false;
+        }
+        // the 252 cell knobs are no host parameters: their own texts, and C.V. takes a typed value too
+        {
+            wc::ui::WcKnob* cv = nullptr;
+            if (auto* p = panelOf (wc::kInst252))
+                for (auto* ch : p->getChildren())
+                    if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch))
+                    {
+                        wc::ui::ReadoutText t;
+                        if (k->paramId.isEmpty() && k->readoutText (t) && t.name == "Cell: C.V. value") cv = k;
+                    }
+            wc::ui::ReadoutText before, after;
+            bool ok252 = cv != nullptr && cv->readoutText (before) && before.value == "-- (no change)" && cv->onType != nullptr;
+            if (ok252)
+            {
+                cv->onType();
+                ro->field.setText ("6,4 V");
+                ro->commitEdit (true);
+                ok252 = ! ro->isEditing() && cv->readoutText (after) && after.value == "6.40 V";
+            }
+            std::printf ("252 cell C.V.: \"%s\", typed 6,4 V -> \"%s\" %s\n", before.value.toRawUTF8(), after.value.toRawUTF8(), ok252 ? "ok" : "BAD");
+            if (! ok252) good = false;
+        }
+        std::printf ("%s\n", sizes.toRawUTF8());
+        if (! good) return 1;
+    }
+
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {
         WcProcessor proc;

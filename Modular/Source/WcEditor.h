@@ -22,6 +22,7 @@ private:
     juce::TextButton prevButton { "<" }, nextButton { ">" }, licenseButton { "DEMO" }, zoomButton { "100 %" };
     juce::Viewport viewport;
     wc::ui::RackView rack;
+    wc::ui::ValueReadout readout;        // over everything, outside the zoom
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
 
