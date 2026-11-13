@@ -74,7 +74,7 @@ public:
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
     bool readoutText (ReadoutText&) override;
-    juce::Rectangle<float> readoutAnchor() override { return getLocalBounds().toFloat(); }
+    juce::Rectangle<float> readoutAnchor() override;
     juce::String paramId() const { return param.getParameterID(); }
 private:
     juce::RangedAudioParameter& param;
@@ -253,6 +253,7 @@ public:
     bool learning() const { return learnId.isNotEmpty(); }
     const juce::String& learningId() const { return learnId; }
     bool learnRing (const juce::String& paramId, float& alpha) const;   // waiting (pulsing) or just assigned (600 ms)
+    float midiMarkMargin (juce::Component& control) const;   // room its ring or dot takes around it, in screen px (0: none)
     bool ccActive (int cc) const;                                       // the CC moved its parameter in the last 150 ms
     juce::Component* controlFor (const juce::String& paramId) const;
     void repaintMarks (const juce::String& paramId);

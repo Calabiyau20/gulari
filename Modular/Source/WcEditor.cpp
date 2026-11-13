@@ -113,6 +113,7 @@ WcEditor::WcEditor (WcProcessor& p)
     addChildComponent (readout);
     readout.suppressed = [this] { return rack.readoutSuppressed(); };
     readout.visibleArea = [this] { return viewport.getBounds(); };
+    readout.markMargin = [this] (juce::Component& c) { return rack.midiMarkMargin (c); };
     rack.readout = &readout;
 
     proc.addChangeListener (this);

@@ -421,7 +421,8 @@ int main (int argc, char** argv)
                 else if (i.itemID != 0) items.add (juce::String (i.itemID) + ":" + i.text + (i.isEnabled ? "" : "(off)"));
             }
             const auto list = items.joinIntoString (" ");
-            const bool shape = list == "[259 A Principal Frequency] 1:Type a value... 2:Reset to default(off) [Knob position] 10:0 % 11:25 % 12:50 % 13:75 % 14:100 %"
+            const bool shape = list == juce::String (juce::CharPointer_UTF8 ("[259 A Principal Frequency] 1:Type a value\xe2\x80\xa6 2:Reset"))
+                                       + " to default(off) [Knob position] 10:0 % 11:25 % 12:50 % 13:75 % 14:100 %"
                                        " 200:MIDI Learn 202:Forget MIDI CC(off)";
             std::printf ("menu: %s %s\n", list.toRawUTF8(), shape ? "ok" : "BAD");
             if (! shape) good = false;
@@ -468,8 +469,8 @@ int main (int argc, char** argv)
             ro->field.setText ("250 ms");
             ro->commitEdit (true);
             pump (30);   // the field's own change notice comes late: the error has to survive it
-            const bool refused = ro->isEditing() && ro->showsError() && ro->current().note.startsWith ("Not a value for this control - try 440 Hz")
-                                 && std::abs (norm ("a_po_freq") - before) < 1.0e-6f && ro->getHeight() == 64;
+            const bool refused = ro->isEditing() && ro->showsError() && ro->current().note.startsWith (juce::CharPointer_UTF8 ("Not a value for this control \xe2\x80\x93 try 440 Hz"))
+                                 && std::abs (norm ("a_po_freq") - before) < 1.0e-6f && ro->getHeight() == 66;
             save (crop (*freq, {}), "type_value_error.png");
             ro->field.setText ("1,2k");
             ro->commitEdit (true);
@@ -543,17 +544,17 @@ int main (int argc, char** argv)
                 }
                 return l.joinIntoString (" ");
             };
-            // the dot of a learned knob: up and to the right of the skirt, in the accent colour (on the panel itself)
+            // the dot of a learned knob: on the skirt at 45 degrees up to the right, in the MIDI colour (on the panel itself)
             auto dotAt = [&] (wc::ui::WcKnob& k)
             {
                 auto* pn = k.getParentComponent();
                 const auto a = pn->getLocalArea (&k, k.readoutAnchor());
-                const float d = a.getWidth() * 0.5f + 7.0f;
+                const float d = a.getWidth() * 0.5f * 0.86f;
                 const auto at = a.getCentre() + juce::Point<float> (d * 0.70710678f, -d * 0.70710678f);
                 auto img = pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f);
                 return img.getPixelAt (juce::roundToInt (at.x), juce::roundToInt (at.y));
             };
-            auto isAccent = [] (juce::Colour c) { const auto a = wc::ui::col::accent; return std::abs (c.getRed() - a.getRed()) < 40 && std::abs (c.getGreen() - a.getGreen()) < 40 && std::abs (c.getBlue() - a.getBlue()) < 40; };
+            auto isAccent = [] (juce::Colour c) { const auto a = wc::ui::col::midi; return std::abs (c.getRed() - a.getRed()) < 40 && std::abs (c.getGreen() - a.getGreen()) < 40 && std::abs (c.getBlue() - a.getBlue()) < 40; };
             bool learnOk = true;
             juce::StringArray bad;
             auto check = [&] (bool b, const juce::String& what) { if (! b) { bad.add (what); learnOk = false; } };
@@ -571,7 +572,7 @@ int main (int argc, char** argv)
             // waiting: the readout holds its text; CC 0 and 120 are not taken, CC 74 (any channel) is
             rv->startLearn ("a_timbre");
             pump (40);
-            check (rv->learning() && ro->isHolding() && ro->current().value == "Move a MIDI control..." && ro->current().note == "Right-click or Esc to cancel", "waiting readout");
+            check (rv->learning() && ro->isHolding() && ro->current().value == juce::String (juce::CharPointer_UTF8 ("Move a MIDI control\xe2\x80\xa6")) && ro->current().note == "Right-click or Esc to cancel", "waiting readout");
             if (auto* t = ro->targetComponent()) if (t != timbre) check (false, "waiting readout on another control");
             timbre->mouseExit (mouse (*timbre, { -5.0f, -5.0f }, {}));   // the mouse going away does not take it down
             freq->mouseEnter (mouse (*freq, freq->getLocalBounds().toFloat().getCentre(), {}));
@@ -600,7 +601,9 @@ int main (int argc, char** argv)
             // hover adds "CC 74"; each CC moves it and makes the dot bigger for a moment
             timbre->mouseEnter (mouse (*timbre, timbre->getLocalBounds().toFloat().getCentre(), {}));
             pump (500);
-            check (ro->isUp() && ro->current().note == "CC 74" && ro->getHeight() == 59, "hover without \"CC 74\"");
+            check (ro->isUp() && ro->current().note == "CC 74" && ro->getHeight() == 61, "hover without \"CC 74\"");
+            // the box keeps 8 px off the dot and the ring (6 px around the skirt), not off the skirt
+            check (! ro->getBounds().toFloat().intersects (ed->getLocalArea (timbre, timbre->readoutAnchor()).expanded (6.0f + 7.5f)), "readout box too close to the MIDI marks");
             save (crop (*timbre, {}), "midi_hover.png");
             timbre->mouseExit (mouse (*timbre, { -5.0f, -5.0f }, {}));
             send ({ cc (2, 74, 127) });
@@ -619,6 +622,10 @@ int main (int argc, char** argv)
                 check (proc.ccOf ("la_off1") == 1 && ro->isUp() && ro->current().warn && ro->current().note == "CC 1 (mod wheel) no longer reaches the MIDI module",
                        "CC 1 warning: \"" + ro->current().note + "\"");
                 save (crop (*off, {}), "midi_cc1_warning.png");
+                // one width cap, 288 px: a longer note takes a second line instead of being cut
+                ro->flash (*off, "CC 1 (mod wheel) no longer reaches the MIDI module, nor the KB-225 MOD output", true, 300);
+                check (ro->getWidth() == 288 && ro->getHeight() == 61 + 13, "long note: " + ro->getBounds().toString());
+                save (crop (*off, {}), "readout_two_line_note.png");
                 juce::String tip;
                 if (auto* pn = panelOf (wc::kInstMidi))
                     for (auto& j : pn->jacks) if (j->output && j->index == wc::MidiInterface::Out_Mod) tip = j->getTooltip();
@@ -641,14 +648,15 @@ int main (int argc, char** argv)
                 check (proc.ccOf ("a_timbre") == 1 && proc.ccOf ("la_off1") < 0 && proc.paramOfCc (74).isEmpty() && ro->current().warn
                        && ro->current().note == "CC 1 moved from 292 A 1 Offset", "moved: \"" + ro->current().note + "\"");
                 save (crop (*timbre, {}), "midi_moved.png");
-                // a lever: its dot sits on the top right corner of the control
+                // a lever: its dot sits on the top right corner of the lever itself, not of its labels (it fell next to B)
                 if (auto* lever = controlNamed (wc::kInst292, "292 A 1 Mode"))
                 {
                     proc.assignCc (21, "la_mode1");
                     rv->repaintMarks ("la_mode1");
                     bring (*lever);
                     auto* pn = lever->getParentComponent();
-                    const auto corner = lever->getBounds().getTopRight();
+                    // the lever is the 24 px on the left of the control, 18 px either side of its middle (3 positions)
+                    const juce::Point<int> corner (lever->getX() + 24, lever->getBounds().getCentreY() - 18);
                     const auto px = pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f).getPixelAt (corner.x, corner.y);
                     check (isAccent (px), "no dot on the lever (" + px.toDisplayString (false) + ")");
                     save (crop (*lever, {}), "midi_lever_assigned.png");
@@ -672,6 +680,72 @@ int main (int argc, char** argv)
                 check (proc.ccOf ("a_po_freq") < 0, "Forget CC 40");
             }
             pump (wc::ui::RackView::kMovedMs + 400);
+            // captures for the visual review: knob sizes, a fader, a waiting lever and its menu, zoom, the Neon Void skin
+            {
+                auto learnt = [&] (juce::Component& c, const juce::String& id, int n, const juce::String& file)
+                {
+                    proc.assignCc (n, id);
+                    rv->repaintMarks (id);
+                    bring (c);
+                    save (crop (c, {}), file);
+                };
+                learnt (*freq, "a_po_freq", 41, "midi_knob_big.png");
+                wc::ui::WcKnob* small = nullptr;   // a 28 px skirt (kr 14)
+                if (auto* pn = panelOf (wc::kInst259))
+                    for (auto* ch : pn->getChildren())
+                        if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch))
+                            if (small == nullptr && k->param != nullptr && k->isRotary() && k->readoutAnchor().getWidth() == 28.0f) small = k;
+                check (small != nullptr, "no small knob on the 259");
+                if (small != nullptr) learnt (*small, small->paramId, 42, "midi_knob_small.png");
+                if (auto* f = knobOf (wc::kInst207, "mx_lvl_a")) learnt (*f, "mx_lvl_a", 43, "midi_fader.png");
+                if (auto* lever = controlNamed (wc::kInst292, "292 A 1 Mode"))
+                {
+                    rv->startLearn ("la_mode1");
+                    bring (*lever);
+                    pump (300);
+                    save (crop (*lever, {}), "midi_lever_waiting.png");
+                    rv->cancelLearn();
+                    setNorm ("la_mode1", 0.5f);
+                    const auto at = lever->getLocalBounds().toFloat().getCentre();
+                    lever->mouseDown (mouse (*lever, at, juce::ModifierKeys::rightButtonModifier));
+                    juce::Component* menu = nullptr;
+                    for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                        if (auto* c = juce::Desktop::getInstance().getComponent (i)) if (c->isVisible() && c != ed.get()) menu = c;
+                    check (menu != nullptr, "no lever menu");
+                    if (menu != nullptr)
+                    {
+                        auto menuImg = menu->createComponentSnapshot (menu->getLocalBounds(), true, 2.0f);
+                        const auto la = ed->getLocalArea (lever, lever->getLocalBounds());
+                        const juce::Rectangle<int> box (la.getCentreX(), la.getCentreY(), menu->getWidth(), menu->getHeight());
+                        auto base = crop (*lever, box);
+                        const auto area = la.getUnion (box).expanded (40).getIntersection (ed->getLocalBounds());
+                        juce::Graphics g (base);
+                        g.drawImageAt (menuImg, (box.getX() - area.getX()) * 2, (box.getY() - area.getY()) * 2);
+                        save (base, "menu_lever_ticked.png");
+                    }
+                    juce::PopupMenu::dismissAllActiveMenus();
+                    pump (60);
+                }
+                rv->startLearn ("a_timbre");   // "Learn another CC": the ring and the dot of CC 1 together
+                for (float z : { 0.5f, 1.5f })
+                {
+                    rv->setZoom (z);
+                    pump (20);
+                    bring (*timbre);
+                    pump (40);
+                    save (crop (*timbre, {}), "midi_zoom" + juce::String (juce::roundToInt (z * 100)) + ".png");
+                }
+                rv->cancelLearn();
+                rv->setZoom (1.0f);
+                pump (20);
+                wc::ui::skin::current = 1;     // Neon Void
+                bring (*timbre);
+                timbre->mouseEnter (mouse (*timbre, timbre->getLocalBounds().toFloat().getCentre(), {}));
+                pump (500);
+                save (crop (*timbre, {}), "midi_neon_void.png");
+                timbre->mouseExit (mouse (*timbre, { -5.0f, -5.0f }, {}));
+                wc::ui::skin::current = 0;
+            }
             std::printf ("midi learn: menus, waiting, CC 0 / 120 refused, CC 74 learned, ring, dot, hover, activity, CC 1 note and MOD tooltip, re-learn, Esc, moved  %s\n",
                          learnOk ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
             if (! learnOk) good = false;

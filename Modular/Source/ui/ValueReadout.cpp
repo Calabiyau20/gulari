@@ -5,16 +5,13 @@ namespace wc::ui
 {
 namespace
 {
-const juce::Colour kBack { 0xf0202126 };     // as the tooltip: #202126 at 94 %
-const juce::Colour kName { 0xffb9bbc1 };
-const juce::Colour kWarn { 0xffe8a33a };
-const juce::Colour kError { 0xffe5484d };
-constexpr int kPadX = 8, kPadY = 5, kGap = 2, kLine1 = 13, kLine2 = 19, kLine3 = 13, kField = 24;
-constexpr int kMinW = 72, kMaxW = 260, kMinEditW = 120, kAway = 8, kEdge = 4;
-constexpr int kMaxWarnW = 340;   // an amber warning is not cut short ("CC 1 (mod wheel) no longer reaches the MIDI module")
+constexpr int kPadX = 8, kPadY = 4, kGap = 4, kLine1 = 13, kLine2 = 19, kLine3 = 13, kField = 24;
+constexpr int kMinW = 72, kMaxW = 288, kMinEditW = 120, kAway = 8, kEdge = 4;
 
 juce::uint32 now() { return juce::Time::getMillisecondCounter(); }
 float width (const juce::Font& f, const juce::String& s) { return juce::GlyphArrangement::getStringWidth (f, s); }
+// a name or note wider than the widest box takes a second line instead of being cut
+int rows (const juce::String& s) { return width (WcLook::label (11.0f), s) > (float) (kMaxW - 2 * kPadX) ? 2 : 1; }
 } // namespace
 
 ValueReadout::ValueReadout()
@@ -24,14 +21,14 @@ ValueReadout::ValueReadout()
     addChildComponent (field);
     field.setFont (WcLook::label (15.0f));
     field.setJustification (juce::Justification::centredLeft);
-    field.setIndents (4, 3);
-    field.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff15161a));
-    field.setColour (juce::TextEditor::textColourId, juce::Colours::white);
-    field.setColour (juce::TextEditor::highlightColourId, col::accent.withAlpha (0.35f));
-    field.setColour (juce::TextEditor::highlightedTextColourId, juce::Colours::white);
+    field.setIndents (0, 3);   // the text starts 8 px in, as the other lines
+    field.setColour (juce::TextEditor::backgroundColourId, col::bg);
+    field.setColour (juce::TextEditor::textColourId, col::text);
+    field.setColour (juce::TextEditor::highlightColourId, col::midi.withAlpha (0.35f));
+    field.setColour (juce::TextEditor::highlightedTextColourId, col::text);
     field.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
     field.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
-    field.setColour (juce::CaretComponent::caretColourId, juce::Colours::white);
+    field.setColour (juce::CaretComponent::caretColourId, col::text);
     field.setSelectAllWhenFocused (false);
     field.onReturnKey = [this] { commitEdit (true); };
     field.onEscapeKey = [this] { cancelEdit(); };
@@ -195,7 +192,8 @@ juce::Rectangle<float> ValueReadout::anchorInParent() const
     auto* parent = getParentComponent();
     auto* src = dynamic_cast<ReadoutSource*> (c);
     if (c == nullptr || parent == nullptr || src == nullptr) return {};
-    return parent->getLocalArea (c, src->readoutAnchor());
+    const auto a = parent->getLocalArea (c, src->readoutAnchor());
+    return markMargin != nullptr ? a.expanded (markMargin (*c)) : a;   // 8 px off the MIDI ring or dot, not off the control
 }
 
 bool ValueReadout::layout (bool evenIfHidden)
@@ -224,8 +222,8 @@ bool ValueReadout::layout (bool evenIfHidden)
     const bool ed = mode == Mode::Edit;
     float textW = juce::jmax (width (WcLook::label (11.0f), shown.name), width (WcLook::label (15.0f), ed ? field.getText() : shown.value),
                               three ? width (WcLook::label (11.0f), shown.note) : 0.0f);
-    const int w = juce::jlimit (ed ? kMinEditW : kMinW, three && shown.warn && ! ed ? kMaxWarnW : kMaxW, (int) std::ceil (textW) + 2 * kPadX + (ed ? 12 : 0));
-    const int h = kPadY + kLine1 + kGap + (ed ? kField : kLine2) + (three ? kGap + kLine3 : 0) + kPadY;   // 44 / 59, editing 49 / 64
+    const int w = juce::jlimit (ed ? kMinEditW : kMinW, kMaxW, (int) std::ceil (textW) + 2 * kPadX + (ed ? 12 : 0));
+    const int h = kPadY + kLine1 * rows (shown.name) + kGap + (ed ? kField : kLine2) + (three ? kGap + kLine3 * rows (shown.note) : 0) + kPadY;   // 44 / 61, editing 49 / 66
 
     // above, centred, 8 px away; else below; else to the right; else to the left. Never over the control.
     const auto area = parent->getLocalBounds().toFloat();
@@ -248,33 +246,33 @@ bool ValueReadout::layout (bool evenIfHidden)
 
 void ValueReadout::resized()
 {
-    field.setBounds (kPadX, kPadY + kLine1 + kGap, getWidth() - 2 * kPadX, kField);
+    field.setBounds (kPadX, kPadY + kLine1 * rows (shown.name) + kGap, getWidth() - 2 * kPadX, kField);
 }
 
 void ValueReadout::paint (juce::Graphics& g)
 {
     const bool ed = mode == Mode::Edit;
-    g.fillAll (kBack);
-    g.setColour (ed ? (invalid ? kError : col::accent) : col::accent.withAlpha (0.5f));
+    g.fillAll (col::overlay.withAlpha (col::overlayAlpha));
+    g.setColour (ed ? (invalid ? col::error : col::midi) : col::midi.withAlpha (col::frameAlpha));
     g.drawRect (getLocalBounds(), 1);
     const int x = kPadX, w = getWidth() - 2 * kPadX;
     int y = kPadY;
-    g.setColour (kName);
+    g.setColour (col::textDim);
     g.setFont (WcLook::label (11.0f));
-    g.drawText (shown.name, x, y, w, kLine1, juce::Justification::centredLeft, true);
-    y += kLine1 + kGap;
+    g.drawFittedText (shown.name, x, y, w, kLine1 * rows (shown.name), juce::Justification::centredLeft, rows (shown.name), 1.0f);
+    y += kLine1 * rows (shown.name) + kGap;
     if (! ed)
     {
-        g.setColour (juce::Colours::white);
+        g.setColour (col::text);
         g.setFont (WcLook::label (15.0f));
         g.drawText (shown.value, x, y, w, kLine2, juce::Justification::centredLeft, true);
     }
     y += (ed ? kField : kLine2) + kGap;
     if (shown.note.isNotEmpty())
     {
-        g.setColour (ed && invalid ? kError : (shown.warn ? kWarn : col::accent));
+        g.setColour (ed && invalid ? col::error : (shown.warn ? col::warn : col::info));
         g.setFont (WcLook::label (11.0f));
-        g.drawText (shown.note, x, y, w, kLine3, juce::Justification::centredLeft, true);
+        g.drawFittedText (shown.note, x, y, w, kLine3 * rows (shown.note), juce::Justification::centredLeft, rows (shown.note), 1.0f);
     }
 }
 
@@ -317,7 +315,7 @@ void ValueReadout::commitEdit (bool fromKey)
     if (! fromKey) { closeEdit(); return; }          // left with a bad value: dropped, no fuss
     invalid = true;
     refused = field.getText();
-    shown.note = "Not a value for this control - try " + editing.example;
+    shown.note = juce::String (juce::CharPointer_UTF8 ("Not a value for this control \xe2\x80\x93 try ")) + editing.example;
     layout (true);
     repaint();
     field.grabKeyboardFocus();

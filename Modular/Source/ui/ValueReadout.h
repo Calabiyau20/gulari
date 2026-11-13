@@ -7,7 +7,7 @@ namespace wc::ui
 struct ReadoutText
 {
     juce::String name, value, note;   // line 1: parameter name, line 2: value with its unit, line 3 (optional): a note
-    bool warn = false;                // the note is a warning (amber), not information (cyan)
+    bool warn = false;                // the note is a warning (gold), not information (orchid)
 };
 
 // The controls that have a readout: knobs, faders, levers and panel buttons
@@ -36,6 +36,7 @@ public:
 
     std::function<bool()> suppressed;                    // a cable being dragged, a menu open
     std::function<juce::Rectangle<int>()> visibleArea;   // where the rack can be seen, in the parent's coordinates
+    std::function<float (juce::Component&)> markMargin;  // room a control's MIDI ring or dot takes around it (parent px)
 
     // hover: after 400 ms still; at once if a readout was up less than 800 ms ago
     void hoverEnter (juce::Component&);

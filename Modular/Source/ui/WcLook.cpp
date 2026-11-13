@@ -62,15 +62,15 @@ juce::Font WcLook::brand (float h)
 
 WcLook::WcLook()
 {
-    setColour (juce::PopupMenu::backgroundColourId, juce::Colour (0xff202126));
-    setColour (juce::PopupMenu::textColourId, juce::Colour (0xffe6e6e6));
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, col::accent.withAlpha (0.35f));
-    setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
-    setColour (juce::PopupMenu::headerTextColourId, col::accent);
+    setColour (juce::PopupMenu::backgroundColourId, col::overlay);
+    setColour (juce::PopupMenu::textColourId, col::text);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, col::midi.withAlpha (0.35f));
+    setColour (juce::PopupMenu::highlightedTextColourId, col::text);
+    setColour (juce::PopupMenu::headerTextColourId, col::info);
     setColour (juce::ComboBox::textColourId, juce::Colour (0xffe6e6e6));
     setColour (juce::ComboBox::arrowColourId, col::accent);
     setColour (juce::TextButton::textColourOffId, juce::Colour (0xffe6e6e6));
-    setColour (juce::TooltipWindow::textColourId, juce::Colour (0xffeeeeee));
+    setColour (juce::TooltipWindow::textColourId, col::text);
 }
 
 // 200t knobs: a brushed silver cap on a coloured (blue) knurled skirt, black index line.
@@ -145,8 +145,56 @@ void WcLook::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, fl
 void WcLook::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
 {
     g.fillAll (findColour (juce::PopupMenu::backgroundColourId));
-    g.setColour (col::accent.withAlpha (0.4f));
+    g.setColour (col::midi.withAlpha (col::frameAlpha));
     g.drawRect (0, 0, w, h, 1);
+}
+
+// Menu items: text 13 px from 18 px in (the tick before it); the right column in SemiBold 11 px, not squeezed, dimmed
+constexpr int kMenuTextX = 18, kMenuItemH = 20;
+
+void WcLook::getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardHeight, int& w, int& h)
+{
+    LookAndFeel_V4::getIdealPopupMenuItemSize (text, isSeparator, standardHeight, w, h);
+    if (! isSeparator) h = juce::jmax (h, kMenuItemH);   // room for 13 px without JUCE shrinking it
+}
+
+void WcLook::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive, bool isHighlighted,
+                                bool isTicked, bool hasSubMenu, const juce::String& text, const juce::String& shortcut,
+                                const juce::Drawable* icon, const juce::Colour* textColour)
+{
+    if (isSeparator || icon != nullptr || hasSubMenu)
+    {
+        LookAndFeel_V4::drawPopupMenuItem (g, area, isSeparator, isActive, isHighlighted, isTicked, hasSubMenu, text, shortcut, icon, textColour);
+        return;
+    }
+    auto r = area.reduced (1);
+    if (isHighlighted && isActive) { g.setColour (findColour (juce::PopupMenu::highlightedBackgroundColourId)); g.fillRect (r); }
+    const auto ink = (textColour != nullptr ? *textColour : col::text).withMultipliedAlpha (isActive ? 1.0f : 0.5f);
+    g.setColour (ink);
+    if (isTicked)
+    {
+        auto tick = getTickShape (1.0f);
+        const auto box = juce::Rectangle<float> ((float) area.getX() + 5.0f, (float) r.getY(), (float) kMenuTextX - 8.0f, (float) r.getHeight()).reduced (0.0f, 5.0f);
+        g.fillPath (tick, tick.getTransformToScaleToFit (box, true));
+    }
+    r.setLeft (area.getX() + kMenuTextX);
+    r.removeFromRight (8);
+    g.setFont (label (13.0f));
+    g.drawFittedText (text, r, juce::Justification::centredLeft, 1, 1.0f);
+    if (shortcut.isNotEmpty())
+    {
+        g.setColour (col::textDim.withMultipliedAlpha (isActive ? 1.0f : 0.5f));
+        g.setFont (label (11.0f));
+        g.drawText (shortcut, r, juce::Justification::centredRight, true);
+    }
+}
+
+void WcLook::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& name)
+{
+    g.setFont (getPopupMenuFont().boldened());
+    g.setColour (findColour (juce::PopupMenu::headerTextColourId));
+    g.drawFittedText (name, area.getX() + kMenuTextX, area.getY(), area.getWidth() - kMenuTextX - 4, (int) ((float) area.getHeight() * 0.8f),
+                      juce::Justification::bottomLeft, 1);
 }
 
 void WcLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
@@ -181,10 +229,10 @@ void WcLook::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int,
 
 void WcLook::drawTooltip (juce::Graphics& g, const juce::String& text, int w, int h)
 {
-    g.fillAll (juce::Colour (0xf0202126));
-    g.setColour (col::accent.withAlpha (0.5f));
+    g.fillAll (col::overlay.withAlpha (col::overlayAlpha));
+    g.setColour (col::midi.withAlpha (col::frameAlpha));
     g.drawRect (0, 0, w, h, 1);
-    g.setColour (juce::Colour (0xffeeeeee));
+    g.setColour (col::text);
     g.setFont (label (13.0f));
     g.drawFittedText (text, 8, 4, w - 16, h - 8, juce::Justification::centredLeft, 4);
 }

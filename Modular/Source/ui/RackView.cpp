@@ -35,7 +35,7 @@ static juce::String jackTip (const JackSpec& j)
     return t;
 }
 
-// what the menus print next to "Type a value..."
+// what the menus print next to "Type a value…"
 static juce::String typeShortcut()
 {
    #if JUCE_MAC
@@ -164,6 +164,13 @@ bool ParamSwitch::readoutText (ReadoutText& t)
 void ParamSwitch::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
 void ParamSwitch::mouseMove (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this); }
 void ParamSwitch::mouseExit (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this); }
+
+// the lever and its nut as paint draws them (24 px wide on the left), not the labels beside it
+juce::Rectangle<float> ParamSwitch::readoutAnchor()
+{
+    const float half = (positions == 3 ? 14.0f : 12.0f) + 4.0f;   // travel + the tip
+    return { 0.0f, (float) getHeight() * 0.5f - half, 24.0f, 2.0f * half };
+}
 
 // chrome bat-handle toggle, vertical, labels printed to its right
 void ParamSwitch::paint (juce::Graphics& g)
@@ -858,9 +865,10 @@ juce::Component* ModulePanel::controlFor (const juce::String& id) const
     return nullptr;
 }
 
-// MIDI Learn on the panel: a 2 px ring 4 px off the skirt (a rounded rectangle on levers, buttons and faders) while
-// a control waits for a CC, pulsing 40-100 % once a second, steady for a moment once assigned; a 6 px dot up and to
-// the right of a learned control, 8 px for a moment each time its CC moves it. Nothing at all with no MIDI mapped.
+// MIDI Learn on the panel: a 2 px ring 4 px off the skirt (a rounded rectangle on levers, buttons and faders), over
+// a 4 px dark one, while a control waits for a CC, pulsing 60-100 % once a second, steady for a moment once assigned;
+// a 6 px dot on the skirt at 45 degrees up to the right (top right corner of levers, buttons and faders), 8 px for a
+// moment each time its CC moves it. Below 100 % zoom they keep their size on screen. Nothing with no MIDI mapped.
 void ModulePanel::paintMidi (juce::Graphics& g)
 {
     if (! rack.learning() && proc.midiMapEmpty()) return;
@@ -872,20 +880,25 @@ void ModulePanel::paintMidi (juce::Graphics& g)
         if (! ring && cc < 0) return;
         const auto a = getLocalArea (&c, src.readoutAnchor());
         const float r = a.getWidth() * 0.5f;
+        const float px = 1.0f / juce::jmin (1.0f, rack.getZoom());   // one screen pixel, below 100 %
         if (ring)
         {
-            g.setColour (col::accent.withAlpha (alpha));
-            if (round) g.drawEllipse (juce::Rectangle<float> (2.0f * (r + 5.0f), 2.0f * (r + 5.0f)).withCentre (a.getCentre()), 2.0f);
-            else g.drawRoundedRectangle (a.expanded (5.0f), 4.0f, 2.0f);
+            for (const bool under : { true, false })
+            {
+                g.setColour (under ? col::bg : col::midi.withAlpha (alpha));
+                const float w = (under ? 4.0f : 2.0f) * px;
+                if (round) g.drawEllipse (juce::Rectangle<float> (2.0f * (r + 5.0f), 2.0f * (r + 5.0f)).withCentre (a.getCentre()), w);
+                else g.drawRoundedRectangle (a.expanded (5.0f), 4.0f, w);
+            }
         }
         if (cc >= 0)
         {
-            const float d = rack.ccActive (cc) ? 8.0f : 6.0f;
-            const float k = r + 3.0f + 4.0f;   // 3 px off the skirt, to the outside of its border
+            const float d = (rack.ccActive (cc) ? 8.0f : 6.0f) * px;
+            const float k = 0.86f * r;   // on the skirt, clear of the scale around it
             const auto at = round ? a.getCentre() + juce::Point<float> (k * 0.70710678f, -k * 0.70710678f) : a.getTopRight();
-            g.setColour (juce::Colour (0xff15161a));
-            g.fillEllipse (juce::Rectangle<float> (d + 2.0f, d + 2.0f).withCentre (at));
-            g.setColour (col::accent);
+            g.setColour (col::bg);
+            g.fillEllipse (juce::Rectangle<float> (d + 2.0f * px, d + 2.0f * px).withCentre (at));
+            g.setColour (col::midi);
             g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (at));
         }
     };
@@ -993,7 +1006,7 @@ void ModulePanel::menu252 (const juce::String& nm)
     m.addSectionHeader (title252 (nm));
     if (nm == "@cv")
     {
-        juce::PopupMenu::Item it ("Type a value...");
+        juce::PopupMenu::Item it (juce::String (juce::CharPointer_UTF8 ("Type a value\xe2\x80\xa6")));
         it.itemID = 1;
         it.shortcutKeyDescription = typeShortcut();
         m.addItem (it);
@@ -1863,7 +1876,7 @@ void RackView::holdLearnReadout()
     auto* c = controlFor (learnId);
     auto* p = proc.apvts.getParameter (learnId);
     if (readout == nullptr || c == nullptr || p == nullptr) return;
-    readout->hold (*c, { p->getName (64), "Move a MIDI control...", "Right-click or Esc to cancel", false });
+    readout->hold (*c, { p->getName (64), juce::String (juce::CharPointer_UTF8 ("Move a MIDI control\xe2\x80\xa6")), "Right-click or Esc to cancel", false });
 }
 
 void RackView::endLearn()
@@ -1930,11 +1943,22 @@ bool RackView::learnRing (const juce::String& id, float& alpha) const
     if (id == learnId)
     {
         const float ph = (float) ((now - learnSince) % 1000u) / 1000.0f;
-        alpha = 0.7f + 0.3f * std::cos (juce::MathConstants<float>::twoPi * ph);   // 40 .. 100 %, once a second
+        alpha = 0.8f + 0.2f * std::cos (juce::MathConstants<float>::twoPi * ph);   // 60 .. 100 %, once a second
         return true;
     }
     if (id == justId && now < justUntil) { alpha = 1.0f; return true; }
     return false;
+}
+
+float RackView::midiMarkMargin (juce::Component& c) const
+{
+    juce::String id;
+    if (auto* k = dynamic_cast<WcKnob*> (&c)) id = k->param != nullptr ? k->paramId : juce::String();
+    else if (auto* w = dynamic_cast<ParamSwitch*> (&c)) id = w->paramId();
+    else if (auto* b = dynamic_cast<ParamButton*> (&c)) id = b->paramId();
+    float alpha = 0.0f;
+    if (id.isEmpty() || (! learnRing (id, alpha) && proc.ccOf (id) < 0)) return 0.0f;
+    return juce::jmax (6.0f, 6.0f * zoom);   // the ring's outer edge, 6 px off the control (it keeps its size below 100 %)
 }
 
 bool RackView::ccActive (int cc) const
@@ -1997,7 +2021,7 @@ juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, 
     m.addSectionHeader (p->getName (64));
     if (knob)
     {
-        juce::PopupMenu::Item it ("Type a value...");
+        juce::PopupMenu::Item it (juce::String (juce::CharPointer_UTF8 ("Type a value\xe2\x80\xa6")));
         it.itemID = 1;
         it.shortcutKeyDescription = typeShortcut();
         m.addItem (it);
@@ -2084,7 +2108,7 @@ void RackView::menuChoice (const juce::String& id, int r, bool waiting, juce::Co
     else if (r >= 20 && r < 20 + n && n > 1) set ((float) (r - 20) / (float) (n - 1));
 }
 
-// Ctrl+click (Cmd on a Mac) or "Type a value...": the readout turns into a field over the control
+// Ctrl+click (Cmd on a Mac) or "Type a value…": the readout turns into a field over the control
 void RackView::typeValue (juce::Component& c, const juce::String& id)
 {
     auto* p = proc.apvts.getParameter (id);
