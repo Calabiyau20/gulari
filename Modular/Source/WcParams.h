@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <optional>
 
 // Host parameters: a fixed bank per module instance, so automation keeps working when modules are added
 // or removed from the rack. Prefixes: "midi_", "out_", and "a_" .. "d_" for the four 259 slots.
@@ -17,4 +18,17 @@ inline float coarseHz (float k, bool low) { return (low ? 0.25f : 27.5f) * std::
 inline float coarseNorm (float hz, bool low) { return std::log2 (hz / (low ? 0.25f : 27.5f)) / 8.0f; }
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+
+// A value typed by hand ("440 Hz", "1,2k", "250", "+50 %", "off") read back for one parameter: the same reading
+// every float and choice parameter gives the host through valueFromStringFunction. `shown` is the text the control
+// showed when the typing started: a bare number is taken in its unit ("120 ms" -> "250" = 250 ms). Without it a bare
+// number is in the unit the parameter shows at its default. Nothing comes back when the text is not a value for
+// this parameter (a unit of another kind, a word it does not know).
+struct TypedValue
+{
+    float plain = 0.0f;   // in the parameter's own range, already limited to it
+    int limited = 0;      // -1 / +1: the text asked for less than the minimum / more than the maximum
+};
+std::optional<TypedValue> parseValueText (const juce::RangedAudioParameter&, const juce::String& text, const juce::String& shown = {});
+juce::String valueTextExample (const juce::RangedAudioParameter&);   // what to suggest when the text was not understood: "440 Hz or 1.2k"
 } // namespace wc

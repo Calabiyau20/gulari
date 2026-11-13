@@ -43,6 +43,28 @@ static void setP (WcProcessor& p, const juce::String& id, float v)
     if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v));
 }
 
+// Two texts of the same parameter that show the same value: "1.00 s" and "1000 ms" are both one second, within
+// half a unit of the last digit of the first one. Words and labels have to match exactly.
+static bool sameShownValue (const juce::String& a, const juce::String& b)
+{
+    auto read = [] (const juce::String& t, double& value, double& halfDigit)
+    {
+        auto s = t.upToFirstOccurrenceOf ("(", false, false).removeCharacters (" ").toLowerCase();
+        if (s.startsWithChar ('x')) s = s.substring (1);
+        const auto num = s.initialSectionContainingOnly ("+-0123456789.");
+        if (! num.containsAnyOf ("0123456789")) return false;
+        const auto unit = s.substring (num.length());
+        const double f = unit == "ms" ? 1.0e-3 : unit == "us" ? 1.0e-6 : unit == "khz" ? 1.0e3 : 1.0;
+        const int decimals = num.containsChar ('.') ? num.length() - num.indexOfChar ('.') - 1 : 0;
+        value = num.getDoubleValue() * f;
+        halfDigit = 0.5 * std::pow (10.0, -decimals) * f;
+        return true;
+    };
+    double va, ha, vb, hb;
+    if (! read (a, va, ha) || ! read (b, vb, hb)) return false;
+    return std::abs (va - vb) <= ha * 1.001 + 1.0e-12;
+}
+
 // run the rack for n samples, collecting one jack (or the main output when inst < 0)
 static std::vector<float> run (WcProcessor& p, int n, int inst = -1, int jack = 0, int noteOn = -1)
 {
@@ -1158,6 +1180,89 @@ int main (int argc, char** argv)
             if (! demo (blob, "signed with another key")) ok = false;
         }
         std::printf ("  demo mode allows %d oscillators and no preset load / save\n", wc::License::kDemoMaxOscillators);
+    }
+
+    // ---- typed values: every float parameter reads its own text back ----
+    // "440 Hz" typed in the host or in the value editor must land on 440 Hz. For each float parameter and 101
+    // positions, getValueForText (getText (v)) has to come back to v within what the text shows.
+    {
+        WcProcessor p;
+        int floats = 0, bad = 0;
+        juce::StringArray fails;
+        for (auto* par : p.getParameters())
+        {
+            if (dynamic_cast<juce::AudioParameterFloat*> (par) == nullptr) continue;
+            auto* f = dynamic_cast<juce::RangedAudioParameter*> (par);   // getText / getValueForText are public here
+            ++floats;
+            for (int i = 0; i <= 100; ++i)
+            {
+                const float v = f->convertTo0to1 (f->convertFrom0to1 ((float) i / 100.0f));   // a value the parameter can hold
+                const auto text = f->getText (v, 64);
+                const float back = f->getValueForText (text);
+                if (f->getText (back, 64) == text || std::abs (back - v) < 1.0e-5f || sameShownValue (text, f->getText (back, 64))) continue;
+                if (++bad <= 8) fails.add (f->getParameterID() + " \"" + text + "\" -> \"" + f->getText (back, 64) + "\"");
+            }
+        }
+        std::printf ("typed values: %d float parameters x 101 positions read their own text back, %d misses %s\n",
+                     floats, bad, bad == 0 ? "ok" : "BAD");
+        for (auto& s : fails) std::printf ("  %s\n", s.toRawUTF8());
+        if (bad != 0) ok = false;
+
+        // fixed cases: what a person types
+        struct Case { const char* id; const char* text; const char* shown; float want; float tol; int limited; };   // want: plain; NAN = not a value
+        const Case cases[] = {
+            { "a_po_freq", "1,2k",     "",         coarseNorm (1200.0f, false), 1.0e-4f, 0 },   // comma decimal, k = x1000, on Hz
+            { "a_po_freq", "440 Hz",   "",         coarseNorm (440.0f, false),  1.0e-4f, 0 },
+            { "a_po_freq", "1.2 KHZ",  "",         coarseNorm (1200.0f, false), 1.0e-4f, 0 },   // unit capitals do not matter
+            { "fa_att1",   "250",      "120 ms",   0.25f * (float) std::log10 (250.0),  1.0e-4f, 0 },   // bare number = the unit shown: 250 ms
+            { "fa_att1",   "2",        "1.20 s",   0.25f * (float) std::log10 (2000.0), 1.0e-4f, 0 },   // ... 2 s
+            { "fa_att1",   "50 %",     "",         0.5f,  1.0e-6f, 0 },                     // % on a time = position of the knob
+            { "fa_att1",   "440 Hz",   "",         NAN,   0.0f,    0 },                     // a unit of another kind
+            { "fa_att1",   "1 h",      "",         NAN,   0.0f,    0 },
+            { "fa_att1",   "",         "",         NAN,   0.0f,    0 },
+            { "fa_att1",   "1 min",    "",         NAN,   0.0f,    0 },
+            { "fa_att1",   "1 ms",     "",         0.0f,  1.0e-6f, 0 },
+            { "fa_att1",   "0.5 ms",   "",         0.0f,  1.0e-6f, -1 },                    // below the range: limited
+            { "a_timbre",  "200 %",    "",         1.0f,  1.0e-6f, 1 },                     // limited to the maximum
+            { "a_timbre",  "37",       "50 %",     0.37f, 1.0e-6f, 0 },
+            { "a_mo_cv",   "+50 %",    "",         0.5f,  1.0e-6f, 0 },                     // shown in %: the shown value (75 % of the knob)
+            { "a_mo_cv",   "\xe2\x88\x92" "25 %", "", -0.25f, 1.0e-6f, 0 },                  // typographic minus
+            { "pp_period", "off",      "",         1.0f,  1.0e-6f, 0 },
+            { "pp_period", "OFF",      "",         1.0f,  1.0e-6f, 0 },
+            { "sp_att0",   "off",      "",         0.0f,  1.0e-6f, 0 },
+            { "sp_att0",   "-6 dB",    "",         30.0f / 42.0f, 1.0e-5f, 0 },
+            { "pp_len",    "7.6",      "",         8.0f,  0.0f,    0 },                     // stepped: rounds to the step
+            { "rg_bpm",    "96 bpm",   "",         96.0f, 0.0f,    0 },
+            { "rg_clk1",   "16",       "",         11.0f, 0.0f,    0 },                     // a label that is a number
+            { "tm_node",   "c",        "",         2.0f,  0.0f,    0 },
+            { "mf_mult1",  "x2",       "",         (float) (std::log (4.0) / std::log (8.0)), 1.0e-5f, 0 },
+            { "mf_mult1",  "2x",       "",         (float) (std::log (4.0) / std::log (8.0)), 1.0e-5f, 0 },
+            { "out_lag",   "0.1 s",    "",         100.0f, 1.0e-3f, 0 },
+            { "fa_mode1",  "cyc",      "",         2.0f,  0.0f,    0 },                     // choice: start of the label
+            { "fa_mode1",  "2",        "",         1.0f,  0.0f,    0 },                     // ... or its position
+            { "fa_mode1",  "banana",   "",         NAN,   0.0f,    0 },
+        };
+        int caseBad = 0;
+        for (auto& c : cases)
+        {
+            auto* par = p.apvts.getParameter (c.id);
+            const auto r = par != nullptr ? wc::parseValueText (*par, juce::String (juce::CharPointer_UTF8 (c.text)), c.shown) : std::nullopt;
+            const bool want = ! std::isnan (c.want);
+            const bool good = par != nullptr && r.has_value() == want && (! want || (std::abs (r->plain - c.want) <= c.tol && r->limited == c.limited));
+            if (! good)
+            {
+                ++caseBad;
+                std::printf ("  typed \"%s\" on %s: got %s, want %s  BAD\n", c.text, c.id,
+                             r ? (juce::String (r->plain, 6) + " limited " + juce::String (r->limited)).toRawUTF8() : "nothing",
+                             want ? (juce::String (c.want, 6) + " limited " + juce::String (c.limited)).toRawUTF8() : "nothing");
+            }
+        }
+        // the host path: before, "440 Hz" read as 440 and pinned the knob to its maximum
+        auto* po = p.apvts.getParameter ("a_po_freq");
+        const float host = coarseHz (po->convertFrom0to1 (po->getValueForText ("440 Hz")), false);
+        if (std::abs (host - 440.0f) > 0.05f) { ++caseBad; std::printf ("  host \"440 Hz\" -> %.2f Hz  BAD\n", host); }
+        std::printf ("typed values: %d fixed cases, %s\n", (int) (sizeof (cases) / sizeof (cases[0])) + 1, caseBad == 0 ? "ok" : "BAD");
+        if (caseBad != 0) ok = false;
     }
 
     // ---- 4. CPU ----
