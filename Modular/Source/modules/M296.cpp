@@ -45,6 +45,7 @@ void M296::prepare (double sampleRate)
         norm[b] = pk > 1.0e-6 ? (float) (1.0 / pk) : 1.0f;
     }
     att = 1.0f - std::exp (-1.0f / (0.002f * fs));
+    rampLen = juce::jmax (1, (int) (0.012f * fs));
     reset();
 }
 
@@ -52,15 +53,18 @@ void M296::reset()
 {
     for (auto& band : f) for (auto& x : band) x.reset();
     for (auto& e : env) e = 0.0f;
+    first = true;
 }
 
 void M296::beginBlock (int)
 {
+    auto set = [&] (dsp::Ramp& r, float v) { if (first) r.snap (v); else r.to (v, rampLen); };   // 12 ms, as the 292
     for (int b = 0; b < kBands; ++b)
     {
         const float k = sliderP[b]->load();
-        bandGain[b] = k < 0.02f ? 0.0f : std::pow (10.0f, sliderDb (k) / 20.0f);
+        set (bandGain[b], k < 0.02f ? 0.0f : std::pow (10.0f, sliderDb (k) / 20.0f));
     }
+    first = false;
     const int d = juce::jlimit (0, 2, (int) std::lround (decayP->load()));   // 0 short, 1 combo, 2 long
     for (int b = 0; b < kBands; ++b)
     {
@@ -94,7 +98,7 @@ void M296::tick (const float* in, float* out) noexcept
         const float y = band[b];
         const float e = juce::jmin (10.0f, env[b]);                   // peak follower: a 1.0 sine = 10 V
         out[Out_Env0 + b] = e;
-        const float ya = y * bandGain[b];
+        const float ya = y * bandGain[b].next();
         out[Out_Band0 + b] = ya;
         if (b & 1) { combO += y; attO += ya; } else { combE += y; attE += ya; }
         // VCA: window (soft edges, one channel wide) + local program input; or the neighbour's envelope (transfer)

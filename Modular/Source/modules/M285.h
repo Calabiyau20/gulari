@@ -44,14 +44,17 @@ public:
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;
-    void reset() override { hs.reset(); hr.reset(); ph = 0.0; }
+    void reset() override { hs.reset(); hr.reset(); ph = 0.0; first = true; }
 
     static float refHz (float k) { return 1000.0f * k * k; }   // 0 .. 1 kHz
 
 private:
     std::atomic<float>* ctlP = nullptr; std::atomic<float>* refP = nullptr; std::atomic<float>* fmP = nullptr; std::atomic<float>* intP = nullptr;
     std::atomic<float>* bmCtlP = nullptr; std::atomic<float>* ampP = nullptr;
-    float fs = 48000.0f, ctl = 0.0f, ref = 0.0f, fm = 0.0f, bmCtl = 0.0f, amp = 1.0f;
+    float fs = 48000.0f, ctl = 0.0f, ref = 0.0f, fm = 0.0f, bmCtl = 0.0f;
+    dsp::Ramp amp;
+    int rampLen = 576;
+    bool first = true;
     bool internal = true;
     double ph = 0.0;
     Hilbert hs, hr;

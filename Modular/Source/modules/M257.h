@@ -16,7 +16,8 @@ public:
     static int inOf (int section, int k) { return section * 4 + k; }   // k: 0 a, 1 b, 2 m, 3 c
 
     M257 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
-    void prepare (double) override {}
+    void prepare (double sampleRate) override { rampLen = juce::jmax (1, (int) (0.012 * sampleRate)); first = true; }
+    void reset() override { first = true; }
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;
     float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
@@ -29,7 +30,10 @@ public:
 
 private:
     std::atomic<float>* kP[2] {}; std::atomic<float>* mP[2] {}; std::atomic<float>* p5P[2] {}; std::atomic<float>* offP[2] {};
-    float k[2] {}, m[2] {}, off[2] {};
+    dsp::Ramp k[2], off[2];
+    float m[2] {};
+    int rampLen = 576;
+    bool first = true;
     bool p5[2] {};
     std::array<std::atomic<float>, Led_Count> leds {};
 };

@@ -22,6 +22,7 @@ public:
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;
+    void reset() override { first = true; }
     float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
 
 private:
@@ -30,9 +31,10 @@ private:
     float fs = 48000.0f;
     float gl[6] {}, gr[6] {};
     bool prog[6] {}, mon[6] {};
-    float preGain = 1.0f;
+    dsp::Ramp gR[6], lR[6], rR[6], preGain;   // gain of A and F, left / right of B-E, pre-amp
+    int rampLen = 576;
+    bool first = true;
     dsp::OnePoleLP lagA, lagF;
-    float g[6] {};
     std::array<std::atomic<float>, Led_Count> leds {};
 };
 } // namespace wc

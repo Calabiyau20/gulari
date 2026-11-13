@@ -50,7 +50,10 @@ private:
     std::atomic<float>* preEP = nullptr; std::atomic<float>* preOP = nullptr; std::atomic<float>* trEP = nullptr; std::atomic<float>* trOP = nullptr;
     float fs = 48000.0f;
     Svf f[kBands][3];
-    float bandGain[kBands] {}, norm[kBands] {}, env[kBands] {}, rel[kBands] {}, att = 0.0f, vca[kBands] {};
+    dsp::Ramp bandGain[kBands];
+    int rampLen = 576;
+    bool first = true;
+    float norm[kBands] {}, env[kBands] {}, rel[kBands] {}, att = 0.0f, vca[kBands] {};
     float freqK = 0.5f, fcvK = 0.0f, widthK = 0.3f, preE = 0.0f, preO = 0.0f;
     bool trE = false, trO = false;
     float inPeak[3] {};

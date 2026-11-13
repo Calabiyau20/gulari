@@ -75,6 +75,7 @@ void M275::prepare (double sampleRate)
     tank[1].prepare (fs, 2.3f);
     for (auto& d : darken) d.set (2500.0f, fs);
     for (auto& r : sMix) r.snap (0.0f);
+    rampLen = juce::jmax (1, (int) (0.012f * fs));
     lastTreb[0] = lastTreb[1] = lastBass[0] = lastBass[1] = 99.0f;
     reset();
 }
@@ -82,6 +83,7 @@ void M275::prepare (double sampleRate)
 void M275::reset()
 {
     for (int c = 0; c < 2; ++c) { tank[c].clear(); treb[c].reset(); bass[c].reset(); darken[c].reset(); }
+    first = true;
 }
 
 void M275::beginBlock (int numSamples)
@@ -91,13 +93,14 @@ void M275::beginBlock (int numSamples)
         const float t = trebP[c]->load(), b = bassP[c]->load();
         // the panel is calibrated in dB AT 10 kHz and AT 50 Hz, so each shelf turns well before its label:
         // an RBJ shelf passes through half its gain at the corner and reaches the full amount about two octaves on
-        if (t != lastTreb[c]) { treb[c].shelf (true, juce::jmin (2800.0f, 0.4f * fs), t, fs); lastTreb[c] = t; }
-        if (b != lastBass[c]) { bass[c].shelf (false, 180.0f, b, fs); lastBass[c] = b; }
+        // the shelf gains glide 12 ms, as the 292; tick redraws the shelf while they move
+        if (first) { trebDb[c].snap (t); bassDb[c].snap (b); } else { trebDb[c].to (t, rampLen); bassDb[c].to (b, rampLen); }
         mix[c] = mixP[c]->load();
         recede[c] = recP[c]->load() > 0.5f;
         hot[c] = hotP[c]->load() > 0.5f;
         juce::ignoreUnused (numSamples);
     }
+    first = false;
 }
 
 void M275::tick (const float* in, float* out) noexcept
@@ -106,6 +109,11 @@ void M275::tick (const float* in, float* out) noexcept
     {
         const int ai = c == 0 ? In_Audio1 : In_Audio2, ci = c == 0 ? In_MixCv1 : In_MixCv2;
         const float x = in[ai] * (hot[c] ? 0.32f : 1.0f);
+        // shortcut: the shelf is redrawn every sample while its gain glides (until the ramp lands), fine for four
+        // shelves; interpolate the coefficients instead if it ever shows in a profile
+        const float t = trebDb[c].next(), b = bassDb[c].next();
+        if (t != lastTreb[c]) { treb[c].shelf (true, juce::jmin (2800.0f, 0.4f * fs), t, fs); lastTreb[c] = t; }
+        if (b != lastBass[c]) { bass[c].shelf (false, 180.0f, b, fs); lastBass[c] = b; }
         const float eq = treb[c].process (bass[c].process (x));
         const float wet = 1.6f * tank[c].process (eq);
         float m = mix[c] + (isPatched (ci) ? in[ci] / 10.0f : 0.0f);

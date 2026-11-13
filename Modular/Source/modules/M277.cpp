@@ -14,14 +14,16 @@ void M277::prepare (double sampleRate)
     fs = (float) sampleRate;
     buf.assign ((size_t) (fs * 3.5f) + 8, 0.0f);    // up to 0.8 s x 4 (c.v.) + margin
     slew = 1.0f - std::exp (-1.0f / (0.03f * fs));
+    rampLen = juce::jmax (1, (int) (0.012f * fs));
     reset();
 }
 
-void M277::reset() { std::fill (buf.begin(), buf.end(), 0.0f); w = 0; for (auto& f : lp) f.reset(); }
+void M277::reset() { std::fill (buf.begin(), buf.end(), 0.0f); w = 0; for (auto& f : lp) f.reset(); first = true; }
 
 void M277::beginBlock (int)
 {
-    for (int i = 0; i < 3; ++i) lvl[i] = lvlP[i]->load();
+    for (int i = 0; i < 3; ++i) { if (first) lvl[i].snap (lvlP[i]->load()); else lvl[i].to (lvlP[i]->load(), rampLen); }   // 12 ms, as the 292
+    first = false;
     longMode = longP->load() > 0.5f;
     tBase = timeSec (timeP->load(), longMode);
     ctl = ctlP->load(); modK = modP->load();
@@ -43,7 +45,7 @@ float M277::read (float d) const noexcept
 
 void M277::tick (const float* in, float* out) noexcept
 {
-    float x = in[In_A] * lvl[0] + in[In_B] * lvl[1] + in[In_C] * lvl[2];
+    float x = in[In_A] * lvl[0].next() + in[In_B] * lvl[1].next() + in[In_C] * lvl[2].next();
     const float ax = std::fabs (x);
     ovlHold = ax > 1.0f ? 1.0f : ovlHold * (1.0f - 1.0f / (0.2f * fs));
     ovl.store (ovlHold, std::memory_order_relaxed);

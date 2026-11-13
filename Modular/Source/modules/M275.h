@@ -39,6 +39,9 @@ private:
     float fs = 48000.0f;
     dsp::Biquad treb[2], bass[2];
     float lastTreb[2] { 99, 99 }, lastBass[2] { 99, 99 };
+    dsp::Ramp trebDb[2], bassDb[2];
+    int rampLen = 576;
+    bool first = true;
     float mix[2] {};
     bool recede[2] {}, hot[2] {};
     Tank tank[2];

@@ -1182,6 +1182,55 @@ int main (int argc, char** argv)
         std::printf ("  demo mode allows %d oscillators and no preset load / save\n", wc::License::kDemoMaxOscillators);
     }
 
+    // ---- a knob that jumps glides 12 ms, as the 292: no step in the output ----
+    // Each module straight, a steady input, the knob jumps between two blocks: the largest change from one sample
+    // to the next has to be a small part of the whole change (a jump puts all of it, or most, in one sample).
+    {
+        std::printf ("KNOB GLIDE\n");
+        struct Case { int inst; const char* id; float from, to; int in; float x; int out; std::vector<std::pair<const char*, float>> also; };
+        const std::vector<Case> cases = {
+            { kInst207, "mx_lvl_a", 0.0f, 1.0f, M207::In_A, 1.0f, M207::Out_L, { { "mx_prog_a", 1.0f } } },
+            { kInst207, "mx_pan1", 0.0f, 1.0f, M207::In_B, 1.0f, M207::Out_R, { { "mx_prog_b", 1.0f }, { "mx_lvl_b", 1.0f } } },
+            { kInst207, "mx_gain", 0.0f, 1.0f, M207::In_Pre, 0.001f, M207::Out_Pre, {} },
+            { kInst296, "sp_att0", 0.5f, 1.0f, M296::In_SigAll, 1.0f, M296::Out_Band0, {} },
+            { kInst285, "fs_amp", 0.0f, 1.0f, M285::In_BmSignal, 1.0f, M285::Out_Var, {} },
+            { kInst277, "dl_lvla", 0.0f, 1.0f, M277::In_A, 0.1f, M277::Out_Q1, {} },
+            { kInst257, "vp_k1", 0.0f, 1.0f, M257::In_Va1, 1.0f, M257::Out_1, {} },
+            { kInst257, "vp_off1", 0.0f, 1.0f, M257::In_Va1, 0.0f, M257::Out_1, {} },
+            { kInst275, "rv_bass1", -10.0f, 10.0f, M275::In_Audio1, 1.0f, M275::Out_Eq1, {} },
+        };
+        for (auto& c : cases)
+        {
+            WcProcessor p;
+            p.prepareToPlay (SR, 64);
+            for (auto& a : c.also) setP (p, a.first, a.second);
+            setP (p, c.id, c.from);
+            auto* m = p.rack.module (c.inst);
+            m->prepare (SR);
+            float in[64] {}, out[64] {};
+            in[c.in] = c.x;
+            auto run = [&] (int blocks, std::vector<float>* rec)
+            {
+                for (int b = 0; b < blocks; ++b)
+                {
+                    m->beginBlock (64);
+                    for (int i = 0; i < 64; ++i) { m->tick (in, out); if (rec != nullptr) rec->push_back (out[c.out]); }
+                }
+            };
+            run ((int) SR / 64, nullptr);                    // settle
+            const float before = out[c.out];
+            setP (p, c.id, c.to);
+            std::vector<float> y { before };
+            run ((int) SR / 128, &y);
+            float step = 0.0f;
+            for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
+            const float whole = std::abs (y.back() - before);
+            const bool good = whole > 0.0f && step < 0.005f * whole;     // a 12 ms ramp: 0.17 %
+            std::printf ("  %-9s %g -> %g: whole change %.4g, largest sample step %.2f %% of it %s\n", c.id, c.from, c.to, whole, 100.0f * step / std::max (whole, 1.0e-12f), good ? "ok" : "BAD");
+            if (! good) ok = false;
+        }
+    }
+
     // ---- MIDI Learn: a learned CC moves its parameter and stops there; a sleeping one goes on ----
     {
         std::printf ("MIDI LEARN\n");

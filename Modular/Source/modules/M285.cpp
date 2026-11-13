@@ -9,12 +9,14 @@ M285::M285 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     bmCtlP = apvts.getRawParameterValue (p + "bmctl"); ampP = apvts.getRawParameterValue (p + "amp");
 }
 
-void M285::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }
+void M285::prepare (double sampleRate) { fs = (float) sampleRate; rampLen = juce::jmax (1, (int) (0.012f * fs)); reset(); }
 
 void M285::beginBlock (int)
 {
     ctl = ctlP->load(); ref = refHz (refP->load()); fm = fmP->load(); internal = intP->load() > 0.5f;
-    bmCtl = bmCtlP->load(); amp = ampP->load();
+    bmCtl = bmCtlP->load();
+    if (first) amp.snap (ampP->load()); else amp.to (ampP->load(), rampLen);   // 12 ms, as the 292
+    first = false;
 }
 
 void M285::tick (const float* in, float* out) noexcept
@@ -39,7 +41,7 @@ void M285::tick (const float* in, float* out) noexcept
     // ---- balanced modulator ----
     const float x = in[In_BmSignal], r = in[In_BmRef];
     const float ring = x * r;
-    const float k = dsp::clampf (amp + bmCtl * in[In_BmControl] / 10.0f, 0.0f, 1.0f);
+    const float k = dsp::clampf (amp.next() + bmCtl * in[In_BmControl] / 10.0f, 0.0f, 1.0f);
     const float am = x * 0.5f * (1.0f + r);
     out[Out_Ring] = out[Out_Ring2] = ring;
     out[Out_Var] = out[Out_Var2] = (1.0f - k) * am + k * ring;

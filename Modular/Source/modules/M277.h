@@ -28,7 +28,10 @@ public:
 
 private:
     std::atomic<float>* lvlP[3] {}; std::atomic<float>* timeP = nullptr; std::atomic<float>* ctlP = nullptr; std::atomic<float>* modP = nullptr; std::atomic<float>* longP = nullptr;
-    float fs = 48000.0f, lvl[3] {}, tBase = 0.1f, ctl = 0.0f, modK = 0.0f;
+    dsp::Ramp lvl[3];
+    int rampLen = 576;
+    bool first = true;
+    float fs = 48000.0f, tBase = 0.1f, ctl = 0.0f, modK = 0.0f;
     bool longMode = false;
     std::vector<float> buf;
     int w = 0;
