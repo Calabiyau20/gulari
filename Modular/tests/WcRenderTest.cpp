@@ -1247,6 +1247,42 @@ int main (int argc, char** argv)
         if (! good) ok = false;
     }
 
+    // ---- rows on screen: LAYOUT comes back as it went, a hand-edited one is cleaned up, every state carries one ----
+    {
+        auto text = [] (const WcProcessor& p)
+        {
+            juce::String t;
+            for (auto& r : p.layout()) { t << "["; for (int i : r) t << instKey (i) << " "; t = t.trimEnd() + "] "; }
+            return t.trimEnd();
+        };
+        auto fromXml = [] (WcProcessor& p, const char* xml) { if (auto x = juce::parseXML (xml)) p.patchFromTree (juce::ValueTree::fromXml (*x)); };
+        WcProcessor p;
+        p.license.status = License::Status::Licensed;
+        p.loadBuiltinPatch (12);                               // 245 Sequence: five modules in two rows
+        const auto before = text (p);
+        p.moveModule (kInstOutput, 0, 0);                     // OUTPUT first
+        p.moveModule (kInst259, (int) p.layout().size(), 0);  // the 259 alone in a new third row
+        WcProcessor q;
+        q.license.status = License::Status::Licensed;
+        q.patchFromTree (p.patchToTree());
+        const bool trip = q.layout() == p.layout() && text (q) == "[out midi sv] [la] [a]";
+        // by hand: an unknown key, a repeat, a module not in the rack, one in the rack left out, a row past 4008
+        fromXml (q, "<WCPATCH name=\"x\" version=\"3\"><MODULES midi=\"1\" a=\"1\" fa=\"1\" la=\"1\" out=\"1\" kb=\"1\" mf=\"1\" s1=\"1\" s2=\"1\" sv=\"1\"/>"
+                    "<CABLES/><LAYOUT><ROW m=\"zz la a la b\"/><ROW m=\"kb mf s1 s2 sv\"/></LAYOUT></WCPATCH>");
+        const auto edited = text (q);
+        fromXml (q, "<WCPATCH name=\"y\" version=\"3\"><MODULES midi=\"1\" a=\"1\" out=\"1\"/><CABLES/><LAYOUT><ROW m=\"out\"/></LAYOUT></WCPATCH>");
+        const auto oneRow = text (q);
+        WcProcessor demo;                                       // the state of a demo session carries the rows too
+        juce::MemoryBlock st;
+        demo.getStateInformation (st);
+        const auto xml = demo.getXmlFromBinary (st.getData(), (int) st.getSize());
+        const bool saved = xml != nullptr && xml->getChildByName ("WCPATCH") != nullptr && xml->getChildByName ("WCPATCH")->getChildByName ("LAYOUT") != nullptr;
+        const bool good = trip && edited == "[la a] [kb mf s1 s2 sv midi fa out]" && oneRow == "[out midi a] []" && saved && before == "[midi sv a] [la out]";
+        std::printf ("ROWS %s -> %s, back %s; by hand %s; %s; demo state with LAYOUT %s %s\n", before.toRawUTF8(), text (p).toRawUTF8(),
+                     trip ? "the same" : "DIFFERENT", edited.toRawUTF8(), oneRow.toRawUTF8(), saved ? "yes" : "NO", good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
     // ---- MIDI Learn: a learned CC moves its parameter and stops there; a sleeping one goes on ----
     {
         std::printf ("MIDI LEARN\n");

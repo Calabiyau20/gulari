@@ -295,10 +295,17 @@ void WcProcessor::disconnectOutput (int inst, int outJack)
     commit();
 }
 
-void WcProcessor::setPresent (int inst, bool on)
+void WcProcessor::setPresent (int inst, bool on, int preferRow)
 {
     if (! isRemovable (inst)) return;
     if (on && ! canAddOscillator (inst)) return;      // demo mode: two oscillators
+    if (on && ! present[(size_t) inst])
+    {
+        auto r = (size_t) juce::jlimit (0, (int) rows.size() - 1, preferRow < 0 ? (int) rows.size() - 1 : preferRow);
+        while (r < rows.size() && ! rowHasRoom (rows[r], panelWidth (inst))) ++r;
+        if (r == rows.size()) rows.emplace_back();
+        rows[r].push_back (inst);
+    }
     present[(size_t) inst] = on;
     if (! on)
         cables.erase (std::remove_if (cables.begin(), cables.end(), [&] (const Cable& c) { return c.srcInst == inst || c.dstInst == inst; }), cables.end());
@@ -307,7 +314,82 @@ void WcProcessor::setPresent (int inst, bool on)
 
 void WcProcessor::commit()
 {
+    fixLayout();
     rack.setPatch (cables, present);
+    sendChangeMessage();
+}
+
+// ------------------------------------------------------------------------------------------------
+// rows on screen
+// ------------------------------------------------------------------------------------------------
+int WcProcessor::panelWidth (int inst) { return (int) specFor (typeOfInst (inst)).width; }
+
+bool WcProcessor::rowHasRoom (const std::vector<int>& row, int width, int except)
+{
+    int used = 0;
+    for (int i : row) if (i != except) used += panelWidth (i) + kGap;
+    return used + width + kGap <= kRowLimit;
+}
+
+// the layout from before the rows could move, frozen: slot order, a new row where a module would pass 1336 units
+std::vector<std::vector<int>> WcProcessor::legacyRows() const
+{
+    std::vector<std::vector<int>> r (1);
+    int x = kGap;
+    for (int i = 0; i < kNumInst; ++i)
+    {
+        if (! present[(size_t) i]) continue;
+        const int w = panelWidth (i);
+        if (x + w > 1336 && x > kGap) { r.emplace_back(); x = kGap; }
+        r.back().push_back (i);
+        x += w + kGap;
+    }
+    return r;
+}
+
+// rows and `present` agree: unknown slots, modules not in the rack and repeats (the first counts) go; a module in
+// the rack and in no row goes at the end of the last row; at least two rows
+void WcProcessor::fixLayout()
+{
+    if (rows.empty()) rows = legacyRows();
+    std::array<bool, kNumInst> seen {};
+    for (auto& row : rows)
+        row.erase (std::remove_if (row.begin(), row.end(), [&] (int i)
+        {
+            if (i < 0 || i >= kNumInst || ! present[(size_t) i] || seen[(size_t) i]) return true;
+            seen[(size_t) i] = true;
+            return false;
+        }), row.end());
+    for (int i = 0; i < kNumInst; ++i) if (present[(size_t) i] && ! seen[(size_t) i]) rows.back().push_back (i);
+    while (rows.size() < 2) rows.emplace_back();
+}
+
+bool WcProcessor::moveModule (int inst, int row, int index)
+{
+    if (inst < 0 || inst >= kNumInst || ! present[(size_t) inst] || row < 0 || row > (int) rows.size()) return false;
+    auto next = rows;
+    for (auto& r : next) r.erase (std::remove (r.begin(), r.end(), inst), r.end());
+    if (row == (int) next.size()) next.emplace_back();
+    auto& r = next[(size_t) row];
+    r.insert (r.begin() + juce::jlimit (0, (int) r.size(), index), inst);
+    if (next == rows) return false;
+    rows = std::move (next);
+    layoutChanged();
+    return true;
+}
+
+bool WcProcessor::removeRow (int row)
+{
+    if (rows.size() <= 2 || row < 0 || row >= (int) rows.size() || ! rows[(size_t) row].empty()) return false;
+    rows.erase (rows.begin() + row);
+    layoutChanged();
+    return true;
+}
+
+void WcProcessor::layoutChanged()
+{
+    // the rows are saved with the project: tell the host there is something new to save. The patch is untouched.
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
     sendChangeMessage();
 }
 
@@ -341,6 +423,7 @@ void WcProcessor::loadBuiltinPatch (int index)
     cables.clear();
     present.fill (false);
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
+    rows.clear();
     colourCounter = 0;
     const int A = kInst259, B = kInst259 + 1;
     using MI = MidiInterface;
@@ -773,6 +856,14 @@ juce::ValueTree WcProcessor::patchToTree() const
         cs.addChild (ct, -1, nullptr);
     }
     t.addChild (cs, -1, nullptr);
+    juce::ValueTree lay ("LAYOUT");   // <ROW m="midi a b"/>: x comes from the order and the widths. Older versions skip it
+    for (auto& row : rows)
+    {
+        juce::StringArray keys;
+        for (int i : row) keys.add (instKey (i));
+        lay.appendChild (juce::ValueTree ("ROW", { { "m", keys.joinIntoString (" ") } }), nullptr);
+    }
+    t.addChild (lay, -1, nullptr);
     return t;
 }
 
@@ -824,6 +915,12 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             if (present[(size_t) i] && (typeOfInst (i) == MT_259 || typeOfInst (i) == MT_258))
                 if (++osc > wc::License::kDemoMaxOscillators) present[(size_t) i] = false;
     }
+    rows.clear();   // no LAYOUT: the layout of before (fixLayout); a hand-edited one is checked there too
+    for (auto row : t.getChildWithName ("LAYOUT"))
+    {
+        rows.emplace_back();
+        for (auto& k : juce::StringArray::fromTokens (row["m"].toString(), " ", "")) rows.back().push_back (instFromKey (k));
+    }
     cables.clear();
     for (auto ct : t.getChildWithName ("CABLES"))
     {
@@ -866,6 +963,7 @@ void WcProcessor::resetAll()
     cables.clear();
     present.fill (false);
     present[(size_t) wc::kInstMidi] = present[(size_t) wc::kInstOutput] = true;
+    rows.clear();
     colourCounter = 0;
     commit();
 }

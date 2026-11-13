@@ -38,8 +38,20 @@ public:
     bool connect (int srcInst, int srcJack, int dstInst, int dstJack, int colour = -1);
     void disconnectInput (int inst, int inJack);
     void disconnectOutput (int inst, int outJack);
-    void setPresent (int inst, bool on);
+    // a module that comes in goes at the end of preferRow, or of the first row below it with room; none has room:
+    // a new row at the bottom. -1 (no editor: the tests, the preset generators): the last row
+    void setPresent (int inst, bool on, int preferRow = -1);
     int nextColour (bool banana);
+
+    // ---- the rows on screen (message thread only; never reaches the rack or the audio) ----
+    // Top to bottom, slots left to right; at least two, and a row left empty stays until removeRow. Saved as LAYOUT;
+    // a patch without one gets the layout of before the rows could move (legacyRows).
+    const std::vector<std::vector<int>>& layout() const { return rows; }
+    bool moveModule (int inst, int row, int index);    // row == layout().size(): a new row. false: nothing moved
+    bool removeRow (int row);                          // only an empty row, and only with more than two
+    static int panelWidth (int inst);
+    static bool rowHasRoom (const std::vector<int>& row, int width, int except = -1);
+    static constexpr int kGap = 6, kRowPitch = 448, kRowLimit = 4008;   // units (px at 100 %); a row ends by 4008
 
     // ---- patches ----
     static juce::StringArray builtinPatchNames();
@@ -104,6 +116,10 @@ public:
 private:
     std::vector<wc::Cable> cables;
     std::array<bool, wc::kNumInst> present {};
+    std::vector<std::vector<int>> rows;                       // see layout(); empty: to be made from `present`
+    std::vector<std::vector<int>> legacyRows() const;
+    void fixLayout();
+    void layoutChanged();
     int colourCounter = 0;
     void commit();
     void resetParams();
