@@ -11,6 +11,7 @@ const juce::Colour kWarn { 0xffe8a33a };
 const juce::Colour kError { 0xffe5484d };
 constexpr int kPadX = 8, kPadY = 5, kGap = 2, kLine1 = 13, kLine2 = 19, kLine3 = 13, kField = 24;
 constexpr int kMinW = 72, kMaxW = 260, kMinEditW = 120, kAway = 8, kEdge = 4;
+constexpr int kMaxWarnW = 340;   // an amber warning is not cut short ("CC 1 (mod wheel) no longer reaches the MIDI module")
 
 juce::uint32 now() { return juce::Time::getMillisecondCounter(); }
 float width (const juce::Font& f, const juce::String& s) { return juce::GlyphArrangement::getStringWidth (f, s); }
@@ -50,7 +51,7 @@ ValueReadout::~ValueReadout()
 // ---- hover ----
 void ValueReadout::hoverEnter (juce::Component& c)
 {
-    if (mode == Mode::Edit || mode == Mode::Drag) return;
+    if (mode == Mode::Edit || mode == Mode::Drag || mode == Mode::Hold) return;
     target = &c;
     stillAt = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition();
     pendingSince = now();
@@ -65,7 +66,7 @@ void ValueReadout::hoverEnter (juce::Component& c)
 
 void ValueReadout::hoverMove (juce::Component& c)
 {
-    if (mode == Mode::Edit || mode == Mode::Drag) return;
+    if (mode == Mode::Edit || mode == Mode::Drag || mode == Mode::Hold) return;
     if (target.getComponent() != &c || mode == Mode::Hidden) { hoverEnter (c); return; }
     if (mode != Mode::Pending) return;
     const auto p = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition();
@@ -104,6 +105,19 @@ void ValueReadout::flash (juce::Component& c, const juce::String& note, bool war
     shown.warn = warn;
     layout (true);
     until = now() + (juce::uint32) ms;
+}
+
+void ValueReadout::hold (juce::Component& c, const ReadoutText& t)
+{
+    if (mode == Mode::Edit) cancelEdit();
+    target = &c;
+    shown = t;
+    show (Mode::Hold, true);
+}
+
+void ValueReadout::release()
+{
+    if (mode == Mode::Hold) hideNow();
 }
 
 void ValueReadout::refresh()
@@ -168,6 +182,7 @@ void ValueReadout::timerCallback()
         case Mode::Hover:
         case Mode::Drag:
         case Mode::Edit:
+        case Mode::Hold:
             break;
     }
     if (isVisible()) lastVisible = t;
@@ -188,7 +203,7 @@ bool ValueReadout::layout (bool evenIfHidden)
     auto* src = dynamic_cast<ReadoutSource*> (target.getComponent());
     auto* parent = getParentComponent();
     if (src == nullptr || parent == nullptr) return false;
-    if (mode != Mode::Edit)
+    if (mode != Mode::Edit && mode != Mode::Hold)   // these two show the text they were given
     {
         const auto keepNote = mode == Mode::Flash ? shown.note : juce::String();
         const bool keepWarn = shown.warn;
@@ -209,7 +224,7 @@ bool ValueReadout::layout (bool evenIfHidden)
     const bool ed = mode == Mode::Edit;
     float textW = juce::jmax (width (WcLook::label (11.0f), shown.name), width (WcLook::label (15.0f), ed ? field.getText() : shown.value),
                               three ? width (WcLook::label (11.0f), shown.note) : 0.0f);
-    const int w = juce::jlimit (ed ? kMinEditW : kMinW, kMaxW, (int) std::ceil (textW) + 2 * kPadX + (ed ? 12 : 0));
+    const int w = juce::jlimit (ed ? kMinEditW : kMinW, three && shown.warn && ! ed ? kMaxWarnW : kMaxW, (int) std::ceil (textW) + 2 * kPadX + (ed ? 12 : 0));
     const int h = kPadY + kLine1 + kGap + (ed ? kField : kLine2) + (three ? kGap + kLine3 : 0) + kPadY;   // 44 / 59, editing 49 / 64
 
     // above, centred, 8 px away; else below; else to the right; else to the left. Never over the control.

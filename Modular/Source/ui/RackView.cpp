@@ -66,6 +66,16 @@ JackComp::JackComp (RackView& rv, int i, const JackSpec& s, int dsp)
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
 }
 
+// the KB-225 MOD output: when a control has learned CC 1, the jack says that it no longer follows the wheel
+juce::String JackComp::getTooltip()
+{
+    auto t = juce::SettableTooltipClient::getTooltip();
+    if (inst == kInstMidi && output && index == MidiInterface::Out_Mod && rack.proc.ccIsLive (1))
+        if (auto* p = rack.proc.apvts.getParameter (rack.proc.paramOfCc (1)))
+            t << "\nCC 1 is assigned to " << p->getName (64) << ": this output holds its last value";
+    return t;
+}
+
 void JackComp::paint (juce::Graphics& g)
 {
     const auto c = getLocalBounds().toFloat().getCentre();
@@ -148,6 +158,7 @@ bool ParamSwitch::readoutText (ReadoutText& t)
 {
     t.name = param.getName (64);
     t.value = param.getCurrentValueAsText();
+    RackView::ccNote (*this, param.getParameterID(), t);
     return true;
 }
 void ParamSwitch::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
@@ -231,6 +242,7 @@ bool ParamButton::readoutText (ReadoutText& t)
 {
     t.name = param.getName (64);
     t.value = param.getCurrentValueAsText();
+    RackView::ccNote (*this, param.getParameterID(), t);
     return true;
 }
 void ParamButton::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
@@ -308,8 +320,9 @@ bool WcKnob::readoutText (ReadoutText& t)
         if (param == nullptr) return false;
         t.name = param->getName (64);
         t.value = param->getCurrentValueAsText();
+        RackView::ccNote (*this, paramId, t);
     }
-    if (stepsNote.isNotEmpty()) t.note = stepsNote;
+    if (stepsNote.isNotEmpty()) { t.note = stepsNote; t.warn = false; }
     return true;
 }
 
@@ -834,6 +847,51 @@ void ModulePanel::bindKnob (size_t i)
     k.onMenu = [this, kp] { if (kp->param != nullptr) rack.paramMenu (*kp, kp->paramId, true); };
     k.onType = [this, kp] { if (kp->param != nullptr) rack.typeValue (*kp, kp->paramId); };
     if (rack.readout != nullptr && rack.readout->targetComponent() == kp) rack.readout->refresh();
+    repaint (k.getBounds().expanded (12));   // a dynamic knob shows its MIDI dot only for the parameter that learned it
+}
+
+juce::Component* ModulePanel::controlFor (const juce::String& id) const
+{
+    for (auto& k : sliders) if (k->param != nullptr && k->paramId == id) return k.get();
+    for (auto& w : switches) if (w->paramId() == id) return w.get();
+    for (auto& b : buttons) if (b->paramId() == id) return b.get();
+    return nullptr;
+}
+
+// MIDI Learn on the panel: a 2 px ring 4 px off the skirt (a rounded rectangle on levers, buttons and faders) while
+// a control waits for a CC, pulsing 40-100 % once a second, steady for a moment once assigned; a 6 px dot up and to
+// the right of a learned control, 8 px for a moment each time its CC moves it. Nothing at all with no MIDI mapped.
+void ModulePanel::paintMidi (juce::Graphics& g)
+{
+    if (! rack.learning() && proc.midiMapEmpty()) return;
+    auto mark = [&] (juce::Component& c, ReadoutSource& src, const juce::String& id, bool round)
+    {
+        float alpha = 1.0f;
+        const bool ring = rack.learnRing (id, alpha);
+        const int cc = proc.ccOf (id);
+        if (! ring && cc < 0) return;
+        const auto a = getLocalArea (&c, src.readoutAnchor());
+        const float r = a.getWidth() * 0.5f;
+        if (ring)
+        {
+            g.setColour (col::accent.withAlpha (alpha));
+            if (round) g.drawEllipse (juce::Rectangle<float> (2.0f * (r + 5.0f), 2.0f * (r + 5.0f)).withCentre (a.getCentre()), 2.0f);
+            else g.drawRoundedRectangle (a.expanded (5.0f), 4.0f, 2.0f);
+        }
+        if (cc >= 0)
+        {
+            const float d = rack.ccActive (cc) ? 8.0f : 6.0f;
+            const float k = r + 3.0f + 4.0f;   // 3 px off the skirt, to the outside of its border
+            const auto at = round ? a.getCentre() + juce::Point<float> (k * 0.70710678f, -k * 0.70710678f) : a.getTopRight();
+            g.setColour (juce::Colour (0xff15161a));
+            g.fillEllipse (juce::Rectangle<float> (d + 2.0f, d + 2.0f).withCentre (at));
+            g.setColour (col::accent);
+            g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (at));
+        }
+    };
+    for (auto& k : sliders) if (k->param != nullptr) mark (*k, *k, k->paramId, k->isRotary());
+    for (auto& w : switches) mark (*w, *w, w->paramId(), false);
+    for (auto& b : buttons) mark (*b, *b, b->paramId(), false);
 }
 
 int ModulePanel::cursor252() const
@@ -927,6 +985,7 @@ bool ModulePanel::describe252 (const juce::String& nm, ReadoutText& t) const
 
 void ModulePanel::menu252 (const juce::String& nm)
 {
+    rack.cancelLearn();   // a menu ends a MIDI Learn
     auto* k = freeKnobs[nm].get();
     const double reset = nm == "@offset" ? 0.5 : 0.0;
     juce::PopupMenu m;
@@ -1470,6 +1529,7 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
             g.fillRect (bar.withTop (bar.getBottom() - h));
         }
     }
+    paintMidi (g);   // last, over every display of the panel
 }
 
 void ModulePanel::updateLeds()
@@ -1690,11 +1750,17 @@ RackView::RackView (WcProcessor& p) : proc (p)
     addAndMakeVisible (content);
     content.addAndMakeVisible (cables);
     proc.addChangeListener (this);
+    for (size_t i = 0; i < movesSeen.size(); ++i) movesSeen[i] = proc.ccMoves[i].load();
     rebuild();
     startTimerHz (30);
 }
 
-RackView::~RackView() { proc.removeChangeListener (this); }
+RackView::~RackView()
+{
+    // the editor closing cancels a learn: it lives here, not in the processor
+    if (listeningClicks) juce::Desktop::getInstance().removeGlobalMouseListener (&learnClicks);
+    proc.removeChangeListener (this);
+}
 
 void RackView::changeListenerCallback (juce::ChangeBroadcaster*)
 {
@@ -1775,7 +1841,138 @@ void RackView::paint (juce::Graphics& g)
 void RackView::timerCallback()
 {
     for (auto& p : panels) p->updateLeds();
+    learnTick();
     if (readout != nullptr) readout->refresh();   // a value moved by the host or a preset, under the mouse
+}
+
+// ---- MIDI Learn ----
+void RackView::startLearn (const juce::String& id)
+{
+    if (proc.apvts.getParameter (id) == nullptr) return;
+    cancelLearn();                                  // learning another control ends the first learn
+    learnId = id;
+    learnFrom = proc.lastLearnableCc.load();        // only a CC that comes in from now on
+    learnSince = juce::Time::getMillisecondCounter();
+    if (! listeningClicks) { juce::Desktop::getInstance().addGlobalMouseListener (&learnClicks); listeningClicks = true; }
+    holdLearnReadout();
+    repaintMarks (id);
+}
+
+void RackView::holdLearnReadout()
+{
+    auto* c = controlFor (learnId);
+    auto* p = proc.apvts.getParameter (learnId);
+    if (readout == nullptr || c == nullptr || p == nullptr) return;
+    readout->hold (*c, { p->getName (64), "Move a MIDI control...", "Right-click or Esc to cancel", false });
+}
+
+void RackView::endLearn()
+{
+    const auto id = learnId;
+    learnId.clear();
+    if (listeningClicks) { juce::Desktop::getInstance().removeGlobalMouseListener (&learnClicks); listeningClicks = false; }
+    if (readout != nullptr) readout->release();
+    repaintMarks (id);
+}
+
+void RackView::cancelLearn()
+{
+    if (learning()) endLearn();   // the old CC, if there was one, stays where it was
+}
+
+void RackView::finishLearn (int cc)
+{
+    const auto id = learnId;
+    juce::String moved;
+    if (! proc.assignCc (cc, id, &moved)) return;   // not a CC that can be learned: keep waiting
+    endLearn();
+    justId = id;
+    justUntil = juce::Time::getMillisecondCounter() + (juce::uint32) kAssignedRingMs;
+    repaintMarks (id);
+    if (moved.isNotEmpty()) repaintMarks (moved);
+    auto* c = controlFor (id);
+    if (readout == nullptr || c == nullptr) return;
+    const juce::String name = "CC " + juce::String (cc);
+    if (auto* from = proc.apvts.getParameter (moved))
+        readout->flash (*c, name + " moved from " + from->getName (64), true, kMovedMs);
+    else if (cc == 1)
+        readout->flash (*c, "CC 1 (mod wheel) no longer reaches the MIDI module", true, kCc1Ms);
+    else
+        readout->flash (*c, name, false, kLearnedMs);
+}
+
+void RackView::learnTick()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+    if (learning())
+    {
+        const auto ev = proc.lastLearnableCc.load();
+        if (! menuOpen && ev != learnFrom) { learnFrom = ev; finishLearn ((int) (ev & 0xffu)); }
+        if (learning())
+        {
+            repaintMarks (learnId);                    // the ring pulses
+            if (readout != nullptr && ! readout->isHolding() && ! readout->isEditing() && ! readoutSuppressed()) holdLearnReadout();   // its control was rebuilt
+        }
+    }
+    if (justId.isNotEmpty() && now >= justUntil) { const auto id = justId; justId.clear(); repaintMarks (id); }
+    for (int cc = 0; cc < 128; ++cc)
+    {
+        const auto n = proc.ccMoves[(size_t) cc].load (std::memory_order_relaxed);
+        if (n != movesSeen[(size_t) cc]) { movesSeen[(size_t) cc] = n; activeUntil[(size_t) cc] = now + (juce::uint32) kActivityMs; repaintMarks (proc.paramOfCc (cc)); }
+        else if (activeUntil[(size_t) cc] != 0 && now >= activeUntil[(size_t) cc]) { activeUntil[(size_t) cc] = 0; repaintMarks (proc.paramOfCc (cc)); }
+    }
+}
+
+bool RackView::learnRing (const juce::String& id, float& alpha) const
+{
+    if (id.isEmpty()) return false;
+    const auto now = juce::Time::getMillisecondCounter();
+    if (id == learnId)
+    {
+        const float ph = (float) ((now - learnSince) % 1000u) / 1000.0f;
+        alpha = 0.7f + 0.3f * std::cos (juce::MathConstants<float>::twoPi * ph);   // 40 .. 100 %, once a second
+        return true;
+    }
+    if (id == justId && now < justUntil) { alpha = 1.0f; return true; }
+    return false;
+}
+
+bool RackView::ccActive (int cc) const
+{
+    return cc >= 0 && cc < 128 && activeUntil[(size_t) cc] != 0 && juce::Time::getMillisecondCounter() < activeUntil[(size_t) cc];
+}
+
+juce::Component* RackView::controlFor (const juce::String& id) const
+{
+    if (id.isEmpty()) return nullptr;
+    for (auto& p : panels) if (auto* c = p->controlFor (id)) return c;
+    return nullptr;
+}
+
+void RackView::repaintMarks (const juce::String& id)
+{
+    if (auto* c = controlFor (id)) if (auto* p = c->getParentComponent()) p->repaint (c->getBounds().expanded (12));
+}
+
+void RackView::ccNote (juce::Component& c, const juce::String& id, ReadoutText& t)
+{
+    if (t.note.isNotEmpty()) return;
+    if (auto* rv = c.findParentComponentOfClass<RackView>())
+    {
+        const int cc = rv->proc.ccOf (id);
+        if (cc >= 0) { t.note = "CC " + juce::String (cc); t.warn = false; }
+    }
+}
+
+void RackView::LearnClicks::mouseDown (const juce::MouseEvent& e)
+{
+    if (! owner.learning()) return;
+    auto* ed = owner.findParentComponentOfClass<juce::AudioProcessorEditor>();
+    auto* c = e.eventComponent;
+    if (ed == nullptr || c == nullptr || ! (c == ed || ed->isParentOf (c))) return;   // not in the plugin
+    auto* waiting = owner.controlFor (owner.learnId);
+    if (e.mods.isPopupMenu() && waiting != nullptr && (c == waiting || waiting->isParentOf (c))) return;   // its menu: "Cancel MIDI Learn"
+    owner.cancelLearn();
 }
 
 ValueReadout* RackView::readoutFor (juce::Component& c)
@@ -1791,7 +1988,7 @@ static int numValuesOf (const juce::RangedAudioParameter& p)
 }
 
 // Right click on a knob, fader, lever or panel button. Everything is done through the parameter id.
-juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, bool knob)
+juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, bool knob, int cc, bool waiting)
 {
     auto* p = &p0;
     const int n = numValuesOf (*p);
@@ -1839,8 +2036,14 @@ juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, 
         }
     }
     m.addSeparator();
-    m.addItem (200, "MIDI Learn", false);        // MIDI Learn comes in the next part of this delivery
-    m.addItem (202, "Forget MIDI CC", false);
+    {
+        const juce::String ccName = "CC " + juce::String (cc);
+        juce::PopupMenu::Item it (waiting ? "Cancel MIDI Learn" : (cc >= 0 ? "Learn another CC" : "MIDI Learn"));
+        it.itemID = waiting ? 201 : 200;
+        if (cc >= 0 && ! waiting) it.shortcutKeyDescription = ccName;
+        m.addItem (it);
+        m.addItem (202, cc >= 0 ? "Forget " + ccName : juce::String ("Forget MIDI CC"), cc >= 0);
+    }
     return m;
 }
 
@@ -1848,25 +2051,37 @@ void RackView::paramMenu (juce::Component& c, const juce::String& id, bool knob)
 {
     auto* p = proc.apvts.getParameter (id);
     if (p == nullptr) return;
-    const int n = numValuesOf (*p);
-    auto m = buildParamMenu (*p, knob);
+    // a menu ends a MIDI Learn; the waiting control's own menu offers to cancel it (and ends it when it closes)
+    if (learnId != id) cancelLearn();
+    const bool waiting = learnId == id;
+    auto m = buildParamMenu (*p, knob, proc.ccOf (id), waiting);
     m.setLookAndFeel (&c.getLookAndFeel());
     menuOpen = true;
     if (readout != nullptr) readout->refresh();
     juce::Component::SafePointer<RackView> self (this);
     juce::Component::SafePointer<juce::Component> ctl (&c);
-    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, ctl, id, n] (int r)
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, ctl, id, waiting] (int r)
     {
         if (self == nullptr) return;
         self->menuOpen = false;
-        auto* prm = self->proc.apvts.getParameter (id);
-        if (prm == nullptr || r == 0) return;
-        auto set = [prm] (float v) { prm->beginChangeGesture(); prm->setValueNotifyingHost (v); prm->endChangeGesture(); };
-        if (r == 1) { if (ctl != nullptr) self->typeValue (*ctl, id); }
-        else if (r == 2) set (prm->getDefaultValue());
-        else if (r >= 10 && r <= 14) set (prm->convertTo0to1 (prm->convertFrom0to1 ((float) (r - 10) * 0.25f)));
-        else if (r >= 20 && r < 20 + n && n > 1) set ((float) (r - 20) / (float) (n - 1));
+        self->menuChoice (id, r, waiting, ctl.getComponent());
     });
+}
+
+void RackView::menuChoice (const juce::String& id, int r, bool waiting, juce::Component* ctl)
+{
+    if (waiting) cancelLearn();
+    auto* prm = proc.apvts.getParameter (id);
+    if (prm == nullptr || r == 0) return;
+    const int n = numValuesOf (*prm);
+    if (r == 201) return;   // cancelled above (and not a value of a long list: 201 - 20 is a step of Master BPM)
+    if (r == 200) { startLearn (id); return; }
+    if (r == 202) { proc.forgetCc (id); repaintMarks (id); if (readout != nullptr) readout->refresh(); return; }
+    auto set = [prm] (float v) { prm->beginChangeGesture(); prm->setValueNotifyingHost (v); prm->endChangeGesture(); };
+    if (r == 1) { if (ctl != nullptr) typeValue (*ctl, id); }
+    else if (r == 2) set (prm->getDefaultValue());
+    else if (r >= 10 && r <= 14) set (prm->convertTo0to1 (prm->convertFrom0to1 ((float) (r - 10) * 0.25f)));
+    else if (r >= 20 && r < 20 + n && n > 1) set ((float) (r - 20) / (float) (n - 1));
 }
 
 // Ctrl+click (Cmd on a Mac) or "Type a value...": the readout turns into a field over the control
@@ -1978,6 +2193,7 @@ void RackView::endDrag (const juce::MouseEvent& e)
 
 void RackView::jackMenu (JackComp& j)
 {
+    cancelLearn();   // a menu ends a MIDI Learn
     juce::PopupMenu m;
     const int n = cableCountAt (j);
     m.addItem (1, n > 1 ? "Disconnect " + juce::String (n) + " cables" : "Disconnect", n > 0);

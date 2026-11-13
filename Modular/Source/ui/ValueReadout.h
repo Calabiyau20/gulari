@@ -46,6 +46,10 @@ public:
     void dragEnd (juce::Component&, bool mouseStillOver);
     void refresh();                                      // texts and place; the rack calls it at 30 Hz
     void flash (juce::Component&, const juce::String& note, bool warn, int ms);
+    // a fixed text over a control until released (MIDI Learn waiting for a CC): no timeout, hovers elsewhere ignored
+    void hold (juce::Component&, const ReadoutText&);
+    void release();                                      // only if it is still holding
+    bool isHolding() const { return mode == Mode::Hold; }
 
     void edit (juce::Component&, ValueEdit);
     bool isEditing() const { return mode == Mode::Edit; }
@@ -64,7 +68,7 @@ public:
     static constexpr int kHoverMs = 400, kWarmMs = 800, kLingerMs = 600, kFadeMs = 120;
 
 private:
-    enum class Mode { Hidden, Pending, Hover, Drag, Linger, Flash, Edit };
+    enum class Mode { Hidden, Pending, Hover, Drag, Linger, Flash, Edit, Hold };
     Mode mode = Mode::Hidden;
     juce::Component::SafePointer<juce::Component> target;
     ReadoutText shown;

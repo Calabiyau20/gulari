@@ -4,6 +4,7 @@
 #include "modules/M250.h"
 #include "modules/M259.h"
 #include "modules/M281.h"
+#include "modules/MidiInterface.h"
 #include "ui/RackView.h"
 #if JUCE_LINUX
  #include <dlfcn.h>
@@ -413,17 +414,15 @@ int main (int argc, char** argv)
         {
             auto m = wc::ui::RackView::buildParamMenu (*proc.apvts.getParameter ("a_po_freq"), true);
             juce::StringArray items;
-            bool midiOff = true;
             for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
             {
                 auto& i = it.getItem();
                 if (i.isSectionHeader) items.add ("[" + i.text + "]");
                 else if (i.itemID != 0) items.add (juce::String (i.itemID) + ":" + i.text + (i.isEnabled ? "" : "(off)"));
-                if (i.itemID >= 200 && i.isEnabled) midiOff = false;
             }
             const auto list = items.joinIntoString (" ");
-            const bool shape = list.startsWith ("[259 A Principal Frequency] 1:Type a value... 2:Reset to default(off) [Knob position] 10:0 % 11:25 % 12:50 % 13:75 % 14:100 %")
-                               && midiOff;
+            const bool shape = list == "[259 A Principal Frequency] 1:Type a value... 2:Reset to default(off) [Knob position] 10:0 % 11:25 % 12:50 % 13:75 % 14:100 %"
+                                       " 200:MIDI Learn 202:Forget MIDI CC(off)";
             std::printf ("menu: %s %s\n", list.toRawUTF8(), shape ? "ok" : "BAD");
             if (! shape) good = false;
             auto sw = wc::ui::RackView::buildParamMenu (*proc.apvts.getParameter ("la_mode1"), false);
@@ -522,6 +521,160 @@ int main (int argc, char** argv)
             }
             std::printf ("252 cell C.V.: \"%s\", typed 6,4 V -> \"%s\" %s\n", before.value.toRawUTF8(), after.value.toRawUTF8(), ok252 ? "ok" : "BAD");
             if (! ok252) good = false;
+        }
+        // ---- MIDI Learn: waiting, assigned, the dot, activity, CC 1, a CC moved from another control, cancelling ----
+        {
+            auto send = [&proc] (std::initializer_list<juce::MidiMessage> msgs)
+            {
+                juce::AudioBuffer<float> buf (2, 64);
+                juce::MidiBuffer midi;
+                int at = 0;
+                for (auto& m : msgs) midi.addEvent (m, at++);
+                proc.processBlock (buf, midi);
+            };
+            auto cc = [] (int ch, int n, int v) { return juce::MidiMessage::controllerEvent (ch, n, v); };
+            auto items = [] (const juce::PopupMenu& m)
+            {
+                juce::StringArray l;
+                for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+                {
+                    auto& i = it.getItem();
+                    if (i.itemID >= 200) l.add (juce::String (i.itemID) + ":" + i.text + (i.shortcutKeyDescription.isNotEmpty() ? "[" + i.shortcutKeyDescription + "]" : "") + (i.isEnabled ? "" : "(off)"));
+                }
+                return l.joinIntoString (" ");
+            };
+            // the dot of a learned knob: up and to the right of the skirt, in the accent colour (on the panel itself)
+            auto dotAt = [&] (wc::ui::WcKnob& k)
+            {
+                auto* pn = k.getParentComponent();
+                const auto a = pn->getLocalArea (&k, k.readoutAnchor());
+                const float d = a.getWidth() * 0.5f + 7.0f;
+                const auto at = a.getCentre() + juce::Point<float> (d * 0.70710678f, -d * 0.70710678f);
+                auto img = pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f);
+                return img.getPixelAt (juce::roundToInt (at.x), juce::roundToInt (at.y));
+            };
+            auto isAccent = [] (juce::Colour c) { const auto a = wc::ui::col::accent; return std::abs (c.getRed() - a.getRed()) < 40 && std::abs (c.getGreen() - a.getGreen()) < 40 && std::abs (c.getBlue() - a.getBlue()) < 40; };
+            bool learnOk = true;
+            juce::StringArray bad;
+            auto check = [&] (bool b, const juce::String& what) { if (! b) { bad.add (what); learnOk = false; } };
+
+            const auto* tp = proc.apvts.getParameter ("a_timbre");
+            check (items (wc::ui::RackView::buildParamMenu (*tp, true)) == "200:MIDI Learn 202:Forget MIDI CC(off)", "menu without CC: " + items (wc::ui::RackView::buildParamMenu (*tp, true)));
+            check (items (wc::ui::RackView::buildParamMenu (*tp, true, 74)) == "200:Learn another CC[CC 74] 202:Forget CC 74", "menu with CC 74: " + items (wc::ui::RackView::buildParamMenu (*tp, true, 74)));
+            check (items (wc::ui::RackView::buildParamMenu (*tp, true, -1, true)) == "201:Cancel MIDI Learn 202:Forget MIDI CC(off)", "menu waiting: " + items (wc::ui::RackView::buildParamMenu (*tp, true, -1, true)));
+            check (items (wc::ui::RackView::buildParamMenu (*proc.apvts.getParameter ("la_mode1"), false, 20)) == "200:Learn another CC[CC 20] 202:Forget CC 20", "lever menu");
+
+            auto* timbre = knobOf (wc::kInst259, "a_timbre");
+            if (timbre == nullptr) { std::printf ("midi learn: NO timbre knob\n"); return 1; }
+            bring (*timbre);
+            const auto restDot = dotAt (*timbre);
+            // waiting: the readout holds its text; CC 0 and 120 are not taken, CC 74 (any channel) is
+            rv->startLearn ("a_timbre");
+            pump (40);
+            check (rv->learning() && ro->isHolding() && ro->current().value == "Move a MIDI control..." && ro->current().note == "Right-click or Esc to cancel", "waiting readout");
+            if (auto* t = ro->targetComponent()) if (t != timbre) check (false, "waiting readout on another control");
+            timbre->mouseExit (mouse (*timbre, { -5.0f, -5.0f }, {}));   // the mouse going away does not take it down
+            freq->mouseEnter (mouse (*freq, freq->getLocalBounds().toFloat().getCentre(), {}));
+            check (ro->isHolding() && ro->targetComponent() == timbre, "hover elsewhere took the waiting readout");   // not even for a frame
+            pump (500);
+            check (ro->isHolding() && ro->targetComponent() == timbre, "hover elsewhere took the waiting readout later");
+            freq->mouseExit (mouse (*freq, { -5.0f, -5.0f }, {}));
+            save (crop (*timbre, {}), "midi_waiting.png");
+            send ({ cc (1, 0, 10), cc (1, 120, 0) });
+            pump (100);
+            check (rv->learning() && proc.midiMapEmpty(), "CC 0 / 120 were taken by a learn");
+            send ({ cc (5, 74, 30) });
+            pump (100);
+            check (! rv->learning() && proc.ccOf ("a_timbre") == 74, "CC 74 not learned");
+            float ringAlpha = 0.0f;
+            check (rv->learnRing ("a_timbre", ringAlpha) && ringAlpha == 1.0f, "no steady ring after the learn");
+            check (ro->isUp() && ro->current().note == "CC 74" && ! ro->current().warn, "readout after the learn: \"" + ro->current().note + "\"");
+            save (crop (*timbre, {}), "midi_just_assigned.png");
+            pump (wc::ui::RackView::kAssignedRingMs + 100);
+            check (! rv->learnRing ("a_timbre", ringAlpha), "the ring stayed");
+            pump (wc::ui::RackView::kLearnedMs + 400);
+            check (! ro->isUp(), "the readout stayed up");
+            const auto shownDot = dotAt (*timbre);
+            check (isAccent (shownDot) && ! isAccent (restDot), "no dot (" + shownDot.toDisplayString (false) + ")");
+            save (crop (*timbre, {}), "midi_assigned.png");
+            // hover adds "CC 74"; each CC moves it and makes the dot bigger for a moment
+            timbre->mouseEnter (mouse (*timbre, timbre->getLocalBounds().toFloat().getCentre(), {}));
+            pump (500);
+            check (ro->isUp() && ro->current().note == "CC 74" && ro->getHeight() == 59, "hover without \"CC 74\"");
+            save (crop (*timbre, {}), "midi_hover.png");
+            timbre->mouseExit (mouse (*timbre, { -5.0f, -5.0f }, {}));
+            send ({ cc (2, 74, 127) });
+            pump (40);
+            check (rv->ccActive (74) && std::abs (norm ("a_timbre") - 1.0f) < 1.0e-6f, "CC 74 did not move it / no activity");
+            pump (wc::ui::RackView::kActivityMs + 100);
+            check (! rv->ccActive (74), "activity stayed");
+
+            // CC 1 learned: amber warning, and the MOD jack of the KB-225 says so
+            if (auto* off = controlNamed (wc::kInst292, "292 A 1 Offset"))
+            {
+                bring (*off);
+                rv->startLearn ("la_off1");
+                send ({ cc (1, 1, 64) });
+                pump (100);
+                check (proc.ccOf ("la_off1") == 1 && ro->isUp() && ro->current().warn && ro->current().note == "CC 1 (mod wheel) no longer reaches the MIDI module",
+                       "CC 1 warning: \"" + ro->current().note + "\"");
+                save (crop (*off, {}), "midi_cc1_warning.png");
+                juce::String tip;
+                if (auto* pn = panelOf (wc::kInstMidi))
+                    for (auto& j : pn->jacks) if (j->output && j->index == wc::MidiInterface::Out_Mod) tip = j->getTooltip();
+                check (tip.contains ("CC 1 is assigned to 292 A 1 Offset: this output holds its last value"), "MOD jack tooltip: " + tip.replace ("\n", " / "));
+                // "Learn another CC" on 259 Timbre keeps CC 74 while it waits; Esc cancels and it is as it was
+                bring (*timbre);
+                rv->startLearn ("a_timbre");
+                check (items (wc::ui::RackView::buildParamMenu (*tp, true, proc.ccOf ("a_timbre"), rv->learningId() == "a_timbre")) == "201:Cancel MIDI Learn 202:Forget CC 74", "re-learn menu");
+                ed->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+                check (! rv->learning() && proc.ccOf ("a_timbre") == 74 && ! ro->isHolding(), "Esc did not cancel, or lost CC 74");
+                // learning another control cancels the first
+                rv->startLearn ("a_timbre");
+                rv->startLearn ("a_po_freq");
+                check (rv->learningId() == "a_po_freq", "a second learn did not take over");
+                rv->cancelLearn();
+                // CC 1 was 292's: learned on Timbre it moves, with an amber note naming where from
+                rv->startLearn ("a_timbre");
+                send ({ cc (1, 1, 0) });
+                pump (100);
+                check (proc.ccOf ("a_timbre") == 1 && proc.ccOf ("la_off1") < 0 && proc.paramOfCc (74).isEmpty() && ro->current().warn
+                       && ro->current().note == "CC 1 moved from 292 A 1 Offset", "moved: \"" + ro->current().note + "\"");
+                save (crop (*timbre, {}), "midi_moved.png");
+                // a lever: its dot sits on the top right corner of the control
+                if (auto* lever = controlNamed (wc::kInst292, "292 A 1 Mode"))
+                {
+                    proc.assignCc (21, "la_mode1");
+                    rv->repaintMarks ("la_mode1");
+                    bring (*lever);
+                    auto* pn = lever->getParentComponent();
+                    const auto corner = lever->getBounds().getTopRight();
+                    const auto px = pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f).getPixelAt (corner.x, corner.y);
+                    check (isAccent (px), "no dot on the lever (" + px.toDisplayString (false) + ")");
+                    save (crop (*lever, {}), "midi_lever_assigned.png");
+                }
+            }
+            else check (false, "NO 292 offset knob");
+            // what the menu's MIDI items do. Master BPM has 281 values: 201 is also a value of its list, and
+            // "Cancel MIDI Learn" must not set it
+            {
+                const auto& br = proc.apvts.getParameter ("rg_bpm")->getNormalisableRange();
+                const float bpm = norm ("rg_bpm");
+                rv->startLearn ("rg_bpm");
+                rv->menuChoice ("rg_bpm", 201, true, nullptr);
+                check ((br.end - br.start) / br.interval > 181.0f && ! rv->learning() && norm ("rg_bpm") == bpm, "Cancel MIDI Learn set Master BPM to " + juce::String (norm ("rg_bpm")));
+                rv->menuChoice ("a_po_freq", 200, false, nullptr);
+                check (rv->learningId() == "a_po_freq", "MIDI Learn from the menu");
+                rv->menuChoice ("a_po_freq", 0, true, nullptr);   // its menu closed without a choice
+                check (! rv->learning(), "closing the waiting control's menu did not cancel");
+                proc.assignCc (40, "a_po_freq");
+                rv->menuChoice ("a_po_freq", 202, false, nullptr);
+                check (proc.ccOf ("a_po_freq") < 0, "Forget CC 40");
+            }
+            pump (wc::ui::RackView::kMovedMs + 400);
+            std::printf ("midi learn: menus, waiting, CC 0 / 120 refused, CC 74 learned, ring, dot, hover, activity, CC 1 note and MOD tooltip, re-learn, Esc, moved  %s\n",
+                         learnOk ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
+            if (! learnOk) good = false;
         }
         std::printf ("%s\n", sizes.toRawUTF8());
         if (! good) return 1;

@@ -22,6 +22,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseEnter (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
+    juce::String getTooltip() override;      // the KB-225 MOD output says when CC 1 is learned by a control
     const int inst, index;
     const bool output;
     const JackKind kind;
@@ -74,6 +75,7 @@ public:
     void mouseExit (const juce::MouseEvent&) override;
     bool readoutText (ReadoutText&) override;
     juce::Rectangle<float> readoutAnchor() override { return getLocalBounds().toFloat(); }
+    juce::String paramId() const { return param.getParameterID(); }
 private:
     juce::RangedAudioParameter& param;
     int positions, value = 0;
@@ -96,6 +98,7 @@ public:
     void mouseExit (const juce::MouseEvent&) override;
     bool readoutText (ReadoutText&) override;
     juce::Rectangle<float> readoutAnchor() override { return getLocalBounds().toFloat(); }
+    juce::String paramId() const { return param.getParameterID(); }
 private:
     juce::RangedAudioParameter& param;
     juce::ParameterAttachment attach;
@@ -150,6 +153,7 @@ public:
     void updateLeds();
     void touch218 (juce::Point<float> p, bool down);
     void toggleMatrixCell (int row, int col);   // 242: row 0 = stages, rows 1..3 = A B C
+    juce::Component* controlFor (const juce::String& paramId) const;   // the knob, fader, lever or button showing it
     const int inst;
     std::vector<std::unique_ptr<JackComp>> jacks;
 private:
@@ -178,6 +182,7 @@ private:
     void paint252 (juce::Graphics&);
     void paint666 (juce::Graphics&);
     void paint291 (juce::Graphics&);
+    void paintMidi (juce::Graphics&);        // MIDI Learn: the ring of a control waiting for a CC, the dot of a learned one
     int seq666 = 0;
     std::unique_ptr<wc::M666::Frame> frame666;
     std::vector<juce::Point<float>> trail666;
@@ -233,9 +238,25 @@ public:
     bool menuOpen = false;
     bool readoutSuppressed() const { return isDragging() || menuOpen; }
     void paramMenu (juce::Component& control, const juce::String& paramId, bool knob);
-    static juce::PopupMenu buildParamMenu (const juce::RangedAudioParameter&, bool knob);   // knob: Type and positions
+    // knob: Type and positions. cc: the parameter's learned CC (-1 none); waiting: it is the one waiting for a CC
+    static juce::PopupMenu buildParamMenu (const juce::RangedAudioParameter&, bool knob, int cc = -1, bool waiting = false);
+    void menuChoice (const juce::String& paramId, int result, bool waiting, juce::Component* control);   // what the menu does
     void typeValue (juce::Component& control, const juce::String& paramId);
     static ValueReadout* readoutFor (juce::Component& control);
+    static void ccNote (juce::Component& control, const juce::String& paramId, ReadoutText&);   // "CC 74" on a learned control
+
+    // MIDI Learn. Waiting for a CC is the editor's state, by parameter id (a rebuild meanwhile does not lose it): the
+    // next learnable CC that comes in is assigned. A menu, Esc, a click in the plugin, another learn or the editor
+    // closing cancel it; there is no timeout. "Learn another CC" waits with the old CC still in place.
+    void startLearn (const juce::String& paramId);
+    void cancelLearn();
+    bool learning() const { return learnId.isNotEmpty(); }
+    const juce::String& learningId() const { return learnId; }
+    bool learnRing (const juce::String& paramId, float& alpha) const;   // waiting (pulsing) or just assigned (600 ms)
+    bool ccActive (int cc) const;                                       // the CC moved its parameter in the last 150 ms
+    juce::Component* controlFor (const juce::String& paramId) const;
+    void repaintMarks (const juce::String& paramId);
+    static constexpr int kAssignedRingMs = 600, kActivityMs = 150, kLearnedMs = 1500, kMovedMs = 2500, kCc1Ms = 3000;
 
     JackComp* findJack (int inst, bool output, int index) const;
     juce::Point<float> jackCentre (const JackComp& j) const;
@@ -257,5 +278,21 @@ private:
     juce::Point<int> contentSize { 800, 450 };
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
+
+    juce::String learnId, justId;              // waiting for a CC; just assigned (its ring stays a moment)
+    juce::uint32 learnFrom = 0, learnSince = 0, justUntil = 0;
+    std::array<juce::uint32, 128> movesSeen {}, activeUntil {};
+    void learnTick();
+    void finishLearn (int cc);
+    void holdLearnReadout();
+    void endLearn();
+    // a click anywhere in the plugin cancels a learn (a right click on the waiting control opens its menu instead)
+    struct LearnClicks : public juce::MouseListener
+    {
+        explicit LearnClicks (RackView& r) : owner (r) {}
+        void mouseDown (const juce::MouseEvent&) override;
+        RackView& owner;
+    } learnClicks { *this };
+    bool listeningClicks = false;
 };
 } // namespace wc::ui

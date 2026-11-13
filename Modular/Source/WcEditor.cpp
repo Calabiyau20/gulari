@@ -129,6 +129,12 @@ WcEditor::~WcEditor()
     setLookAndFeel (nullptr);
 }
 
+bool WcEditor::keyPressed (const juce::KeyPress& k)
+{
+    if (k == juce::KeyPress::escapeKey && rack.learning()) { rack.cancelLearn(); return true; }
+    return false;
+}
+
 void WcEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     patchBox.setText (proc.patchName, juce::dontSendNotification);
