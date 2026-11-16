@@ -24,6 +24,10 @@ namespace col
     const juce::Colour info     { 0xffc560ef };   // Cosmos orchid: info text on the overlay (fuchsia is 3.2:1 there)
     const juce::Colour warn     { 0xfff5be3e };   // Cosmos gold
     const juce::Colour error    { 0xffff6b6e };
+    // modulation by drag (provisional, for the visual auditor): an ASSIGN button that modulates nothing, and one that
+    // does - the ring, the ghost line and the live dot are in the same orange
+    const juce::Colour modFree  { 0xff345fc2 };   // Cosmos azure
+    const juce::Colour mod      { 0xffff8a1f };   // redder than the gold of the warnings
 }
 
 // the two panel finishes: 0 = Classic (200-series aluminium, blue silkscreen), 1 = Neon Void (Calabi Yau cosmos)

@@ -22,8 +22,10 @@ struct JackSpec
 };
 
 // Push = momentary button (not a parameter); Button = white button that steps a parameter
-enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3, Push, Button, Fader, Prog };   // Fader: vertical, 26 x 120
+enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3, Push, Button, Fader, Prog, Assign };   // Fader: vertical, 26 x 120
 // Prog: 248 programming lever (momentary up / down) acting on the stage being edited
+// Assign: modulation source button (26 x 26) for the output jack `jack`; label = the source's name (12 characters at
+// most: "LFO", "Matrix 3"). Drag it onto a knob or fader to modulate it.
 
 struct ControlSpec
 {
@@ -34,6 +36,7 @@ struct ControlSpec
     juce::uint32 colour; // knob cap colour
     const char* scale = nullptr;   // printed scale around the knob, "|" separated, e.g. ".001|.01|.1|1|10"
     const char* scale2 = nullptr;  // second (inner) scale ring
+    int jack = -1;                 // Assign: the output jack (DSP index) it modulates from
 };
 
 struct SectionSpec { const char* title; float x, y, w, h; };

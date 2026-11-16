@@ -45,6 +45,25 @@ static juce::String typeShortcut()
    #endif
 }
 
+// modulation depth: what the menus print next to the current source, and how to change it
+static juce::String depthShortcut()
+{
+   #if JUCE_MAC
+    return "Cmd+Drag";
+   #else
+    return "Ctrl+Drag";
+   #endif
+}
+static juce::String depthHint()
+{
+   #if JUCE_MAC
+    return "Cmd+drag the knob to change the depth";
+   #else
+    return "Ctrl+drag the knob to change the depth";
+   #endif
+}
+static juce::String midDot() { return juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")); }
+
 // italic silkscreen: the 200-series panels are lettered in lowercase italics
 static void drawItalic (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, juce::Justification j, const juce::Font& f, juce::Colour c)
 {
@@ -299,6 +318,73 @@ void PushButton::paint (juce::Graphics& g)
 }
 
 // =================================================================================================
+// AssignButton
+// =================================================================================================
+AssignButton::AssignButton (RackView& rv, int i, int j, const juce::String& n) : inst (i), jack (j), name (n), rack (rv)
+{
+    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+}
+
+juce::String AssignButton::getTooltip()
+{
+    const int n = rack.modCount (inst, jack);
+    if (n == 0) return "Drag onto a knob or fader to modulate it";
+    return "Modulates " + juce::String (n) + (n == 1 ? " control" : " controls") + ". Drag onto another one to add it; right-click to list them";
+}
+
+// as PushButton: a 21 px grey ring, the button 18 px in it (15 px and 15 % darker while pressed); white ring on hover
+void AssignButton::paint (juce::Graphics& g)
+{
+    const auto c = getLocalBounds().toFloat().getCentre();
+    const auto colour = rack.modCount (inst, jack) > 0 ? col::mod : col::modFree;
+    g.setColour (juce::Colours::black.withAlpha (0.3f));
+    g.fillEllipse (c.x - 10.0f, c.y - 9.0f, 21.0f, 21.0f);
+    g.setColour (juce::Colour (0xff9c9d9a));
+    g.fillEllipse (c.x - 10.5f, c.y - 10.5f, 21.0f, 21.0f);
+    const float r = pressed ? 7.5f : 9.0f;
+    g.setColour (pressed ? colour.withMultipliedBrightness (0.85f) : colour);
+    g.fillEllipse (c.x - r, c.y - r, 2.0f * r, 2.0f * r);
+    if (isMouseOver())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.drawEllipse (c.x - 11.5f, c.y - 11.5f, 23.0f, 23.0f, 1.5f);
+    }
+}
+
+void AssignButton::mouseDown (const juce::MouseEvent& e)
+{
+    menuClick = e.mods.isPopupMenu();
+    if (menuClick) { rack.assignMenu (inst, jack); return; }
+    pressed = true;
+    dragging = false;
+    downAt = e.getScreenPosition().toFloat();
+    beginDragAutoRepeat (16);   // drags arrive while the mouse rests at the edge, so the view keeps scrolling
+    repaint();
+}
+
+void AssignButton::mouseDrag (const juce::MouseEvent& e)
+{
+    if (menuClick || ! pressed) return;
+    if (! dragging)
+    {
+        if (e.getScreenPosition().toFloat().getDistanceFrom (downAt) < 4.0f) return;   // a click: nothing yet
+        dragging = true;
+        rack.beginAssignDrag (*this);
+    }
+    rack.assignDragMove (e);
+}
+
+void AssignButton::mouseUp (const juce::MouseEvent& e)
+{
+    if (menuClick) { menuClick = false; return; }
+    const bool click = pressed && ! dragging;
+    if (dragging) rack.endAssignDrag (e);
+    pressed = dragging = false;
+    repaint();
+    if (click) rack.assignClick (*this);
+}
+
+// =================================================================================================
 // WcKnob
 // =================================================================================================
 WcKnob::WcKnob (SliderStyle st) : juce::Slider (st, NoTextBox)
@@ -328,9 +414,14 @@ bool WcKnob::readoutText (ReadoutText& t)
         if (param == nullptr) return false;
         t.name = param->getName (64);
         t.value = param->getCurrentValueAsText();
-        RackView::ccNote (*this, paramId, t);
+        if (depthDrag) { if (auto* rv = findParentComponentOfClass<RackView>()) rv->depthReadout (*this, t); }
+        else { RackView::ccNote (*this, paramId, t); RackView::modNote (*this, paramId, t); }
     }
-    if (stepsNote.isNotEmpty()) { t.note = stepsNote; t.warn = false; }
+    if (stepsNote.isNotEmpty())
+    {
+        if (depthDrag) t.note << midDot() << stepsNote;   // "Sweeps 220 Hz - 880 Hz · 10 % steps"
+        else { t.note = stepsNote; t.warn = false; }
+    }
     return true;
 }
 
@@ -352,7 +443,7 @@ void WcKnob::mouseDown (const juce::MouseEvent& e)
     raw = valueToProportionOfLength (getValue());
     down = last = screen (e);
     typing = e.mods.isCommandDown() && onType != nullptr;   // decided on release: still (< 4 px) types, moved drags
-    gesture = false;
+    gesture = depthDrag = false;
     stepsNote.clear();
     if (auto* r = RackView::readoutFor (*this)) r->dragStart (*this);
 }
@@ -364,16 +455,43 @@ void WcKnob::mouseDrag (const juce::MouseEvent& e)
     const auto d = p - last;
     last = p;
     const bool fine = e.mods.isShiftDown();
+    double step;
     if (isRotary())
-        raw += (double) (d.x - d.y) / (fine ? kTurnPx * 10.0 : kTurnPx);
+        step = (double) (d.x - d.y) / (fine ? kTurnPx * 10.0 : kTurnPx);
     else
     {
         // a fader runs under the hand: its own length on the screen is the whole travel
         const float scale = (localPointToGlobal (juce::Point<float> (0.0f, 1.0f)) - localPointToGlobal (juce::Point<float> (0.0f, 0.0f))).getDistanceFromOrigin();
         const double len = juce::jmax (1.0, (double) std::abs (getPositionOfValue (getMaximum()) - getPositionOfValue (getMinimum())) * scale);
-        raw -= (double) d.y / (fine ? len * 10.0 : len);
+        step = -(double) d.y / (fine ? len * 10.0 : len);
     }
-    raw = juce::jlimit (0.0, 1.0, raw);
+    if (typing && param != nullptr && p.getDistanceFrom (down) >= 4.0f)
+    {
+        // Ctrl/Cmd + drag on a parameter: the depth of its current modulation, never the knob (none: it says so)
+        typing = false;
+        depthDrag = true;
+        if (auto* rv = findParentComponentOfClass<RackView>()) hasDepth = rv->depthStart (*this, depthRaw);
+    }
+    if (depthDrag)
+    {
+        // the same drag as the knob's on another variable: -100 .. +100 %, through 0 with no detent
+        stepsNote.clear();
+        if (hasDepth)
+        {
+            depthRaw = juce::jlimit (-1.0, 1.0, depthRaw + step);
+            double q = depthRaw;
+            if (e.mods.isAltDown())
+            {
+                const double grid = fine ? 100.0 : 10.0;
+                q = std::round (depthRaw * grid) / grid;
+                stepsNote = fine ? "1 % steps" : "10 % steps";
+            }
+            if (auto* rv = findParentComponentOfClass<RackView>()) rv->setCurrentDepth (paramId, (float) q);
+        }
+        if (auto* r = RackView::readoutFor (*this)) r->refresh();
+        return;
+    }
+    raw = juce::jlimit (0.0, 1.0, raw + step);
     if (typing)
     {
         if (p.getDistanceFrom (down) < 4.0f) return;
@@ -402,7 +520,7 @@ void WcKnob::mouseUp (const juce::MouseEvent& e)
 {
     if (menuClick) { menuClick = false; return; }
     if (gesture && param != nullptr) param->endChangeGesture();
-    gesture = false;
+    gesture = depthDrag = hasDepth = false;
     stepsNote.clear();
     if (auto* r = RackView::readoutFor (*this)) r->dragEnd (*this, getLocalBounds().contains (e.getPosition()));
     if (typing) { typing = false; if (onType != nullptr) onType(); }
@@ -516,6 +634,14 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     addAndMakeVisible (*grip);
     for (auto& c : spec.controls)
     {
+        if (c.style == CtrlStyle::Assign)
+        {
+            auto b = std::make_unique<AssignButton> (rack, inst, c.jack, c.label);
+            b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
+            addAndMakeVisible (*b);
+            assigns.push_back (std::move (b));
+            continue;
+        }
         if (c.style == CtrlStyle::Prog)
         {
             const juce::String lab (c.label);
@@ -853,6 +979,7 @@ void ModulePanel::bindKnob (size_t i)
     auto& k = *sliders[i];
     k.param = attachments[i] != nullptr ? proc.apvts.getParameter (boundIds[i]) : nullptr;
     k.paramId = k.param != nullptr ? boundIds[i] : juce::String();
+    k.dynamic = sliderIds[i].containsChar ('{');
     if (k.param != nullptr) k.setDoubleClickReturnValue (true, k.param->convertFrom0to1 (k.param->getDefaultValue()), juce::ModifierKeys());
     else k.setDoubleClickReturnValue (false, 0.0);
     auto* kp = &k;
@@ -910,6 +1037,84 @@ void ModulePanel::paintMidi (juce::Graphics& g)
     for (auto& k : sliders) if (k->param != nullptr) mark (*k, *k, k->paramId, k->isRotary());
     for (auto& w : switches) mark (*w, *w, w->paramId(), false);
     for (auto& b : buttons) mark (*b, *b, b->paramId(), false);
+}
+
+// Modulation on the panel: an arc on the circle kr + 5 around a modulated knob, from the lowest value it reaches to
+// the highest (a bar inside a fader's slot), a dot where the module hears it now, a radial tick where it is cut at an
+// end. While an ASSIGN is dragged: a thin circle round each knob it can go on; the one under it with the arc it would
+// get. Below 100 % strokes and dots keep their size on screen. With no modulation and no drag: nothing at all.
+void ModulePanel::paintMods (juce::Graphics& g)
+{
+    if (! rack.assigning() && proc.getAssignments().empty()) return;
+    const float px = 1.0f / juce::jmin (1.0f, rack.getZoom());   // one screen pixel, below 100 %
+    auto theta = [] (float n) { return juce::MathConstants<float>::pi * (1.2f + 1.6f * n); };   // as the knob turns
+    auto dot = [&] (juce::Point<float> at)
+    {
+        g.setColour (col::bg);
+        g.fillEllipse (juce::Rectangle<float> (7.0f * px, 7.0f * px).withCentre (at));
+        g.setColour (col::mod);
+        g.fillEllipse (juce::Rectangle<float> (5.0f * px, 5.0f * px).withCentre (at));
+    };
+    for (auto& kp : sliders)
+    {
+        auto& k = *kp;
+        if (k.param == nullptr) continue;
+        const int cand = rack.candidate (k);
+        float lo = 0.0f, hi = 0.0f;
+        bool cutLo = false, cutHi = false;
+        const bool mod = rack.modRange (*k.param, cand == 2, lo, hi, cutLo, cutHi);
+        if (! mod && cand == 0) continue;
+        const float live = k.param->convertTo0to1 (proc.rack.effective (k.param->getParameterIndex()));   // what the module hears
+        if (k.isRotary())
+        {
+            const auto a = getLocalArea (&k, k.readoutAnchor());
+            const auto c = a.getCentre();
+            const float r = a.getWidth() * 0.5f + 5.0f;
+            auto at = [&] (float n, float rr) { const float t = theta (n); return c + juce::Point<float> (rr * std::sin (t), -rr * std::cos (t)); };
+            if (cand > 0)
+            {
+                g.setColour (col::mod.withAlpha (cand == 2 ? 0.6f : 0.35f));
+                g.drawEllipse (juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (c), 1.5f * px);
+            }
+            if (! mod) continue;
+            juce::Path arc;
+            if (hi > lo) arc.addCentredArc (c.x, c.y, r, r, 0.0f, theta (lo), theta (hi), true);
+            for (const bool under : { true, false })
+            {
+                g.setColour (under ? col::bg : col::mod);
+                const float w = (under ? 4.0f : 2.0f) * px, half = (under ? 4.0f : 3.0f) * px;   // the tick: 6 x 2 over 8 x 4
+                g.strokePath (arc, juce::PathStrokeType (w, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                if (cutLo) g.drawLine ({ at (0.0f, r - half), at (0.0f, r + half) }, w);
+                if (cutHi) g.drawLine ({ at (1.0f, r - half), at (1.0f, r + half) }, w);
+            }
+            dot (at (live, r));
+            continue;
+        }
+        const auto b = k.getBounds().toFloat();
+        const float cx = b.getCentreX();
+        auto y = [&] (float n) { return b.getY() + (float) k.getPositionOfValue (k.proportionOfLengthToValue ((double) n)); };
+        const juce::Rectangle<float> slot (cx - 3.0f, y (1.0f), 6.0f, y (0.0f) - y (1.0f));   // as WcLook draws it
+        if (cand > 0)
+        {
+            g.setColour (col::mod.withAlpha (cand == 2 ? 0.6f : 0.35f));
+            g.drawRoundedRectangle (slot.expanded (5.0f), 4.0f, 1.5f * px);
+        }
+        if (! mod) continue;
+        {
+            juce::Graphics::ScopedSaveState ss (g);
+            g.excludeClipRegion (juce::Rectangle<float> (22.0f, 14.0f).withCentre ({ cx, y (k.param->getValue()) }).toNearestInt());   // under the cap
+            g.setColour (col::mod);
+            g.fillRect (juce::Rectangle<float> (cx - px, y (hi), 2.0f * px, y (lo) - y (hi)));
+            for (const bool under : { true, false })
+            {
+                g.setColour (under ? col::bg : col::mod);
+                const float w = (under ? 4.0f : 2.0f) * px, half = (under ? 5.0f : 4.0f) * px;   // the tick: 8 x 2 over 10 x 4
+                if (cutLo) g.drawLine (cx - half, y (0.0f), cx + half, y (0.0f), w);
+                if (cutHi) g.drawLine (cx - half, y (1.0f), cx + half, y (1.0f), w);
+            }
+        }
+        dot ({ cx, y (live) });
+    }
 }
 
 int ModulePanel::cursor252() const
@@ -1547,7 +1752,8 @@ void ModulePanel::paintOverChildren (juce::Graphics& g)
             g.fillRect (bar.withTop (bar.getBottom() - h));
         }
     }
-    paintMidi (g);   // last, over every display of the panel
+    paintMods (g);
+    paintMidi (g);   // last, over every display of the panel (the learn ring covers the modulation arc)
     if (rack.movingPanel() == this)
     {
         g.setColour (col::midi);
@@ -1606,6 +1812,10 @@ void ModulePanel::updateLeds()
             }
         }
     }
+    for (auto& k : sliders)   // the live dot of a modulated knob (64 of them at most)
+        if (k->param != nullptr)
+            for (auto& a : proc.getAssignments())
+                if (a.param == k->param->getParameterIndex()) { repaint (k->getBounds().expanded (12)); break; }
     if (type == MT_Midi)
     {
         const bool on = proc.rack.midi().gateLed.load (std::memory_order_relaxed);
@@ -1814,13 +2024,35 @@ void CableLayer::paint (juce::Graphics& g)
         auto* b = rack.findJack (c.dstInst, false, c.dstJack);
         if (a == nullptr || b == nullptr) continue;
         // while a module moves, its own cords stay as they are and the others step back
-        const bool own = moving == nullptr || c.srcInst == moving->inst || c.dstInst == moving->inst;
+        const bool own = (moving == nullptr || c.srcInst == moving->inst || c.dstInst == moving->inst) && ! rack.assigning();
         const float alpha = own ? rack.cableAlpha : juce::jmin (rack.cableAlpha, 0.35f);
         drawCable (g, rack.jackCentre (*a), rack.jackCentre (*b), cableColour (c.colour, a->kind == JackKind::Banana), a->kind == JackKind::Banana, alpha, (float) getHeight() - 4.0f);
     }
     if (rack.dragFrom != nullptr)
         drawCable (g, rack.jackCentre (*rack.dragFrom), rack.dragPos, cableColour (rack.dragColour, rack.dragFrom->kind == JackKind::Banana),
                    rack.dragFrom->kind == JackKind::Banana, 1.0f, (float) getHeight() - 4.0f);
+    // an ASSIGN being dragged: a straight dashed line, not a cord - to the knob it would modulate, red where it cannot
+    if (auto* b = rack.assignFrom.getComponent())
+    {
+        using D = RackView::Drop;
+        auto* over = rack.assignOver.getComponent();
+        const bool good = over != nullptr && (rack.assignDrop == D::Valid || rack.assignDrop == D::Already);
+        const bool red = rack.assignFull || (over != nullptr && ! good);
+        const auto from = rack.content.getLocalPoint (b, b->getLocalBounds().toFloat().getCentre());
+        const auto to = good ? rack.content.getLocalPoint (over, over->getLocalBounds().toFloat().getCentre()) : rack.assignPos;
+        const float px = 1.0f / juce::jmin (1.0f, rack.getZoom());
+        const float dashes[] = { 6.0f * px, 4.0f * px };
+        juce::Path line, dashed;
+        line.startNewSubPath (from);
+        line.lineTo (to);
+        for (const bool under : { true, false })
+        {
+            juce::PathStrokeType ((under ? 4.0f : 2.0f) * px).createDashedStroke (dashed, line, dashes, 2);
+            g.setColour (under ? col::bg : (red ? col::error : col::mod));
+            g.fillPath (dashed);
+            g.fillEllipse (juce::Rectangle<float> ((under ? 10.0f : 8.0f) * px, (under ? 10.0f : 8.0f) * px).withCentre (to));
+        }
+    }
 }
 
 // =================================================================================================
@@ -1861,6 +2093,7 @@ void RackView::changeListenerCallback (juce::ChangeBroadcaster*)
 void RackView::rebuild()
 {
     cancelModuleDrag();
+    cancelAssignDrag();
     panels.clear();
     // made in slot order, as changeListenerCallback compares them; where they go comes from the rows
     for (int inst = 0; inst < kNumInst; ++inst)
@@ -1947,7 +2180,7 @@ void RackView::layoutPanels()
 
 void RackView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
-    if (onZoomGesture != nullptr && moving == nullptr && (e.mods.isCtrlDown() || e.mods.isCommandDown()) && w.deltaY != 0.0f)
+    if (onZoomGesture != nullptr && moving == nullptr && ! assigning() && (e.mods.isCtrlDown() || e.mods.isCommandDown()) && w.deltaY != 0.0f)
     {
         onZoomGesture (w.isReversed ? -w.deltaY : w.deltaY, e.position);
         return;                                   // zoomed: the viewport must not scroll as well
@@ -2130,8 +2363,8 @@ float RackView::midiMarkMargin (juce::Component& c) const
     else if (auto* w = dynamic_cast<ParamSwitch*> (&c)) id = w->paramId();
     else if (auto* b = dynamic_cast<ParamButton*> (&c)) id = b->paramId();
     float alpha = 0.0f;
-    if (id.isEmpty() || (! learnRing (id, alpha) && proc.ccOf (id) < 0)) return 0.0f;
-    return juce::jmax (6.0f, 6.0f * zoom);   // the ring's outer edge, 6 px off the control (it keeps its size below 100 %)
+    if (id.isEmpty() || (! learnRing (id, alpha) && proc.ccOf (id) < 0 && modsOf (id).empty())) return 0.0f;
+    return juce::jmax (6.0f, 6.0f * zoom);   // the ring's outer edge, 6 px off the control (it keeps its size below 100 %); the modulation arc too
 }
 
 bool RackView::ccActive (int cc) const
@@ -2185,7 +2418,7 @@ static int numValuesOf (const juce::RangedAudioParameter& p)
 }
 
 // Right click on a knob, fader, lever or panel button. Everything is done through the parameter id.
-juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, bool knob, int cc, bool waiting)
+juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, bool knob, int cc, bool waiting, const ModMenu* mod)
 {
     auto* p = &p0;
     const int n = numValuesOf (*p);
@@ -2241,6 +2474,30 @@ juce::PopupMenu RackView::buildParamMenu (const juce::RangedAudioParameter& p0, 
         m.addItem (it);
         m.addItem (202, cc >= 0 ? "Forget " + ccName : juce::String ("Forget MIDI CC"), cc >= 0);
     }
+    if (mod == nullptr || ! knob) return m;
+    m.addSeparator();
+    if (! mod->can) { m.addItem (398, "Can't be modulated", false); return m; }
+    if (mod->names.isEmpty()) m.addItem (398, "Drag an ASSIGN button here to modulate it", false);
+    else
+    {
+        m.addSectionHeader ("Modulation");
+        for (int i = 0; i < mod->names.size(); ++i)
+        {
+            juce::PopupMenu::Item it (mod->names[i] + ": " + mod->depths[i]);
+            it.itemID = 300 + i;
+            it.isTicked = mod->names.size() > 1 && i == mod->current;
+            if (i == mod->current) it.shortcutKeyDescription = depthShortcut();
+            m.addItem (it);
+        }
+    }
+    if (! mod->with.isEmpty())
+    {
+        juce::PopupMenu with;
+        for (int j = 0; j < mod->with.size(); ++j) with.addItem (364 + j, mod->with[j], ! mod->full);
+        m.addSubMenu ("Modulate with", with);
+    }
+    for (int i = 0; i < mod->names.size(); ++i) m.addItem (332 + i, "Remove " + mod->names[i]);
+    if (! mod->names.isEmpty()) m.addItem (399, "Remove all modulation");
     return m;
 }
 
@@ -2251,7 +2508,22 @@ void RackView::paramMenu (juce::Component& c, const juce::String& id, bool knob)
     // a menu ends a MIDI Learn; the waiting control's own menu offers to cancel it (and ends it when it closes)
     if (learnId != id) cancelLearn();
     const bool waiting = learnId == id;
-    auto m = buildParamMenu (*p, knob, proc.ccOf (id), waiting);
+    ModMenu mod;
+    if (knob)   // a knob or a fader: its Modulation block
+    {
+        mod.can = proc.isModulatable (id);
+        const auto rows = modsOf (id);
+        const auto* cur = currentMod (id);
+        for (size_t i = 0; i < rows.size() && i < 32; ++i)   // shortcut: 32 rows shown per knob, past that it needs a submenu
+        {
+            mod.names.add (sourceName (rows[i].srcInst, rows[i].srcJack));
+            mod.depths.add (depthText (rows[i].depth));
+            if (cur != nullptr && rows[i] == *cur) mod.current = (int) i;
+        }
+        for (auto* b : sourcesFree (id)) mod.with.add (b->name);
+        mod.full = (int) proc.getAssignments().size() >= wc::Rack::kMaxAssignments;
+    }
+    auto m = buildParamMenu (*p, knob, proc.ccOf (id), waiting, knob ? &mod : nullptr);
     m.setLookAndFeel (&c.getLookAndFeel());
     menuOpen = true;
     if (readout != nullptr) readout->refresh();
@@ -2274,7 +2546,28 @@ void RackView::menuChoice (const juce::String& id, int r, bool waiting, juce::Co
     if (r == 201) return;   // cancelled above (and not a value of a long list: 201 - 20 is a step of Master BPM)
     if (r == 200) { startLearn (id); return; }
     if (r == 202) { proc.forgetCc (id); repaintMarks (id); if (readout != nullptr) readout->refresh(); return; }
-    if (r >= 300 && r <= 399) return;   // the Modulation block, never a value (Master BPM has 281: 300 - 20 is one of them)
+    if (r >= 300 && r <= 399)   // the Modulation block, never a value (Master BPM has 281: 300 - 20 is one of them)
+    {
+        const auto rows = modsOf (id);
+        const int i = r < 332 ? r - 300 : r - 332;
+        if (r < 364 && i >= (int) rows.size()) return;
+        if (r < 332)
+        {
+            currentSource[id] = { rows[(size_t) i].srcInst, rows[(size_t) i].srcJack };
+            if (ctl != nullptr) typeDepth (*ctl, id, rows[(size_t) i].srcInst, rows[(size_t) i].srcJack);
+        }
+        else if (r < 364) proc.unassign (rows[(size_t) i].srcInst, rows[(size_t) i].srcJack, id);
+        else if (r < 399)
+        {
+            // shortcut: the free sources are listed again here; a module added or removed while the menu was open shifts them
+            const auto free = sourcesFree (id);
+            const int j = r - 364;
+            if (j < (int) free.size() && proc.assign (free[(size_t) j]->inst, free[(size_t) j]->jack, id, kStartDepth))
+                showAssigned (ctl, id, free[(size_t) j]->inst, free[(size_t) j]->jack);
+        }
+        else proc.unassignParam (id);
+        return;
+    }
     auto set = [prm] (float v) { prm->beginChangeGesture(); prm->setValueNotifyingHost (v); prm->endChangeGesture(); };
     if (r == 1) { if (ctl != nullptr) typeValue (*ctl, id); }
     else if (r == 2) set (prm->getDefaultValue());
@@ -2304,6 +2597,373 @@ void RackView::typeValue (juce::Component& c, const juce::String& id)
         prm->setValueNotifyingHost (norm);
         prm->endChangeGesture();
         if (v->limited != 0) limited = "Limited to " + prm->getText (norm, 64) + (v->limited > 0 ? " (max)" : " (min)");
+        return true;
+    };
+    readout->edit (c, std::move (ed));
+}
+
+// ---- modulation by drag ----
+juce::String RackView::depthText (float d)
+{
+    const int n = juce::roundToInt (d * 100.0f);
+    return (n > 0 ? juce::String ("+") : n < 0 ? juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) : juce::String()) + juce::String (std::abs (n)) + " %";
+}
+
+int RackView::modCount (int inst, int jack) const
+{
+    int n = 0;
+    for (auto& a : proc.getAssignments()) if (a.srcInst == inst && a.srcJack == jack) ++n;
+    return n;
+}
+
+AssignButton* RackView::findAssign (int inst, int jack) const
+{
+    if (auto* p = panelOf (inst))
+        for (auto* c : p->getChildren())
+            if (auto* b = dynamic_cast<AssignButton*> (c)) if (b->jack == jack) return b;
+    return nullptr;
+}
+
+juce::String RackView::sourceName (int inst, int jack) const
+{
+    if (auto* b = findAssign (inst, jack)) return b->name;
+    return instName (inst);   // a row with no button to name it (a test, a hand-made patch)
+}
+
+std::vector<wc::Assignment> RackView::modsOf (const juce::String& id) const
+{
+    std::vector<wc::Assignment> v;
+    if (auto* p = proc.apvts.getParameter (id))
+        for (auto& a : proc.getAssignments()) if (a.param == p->getParameterIndex()) v.push_back (a);
+    return v;
+}
+
+const wc::Assignment* RackView::currentMod (const juce::String& id) const
+{
+    auto* p = proc.apvts.getParameter (id);
+    if (p == nullptr) return nullptr;
+    const auto it = currentSource.find (id);
+    const wc::Assignment* last = nullptr;
+    for (auto& a : proc.getAssignments())
+        if (a.param == p->getParameterIndex())
+        {
+            if (it != currentSource.end() && a.srcInst == it->second.first && a.srcJack == it->second.second) return &a;
+            last = &a;   // none chosen (or gone): the last one assigned
+        }
+    return last;
+}
+
+std::vector<AssignButton*> RackView::sourcesFree (const juce::String& id) const
+{
+    std::vector<AssignButton*> v;
+    const auto rows = modsOf (id);
+    for (auto& p : panels)
+        for (auto* c : p->getChildren())
+            if (auto* b = dynamic_cast<AssignButton*> (c))
+                if (std::none_of (rows.begin(), rows.end(), [b] (const wc::Assignment& a) { return a.srcInst == b->inst && a.srcJack == b->jack; }))
+                    v.push_back (b);
+    return v;
+}
+
+bool RackView::modRange (const juce::RangedAudioParameter& p, bool preview, float& lo, float& hi, bool& cutLo, bool& cutHi) const
+{
+    // shortcut: every source today is 0..10 V (the 281 cycling); the Classic LFO (-10..+10 V) declares its range when it exists
+    constexpr float vMin = 0.0f, vMax = 10.0f;
+    float dLo = 0.0f, dHi = 0.0f;
+    bool any = preview;
+    auto add = [&] (float depth) { dLo += juce::jmin (depth * vMin, depth * vMax) * 0.1f; dHi += juce::jmax (depth * vMin, depth * vMax) * 0.1f; };
+    for (auto& a : proc.getAssignments()) if (a.param == p.getParameterIndex()) { add (a.depth); any = true; }
+    if (preview) add (kStartDepth);
+    if (! any) return false;
+    const float base = p.getValue();
+    cutLo = base + dLo < 0.0f;
+    cutHi = base + dHi > 1.0f;
+    lo = juce::jlimit (0.0f, 1.0f, base + dLo);
+    hi = juce::jlimit (0.0f, 1.0f, base + dHi);
+    return true;
+}
+
+int RackView::candidate (const WcKnob& k) const
+{
+    if (! assigning() || assignFull || dropKind (k) != Drop::Valid) return 0;   // not the ones this source moves already
+    return assignOver == &k ? 2 : 1;
+}
+
+// the knob, fader, lever or panel button under a screen point: a knob's skirt 8 screen px bigger, the others' outline
+// as much; of two, the nearest centre
+juce::Component* RackView::controlAt (juce::Point<float> screen) const
+{
+    const float m = 8.0f / zoom;
+    juce::Component* best = nullptr;
+    float bestD = 0.0f;
+    for (auto& p : panels)
+    {
+        const auto pt = p->getLocalPoint (nullptr, screen);
+        if (! p->getLocalBounds().toFloat().expanded (m).contains (pt)) continue;
+        for (auto* c : p->getChildren())
+        {
+            auto* src = dynamic_cast<ReadoutSource*> (c);
+            auto* k = dynamic_cast<WcKnob*> (c);
+            if (! c->isVisible() || src == nullptr || (k == nullptr && dynamic_cast<ParamSwitch*> (c) == nullptr && dynamic_cast<ParamButton*> (c) == nullptr)) continue;
+            const bool round = k != nullptr && k->isRotary();
+            const auto a = k != nullptr && ! round ? c->getBounds().toFloat() : p->getLocalArea (c, src->readoutAnchor());
+            const float d = pt.getDistanceFrom (a.getCentre());
+            if (! (round ? d <= a.getWidth() * 0.5f + m : a.expanded (m).contains (pt))) continue;
+            if (best == nullptr || d < bestD) { best = c; bestD = d; }
+        }
+    }
+    return best;
+}
+
+RackView::Drop RackView::dropKind (const juce::Component& c) const
+{
+    auto* k = dynamic_cast<const WcKnob*> (&c);
+    auto* b = assignFrom.getComponent();
+    if (k == nullptr) return Drop::Lever;                                           // a lever or a panel button
+    if (k->param == nullptr) return k->describe != nullptr ? Drop::Cell : Drop::NoParam;
+    if (proc.isModulatable (k->paramId))
+    {
+        for (auto& a : proc.getAssignments())
+            if (b != nullptr && a.srcInst == b->inst && a.srcJack == b->jack && a.param == k->param->getParameterIndex()) return Drop::Already;
+        return Drop::Valid;
+    }
+    // why not (the rule itself is wc::isModulatable)
+    if (dynamic_cast<juce::AudioParameterBool*> (k->param) != nullptr || dynamic_cast<juce::AudioParameterChoice*> (k->param) != nullptr) return Drop::Lever;
+    for (int i = 0; i < kMax666; ++i) if (k->paramId.startsWith (prefix666 (i))) return Drop::Scope;
+    return Drop::EditKnob;
+}
+
+void RackView::beginAssignDrag (AssignButton& b)
+{
+    cancelAssignDrag();
+    assignFrom = &b;
+    assignFull = (int) proc.getAssignments().size() >= wc::Rack::kMaxAssignments;
+    assignOver = nullptr;
+    assignDrop = Drop::None;
+    assignOutside = false;
+    if (assignFull && readout != nullptr)   // the whole drag: nothing can go in
+        readout->hold (b, { b.name, "64 of 64 modulations in use", "Remove one to add another: right-click an orange ASSIGN button", true });
+    content.repaint();   // the candidates
+}
+
+void RackView::assignDragMove (const juce::MouseEvent& e)
+{
+    if (assignFrom == nullptr) return;
+    autoScroll (e);
+    const auto screen = e.getScreenPosition().toFloat();
+    assignPos = content.getLocalPoint (nullptr, screen);
+    auto* vp = findParentComponentOfClass<juce::Viewport>();
+    const bool outside = vp != nullptr && ! vp->getScreenBounds().toFloat().contains (screen);
+    auto* over = outside ? nullptr : controlAt (screen);
+    auto d = over != nullptr ? dropKind (*over) : Drop::None;
+    if (assignFull && d != Drop::Already) { over = nullptr; d = Drop::None; }   // full: only one it modulates already
+    if (over != assignOver.getComponent() || d != assignDrop || outside != assignOutside)
+    {
+        assignOver = over;
+        assignDrop = d;
+        assignOutside = outside;
+        if (! assignFull) holdAssignReadout();
+    }
+    cables.repaint();   // the line, and under it the panels with the candidates
+}
+
+void RackView::holdAssignReadout()
+{
+    auto* b = assignFrom.getComponent();
+    if (readout == nullptr || b == nullptr) return;
+    if (assignOutside) { readout->hold (*b, { b->name, "Release to cancel", {}, false }); return; }
+    auto* c = assignOver.getComponent();
+    if (c == nullptr) { readout->release(); return; }
+    ReadoutText base;
+    if (auto* src = dynamic_cast<ReadoutSource*> (c)) src->readoutText (base);
+    const juce::String no ("Can't be modulated");
+    ReadoutText t;
+    switch (assignDrop)
+    {
+        case Drop::Valid:    t = { base.name, "Release to modulate", static_cast<WcKnob*> (c)->dynamic ? "This stage only - the knob shows other stages too" : "", false }; break;
+        case Drop::Already:  t = { base.name, "Already modulated by " + b->name, depthHint(), false }; break;
+        case Drop::Lever:    t = { base.name, no, "Levers and selectors jump: only knobs and faders", true }; break;
+        case Drop::EditKnob: t = { base.name, no, "This knob picks what the panel edits", true }; break;
+        case Drop::Scope:    t = { base.name, no, "Display settings of the 666", true }; break;
+        case Drop::Cell:     t = { base.name, no, "It edits the cell under the cursor, not a parameter", true }; break;
+        case Drop::NoParam:  t = { b->name, no, "Nothing to modulate here right now", true }; break;
+        case Drop::None:     readout->release(); return;
+    }
+    readout->hold (*c, t);
+}
+
+void RackView::endAssignDrag (const juce::MouseEvent& e)
+{
+    if (assignFrom == nullptr) return;
+    assignDragMove (e);   // where it was let go
+    auto* b = assignFrom.getComponent();
+    const int inst = b->inst, jack = b->jack;
+    const auto name = b->name;
+    auto* k = dynamic_cast<WcKnob*> (assignOver.getComponent());
+    const auto d = assignDrop;
+    cancelAssignDrag();
+    if (k == nullptr || k->param == nullptr || (d != Drop::Valid && d != Drop::Already)) return;   // nothing, no message
+    if (d == Drop::Valid && ! proc.assign (inst, jack, k->paramId, kStartDepth))
+    {
+        if (readout != nullptr) readout->hold (*b, { name, "Not modulated", "The rack changed while dragging. Try again.", true }, kMovedMs);
+        return;
+    }
+    showAssigned (k, k->paramId, inst, jack);   // dropped again on one it modulates: it becomes the current one
+}
+
+void RackView::showAssigned (juce::Component* c, const juce::String& id, int inst, int jack)
+{
+    currentSource[id] = { inst, jack };
+    auto* p = proc.apvts.getParameter (id);
+    auto* a = currentMod (id);
+    if (readout != nullptr && c != nullptr && p != nullptr && a != nullptr)
+        readout->hold (*c, { p->getName (64), sourceName (inst, jack) + ": " + depthText (a->depth), depthHint(), false }, kLearnedMs);
+}
+
+void RackView::cancelAssignDrag()
+{
+    const bool was = assigning() || assignOver != nullptr;
+    assignFrom = nullptr;
+    assignOver = nullptr;
+    assignDrop = Drop::None;
+    assignFull = assignOutside = false;
+    if (! was) return;
+    if (readout != nullptr) readout->release();
+    content.repaint();
+}
+
+static juce::String assignStatus (int n)
+{
+    return n == 0 ? juce::String ("Drag this button onto a knob")
+                  : "Modulates " + juce::String (n) + (n == 1 ? " control" : " controls") + midDot() + "right-click to list them";
+}
+
+void RackView::assignClick (AssignButton& b)
+{
+    if (readout != nullptr) readout->hold (b, { b.name, assignStatus (modCount (b.inst, b.jack)), {}, false }, kMovedMs);
+}
+
+static std::vector<wc::Assignment> rowsFrom (const WcProcessor& p, int inst, int jack)
+{
+    std::vector<wc::Assignment> v;
+    for (auto& a : p.getAssignments()) if (a.srcInst == inst && a.srcJack == jack) v.push_back (a);
+    return v;
+}
+
+void RackView::assignMenu (int inst, int jack)
+{
+    cancelLearn();   // a menu ends a MIDI Learn
+    const auto rows = rowsFrom (proc, inst, jack);
+    juce::PopupMenu m;
+    if (auto* b = findAssign (inst, jack)) m.setLookAndFeel (&b->getLookAndFeel());
+    m.addSectionHeader (sourceName (inst, jack) + " modulates");
+    if (rows.empty()) m.addItem (999, "Not modulating anything: drag this button onto a knob", false);
+    auto* all = &proc.getParameters();
+    for (size_t i = 0; i < rows.size(); ++i) m.addItem (1 + (int) i, (*all)[rows[i].param]->getName (64) + ": " + depthText (rows[i].depth));
+    if (! rows.empty()) m.addSeparator();
+    for (size_t i = 0; i < rows.size(); ++i) m.addItem (101 + (int) i, "Remove " + (*all)[rows[i].param]->getName (64));
+    if (! rows.empty()) { m.addSeparator(); m.addItem (200, "Remove all (" + juce::String ((int) rows.size()) + ")"); }
+    menuOpen = true;
+    juce::Component::SafePointer<RackView> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, inst, jack] (int r)
+    {
+        if (self == nullptr) return;
+        self->menuOpen = false;
+        self->assignChoice (inst, jack, r);
+    });
+}
+
+void RackView::assignChoice (int inst, int jack, int r)
+{
+    const auto rows = rowsFrom (proc, inst, jack);
+    auto idOf = [this] (const wc::Assignment& a) { return static_cast<juce::RangedAudioParameter*> (proc.getParameters()[a.param])->getParameterID(); };
+    auto* b = findAssign (inst, jack);
+    if (r >= 1 && r <= 64 && r - 1 < (int) rows.size())
+    {
+        const auto id = idOf (rows[(size_t) r - 1]);
+        currentSource[id] = { inst, jack };
+        if (b != nullptr) typeDepth (*b, id, inst, jack);
+    }
+    else if (r >= 101 && r <= 164 && r - 101 < (int) rows.size())
+    {
+        const auto& a = rows[(size_t) r - 101];
+        proc.unassign (inst, jack, idOf (a));
+        if (b != nullptr && readout != nullptr)
+            readout->hold (*b, { b->name, assignStatus (modCount (inst, jack)), "Removed from " + proc.getParameters()[a.param]->getName (64), false }, kLearnedMs);
+    }
+    else if (r == 200) proc.unassignSource (inst, jack);
+}
+
+bool RackView::depthStart (const WcKnob& k, double& depth) const
+{
+    const auto* a = currentMod (k.paramId);
+    if (a == nullptr) return false;
+    depth = a->depth;
+    return true;
+}
+
+void RackView::setCurrentDepth (const juce::String& id, float depth)
+{
+    if (const auto* a = currentMod (id))
+    {
+        const int inst = a->srcInst, jack = a->srcJack;   // setDepth changes the table it points into
+        proc.setDepth (inst, jack, id, depth);
+    }
+}
+
+// the readout of a Ctrl+drag: the depth of the current source, and what the knob sweeps (all its sources)
+void RackView::depthReadout (WcKnob& k, ReadoutText& t) const
+{
+    const auto* a = currentMod (k.paramId);
+    if (a == nullptr || k.param == nullptr) { t.note = "No modulation here: drag an ASSIGN button onto it"; t.warn = false; return; }
+    t.value = sourceName (a->srcInst, a->srcJack) + ": " + depthText (a->depth);
+    float lo = 0.0f, hi = 0.0f;
+    bool cutLo = false, cutHi = false;
+    modRange (*k.param, false, lo, hi, cutLo, cutHi);
+    t.note = "Sweeps " + k.param->getText (lo, 64) + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x93 ")) + k.param->getText (hi, 64);
+    t.warn = cutLo || cutHi;
+    if (t.warn) t.note << midDot() << "cut at " << (cutLo && cutHi ? "both ends" : (cutHi ? "the max" : "the min"));
+}
+
+void RackView::modNote (juce::Component& c, const juce::String& id, ReadoutText& t)
+{
+    auto* rv = c.findParentComponentOfClass<RackView>();
+    if (rv == nullptr) return;
+    const auto rows = rv->modsOf (id);
+    if (rows.empty()) return;
+    juce::String s;
+    if (rows.size() >= 3) s = juce::String ((int) rows.size()) + " modulations" + midDot() + "right-click to see them";
+    else for (auto& a : rows) s << (s.isEmpty() ? juce::String() : midDot()) << rv->sourceName (a.srcInst, a.srcJack) << " " << depthText (a.depth);
+    t.note = t.note.isEmpty() ? s : t.note + midDot() + s;   // after "CC 74"
+    t.warn = false;
+}
+
+// "Set depth" (the knob's menu or the ASSIGN's): the readout turns into a field, as for a value
+void RackView::typeDepth (juce::Component& c, const juce::String& id, int inst, int jack)
+{
+    auto* p = proc.apvts.getParameter (id);
+    float depth = 0.0f;
+    bool found = false;
+    for (auto& a : rowsFrom (proc, inst, jack)) if (p != nullptr && a.param == p->getParameterIndex()) { depth = a.depth; found = true; }
+    if (! found || readout == nullptr) return;
+    ValueEdit ed;
+    ed.name = p->getName (64) + midDot() + sourceName (inst, jack) + " depth";
+    ed.text = depthText (depth);
+    ed.example = "+40 % or -25";
+    ed.what = "a depth";
+    auto* pr = &proc;
+    ed.apply = [pr, id, inst, jack] (const juce::String& text, juce::String& limited) -> bool
+    {
+        // "+25 %", "-40", "12,5%": a sign, a number, a % (each optional), commas or points, spaces anywhere
+        auto t = text.replace (juce::CharPointer_UTF8 ("\xe2\x88\x92"), "-").removeCharacters (" ").replace (",", ".");
+        if (t.endsWithChar ('%')) t = t.dropLastCharacters (1);
+        const auto digits = t.trimCharactersAtStart ("+-");
+        if (t.length() - digits.length() > 1 || ! digits.containsOnly ("0123456789.") || ! digits.containsAnyOf ("0123456789")
+            || digits.indexOfChar ('.') != digits.lastIndexOfChar ('.')) return false;
+        const double x = t.getDoubleValue();
+        if (x > 100.0) limited = "Limited to +100 % (max)";
+        else if (x < -100.0) limited = juce::String (juce::CharPointer_UTF8 ("Limited to \xe2\x88\x92" "100 % (min)"));
+        pr->setDepth (inst, jack, id, (float) juce::jlimit (-1.0, 1.0, x / 100.0));
         return true;
     };
     readout->edit (c, std::move (ed));

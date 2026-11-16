@@ -35,12 +35,14 @@ private:
 // Knob or fader with its own drag: 250 px of screen for the whole turn at any zoom (a fader: its own length),
 // Shift fine (x0.1), Alt in 10 % steps, Shift+Alt in 1 %. A click without moving changes nothing, a click in a
 // fader's slot does not jump. Right click: menu. Ctrl+click (Cmd on a Mac): type a value. Double click: default.
+// Ctrl+drag (Cmd on a Mac) on a parameter: the depth of its current modulation, the same way; never the knob.
 class WcKnob : public juce::Slider, public ReadoutSource
 {
 public:
     explicit WcKnob (SliderStyle);
     juce::RangedAudioParameter* param = nullptr;   // the bound parameter; none for the 252 cell knobs or a dynamic knob without one
     juce::String paramId;
+    bool dynamic = false;                          // follows an edit selector ({e} / {n} / {s}): shows one stage
     std::function<bool (ReadoutText&)> describe;    // a knob that is not a parameter (252 cells) says what it shows
     std::function<void()> onMenu, onType;
     bool readoutText (ReadoutText&) override;
@@ -57,7 +59,8 @@ public:
 private:
     double raw = 0.0;                          // where the drag has the knob, 0..1, before any Alt steps
     juce::Point<float> last, down;             // screen positions
-    bool menuClick = false, typing = false, gesture = false;
+    bool menuClick = false, typing = false, gesture = false, depthDrag = false, hasDepth = false;
+    double depthRaw = 0.0;                     // where the Ctrl+drag has the depth, -1..1, before any Alt steps
     juce::String stepsNote;
     juce::Point<float> screen (const juce::MouseEvent&) const;
     int numValues() const;
@@ -140,6 +143,30 @@ private:
     int editStage() const;
 };
 
+// ASSIGN: a modulation source, one output jack of its module. Drag it onto a knob or fader to modulate it; right
+// click: what it modulates. Blue while it modulates nothing, orange once it does. A child of its panel, as PushButton.
+// Its readout only shows texts the rack holds over it.
+class AssignButton : public juce::Component, public juce::SettableTooltipClient, public ReadoutSource
+{
+public:
+    AssignButton (RackView& rv, int inst, int jack, const juce::String& name);
+    void paint (juce::Graphics&) override;
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    juce::String getTooltip() override;
+    bool readoutText (ReadoutText&) override { return false; }
+    juce::Rectangle<float> readoutAnchor() override { return juce::Rectangle<float> (21.0f, 21.0f).withCentre (getLocalBounds().toFloat().getCentre()); }
+    const int inst, jack;
+    const juce::String name;
+private:
+    RackView& rack;
+    juce::Point<float> downAt;        // screen
+    bool pressed = false, dragging = false, menuClick = false;
+};
+
 class ModulePanel;
 
 // The top strip of a panel (22 units, as wide as the panel): drag it to move the module. A child of the panel, so it
@@ -211,6 +238,7 @@ private:
     void paint666 (juce::Graphics&);
     void paint291 (juce::Graphics&);
     void paintMidi (juce::Graphics&);        // MIDI Learn: the ring of a control waiting for a CC, the dot of a learned one
+    void paintMods (juce::Graphics&);        // modulation: the ring and live dot of a modulated knob, the drop candidates
     int seq666 = 0;
     std::unique_ptr<wc::M666::Frame> frame666;
     std::vector<juce::Point<float>> trail666;
@@ -219,6 +247,7 @@ private:
     std::vector<std::unique_ptr<PushButton>> pushes;
     std::vector<std::unique_ptr<ParamButton>> buttons;
     std::vector<std::unique_ptr<ProgSwitch>> progs;
+    std::vector<std::unique_ptr<AssignButton>> assigns;
     std::vector<float> ledCache;
     float leds4[4] {};
     juce::TextButton removeButton { "x" };
@@ -276,8 +305,11 @@ public:
     bool menuOpen = false;
     bool readoutSuppressed() const { return isDragging() || menuOpen; }
     void paramMenu (juce::Component& control, const juce::String& paramId, bool knob);
-    // knob: Type and positions. cc: the parameter's learned CC (-1 none); waiting: it is the one waiting for a CC
-    static juce::PopupMenu buildParamMenu (const juce::RangedAudioParameter&, bool knob, int cc = -1, bool waiting = false);
+    // knob: Type and positions. cc: the parameter's learned CC (-1 none); waiting: it is the one waiting for a CC.
+    // mod: the Modulation block of a knob or fader (none: no block). IDs 300 + i set the depth of row i, 332 + i
+    // remove it, 364 + j modulate with the free source j, 399 remove them all
+    struct ModMenu { bool can = false, full = false; int current = -1; juce::StringArray names, depths, with; };
+    static juce::PopupMenu buildParamMenu (const juce::RangedAudioParameter&, bool knob, int cc = -1, bool waiting = false, const ModMenu* mod = nullptr);
     void menuChoice (const juce::String& paramId, int result, bool waiting, juce::Component* control);   // what the menu does
     void typeValue (juce::Component& control, const juce::String& paramId);
     static ValueReadout* readoutFor (juce::Component& control);
@@ -295,6 +327,41 @@ public:
     bool ccActive (int cc) const;                                       // the CC moved its parameter in the last 150 ms
     juce::Component* controlFor (const juce::String& paramId) const;
     void repaintMarks (const juce::String& paramId);
+
+    // Modulation by drag (WcProcessor::assign). The drag and the menus work on (source inst, jack, parameter id): a
+    // rebuild cancels the drag, a menu still applies after one. The source "current" for a knob (the one Ctrl+drag
+    // moves) is the editor's state: the last assigned, chosen in its menu or dropped on it again; never saved.
+    void beginAssignDrag (AssignButton&);
+    void assignDragMove (const juce::MouseEvent&);
+    void endAssignDrag (const juce::MouseEvent&);
+    void cancelAssignDrag();                       // Esc, a rebuild: nothing changes
+    bool assigning() const { return assignFrom != nullptr; }
+    void assignClick (AssignButton&);              // a click without moving: the readout says what it does
+    void assignMenu (int inst, int jack);
+    void assignChoice (int inst, int jack, int result);   // what the ASSIGN button's menu does
+    int modCount (int inst, int jack) const;       // the knobs this source modulates
+    juce::String sourceName (int inst, int jack) const;
+    // its rows in the order they were made; the "current" one (nullptr: none)
+    std::vector<wc::Assignment> modsOf (const juce::String& paramId) const;
+    const wc::Assignment* currentMod (const juce::String& paramId) const;
+    // the travel the knob sweeps (0..1, clipped; cutLo / cutHi: it would go past), with the preview of a drop. false:
+    // not modulated
+    bool modRange (const juce::RangedAudioParameter&, bool preview, float& lo, float& hi, bool& cutLo, bool& cutHi) const;
+    int candidate (const WcKnob&) const;           // while dragging an ASSIGN: 0 no, 1 a valid knob, 2 the one under it
+    void depthReadout (WcKnob&, ReadoutText&) const;   // the readout of a Ctrl+drag
+    bool depthStart (const WcKnob&, double& depth) const;   // false: no modulation to move
+    void setCurrentDepth (const juce::String& paramId, float depth);
+    void typeDepth (juce::Component& control, const juce::String& paramId, int inst, int jack);
+    static void modNote (juce::Component& control, const juce::String& paramId, ReadoutText&);   // "LFO +25 %" on hover
+    static juce::String depthText (float depth);   // "+25 %", "−40 %"
+    static constexpr float kStartDepth = 0.25f;
+    // a drop target, by what is under the ASSIGN being dragged
+    enum class Drop { None, Valid, Already, Lever, EditKnob, Scope, Cell, NoParam };
+    juce::Component::SafePointer<AssignButton> assignFrom;   // the button being dragged
+    juce::Point<float> assignPos;                            // the mouse, content coordinates
+    juce::Component::SafePointer<juce::Component> assignOver;   // the control under it
+    Drop assignDrop = Drop::None;
+    bool assignFull = false, assignOutside = false;          // 64 in use; out of the view
     static constexpr int kAssignedRingMs = 600, kActivityMs = 150, kLearnedMs = 1500, kMovedMs = 2500, kCc1Ms = 3000;
 
     JackComp* findJack (int inst, bool output, int index) const;
@@ -344,5 +411,13 @@ private:
         RackView& owner;
     } learnClicks { *this };
     bool listeningClicks = false;
+
+    std::map<juce::String, std::pair<int, int>> currentSource;   // knob -> (inst, jack) chosen for it
+    juce::Component* controlAt (juce::Point<float> screen) const;
+    Drop dropKind (const juce::Component&) const;
+    void holdAssignReadout();
+    void showAssigned (juce::Component* control, const juce::String& paramId, int inst, int jack);   // "LFO: +25 %"
+    AssignButton* findAssign (int inst, int jack) const;
+    std::vector<AssignButton*> sourcesFree (const juce::String& paramId) const;   // the ASSIGN buttons not on it yet
 };
 } // namespace wc::ui

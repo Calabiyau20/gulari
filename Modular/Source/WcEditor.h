@@ -11,7 +11,7 @@ public:
     ~WcEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
-    bool keyPressed (const juce::KeyPress&) override;   // Esc cancels a MIDI Learn, or a module being moved
+    bool keyPressed (const juce::KeyPress&) override;   // Esc cancels a MIDI Learn, a module being moved or an ASSIGN dragged
 
 private:
     WcProcessor& proc;

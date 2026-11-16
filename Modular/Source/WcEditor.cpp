@@ -134,6 +134,7 @@ bool WcEditor::keyPressed (const juce::KeyPress& k)
 {
     if (k == juce::KeyPress::escapeKey && rack.learning()) { rack.cancelLearn(); return true; }
     if (k == juce::KeyPress::escapeKey && rack.movingPanel() != nullptr) { rack.cancelModuleDrag(); return true; }
+    if (k == juce::KeyPress::escapeKey && rack.assigning()) { rack.cancelAssignDrag(); return true; }
     return false;
 }
 
