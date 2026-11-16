@@ -21,7 +21,7 @@ public:
     // LEDs: 0..15 stage, 20..35 pulse programmed, 40 run, 41 + k: edit-stage program (see led())
     float led (int id) const noexcept override;
 
-    M250 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M250 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

@@ -5,9 +5,9 @@ namespace wc
 {
 using namespace dsp;
 
-M259::M259 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M259::M259 (const Params& params, const juce::String& p)
 {
-    auto get = [&] (const char* s) { P x; x.v = apvts.getRawParameterValue (p + s); jassert (x.v != nullptr); return x; };
+    auto get = [&] (const char* s) { P x; x.v = params.getRawParameterValue (p + s); jassert (x.v != nullptr); return x; };
     moFreq = get ("mo_freq"); moFine = get ("mo_fine"); moRange = get ("mo_range"); moWave = get ("mo_wave");
     moCvAmt = get ("mo_cv"); moFmAmt = get ("mo_fm");
     index = get ("idx"); indexCvAmt = get ("idx_cv"); modAmp = get ("mod_amp"); modPitch = get ("mod_pitch");

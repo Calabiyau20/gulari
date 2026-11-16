@@ -23,7 +23,7 @@ public:
     // LEDs: 0 mix A, 1 s&h A, 2 mix B, 3 s&h B, 10..12 filter A mod type, 13..15 filter B, 20 remote
     float led (int id) const noexcept override;
 
-    M267 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M267 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

@@ -18,7 +18,7 @@ public:
     enum Led { Led_Fluct1, Led_Fluct2, Led_Q2n, Led_Qn1, Led_StoredUni, Led_StoredDist, Led_Count };
     float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
 
-    M266 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M266 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

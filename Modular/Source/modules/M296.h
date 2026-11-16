@@ -23,7 +23,7 @@ public:
     enum Led { Led_Even, Led_All, Led_Odd, Led_Band0 = 10, Led_Count = 26 };
     static constexpr float kCentre[kBands] = { 100, 150, 250, 350, 500, 630, 800, 1000, 1300, 1600, 2000, 2600, 3500, 5000, 8000, 10000 };
 
-    M296 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M296 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

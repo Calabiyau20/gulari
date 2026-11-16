@@ -2,11 +2,11 @@
 
 namespace wc
 {
-M277::M277 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M277::M277 (const Params& params, const juce::String& p)
 {
-    for (int i = 0; i < 3; ++i) lvlP[i] = apvts.getRawParameterValue (p + "lvl" + juce::String::charToString ((juce::juce_wchar) ('a' + i)));
-    timeP = apvts.getRawParameterValue (p + "time"); ctlP = apvts.getRawParameterValue (p + "ctl");
-    modP = apvts.getRawParameterValue (p + "mod"); longP = apvts.getRawParameterValue (p + "long");
+    for (int i = 0; i < 3; ++i) lvlP[i] = params.getRawParameterValue (p + "lvl" + juce::String::charToString ((juce::juce_wchar) ('a' + i)));
+    timeP = params.getRawParameterValue (p + "time"); ctlP = params.getRawParameterValue (p + "ctl");
+    modP = params.getRawParameterValue (p + "mod"); longP = params.getRawParameterValue (p + "long");
 }
 
 void M277::prepare (double sampleRate)

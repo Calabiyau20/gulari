@@ -19,7 +19,7 @@ public:
     static constexpr int outPulse (int k) { return 3 * k + 2; }
     static constexpr int kNumIn = 2 * kCh, kNumOut = 3 * kCh;
 
-    M284 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M284 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

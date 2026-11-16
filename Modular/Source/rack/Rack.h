@@ -147,7 +147,8 @@ public:
     ~Rack();
 
     void prepare (double sampleRate);
-    void beginBlock (int numSamples);
+    void beginBlock (int numSamples);    // the control tick: refreshes the mirror (updateParams), then every module
+    void updateParams() noexcept;        // mirror <- APVTS (the tests call it after setting a knob by hand)
     void handleMidi (const juce::MidiMessage& m);
     void tick() noexcept;
     float outL() const noexcept;
@@ -186,6 +187,8 @@ public:
     float jackValue (int inst, int outJack) const noexcept { return outVal[(size_t) inst][(size_t) outJack]; }
     // audio thread: is the slot in the rack as the engine runs it now
     bool isLive (int inst) const noexcept { return live.present[(size_t) inst]; }
+    // what the modules hear of a modulatable knob, by parameter index (the knob itself is in the APVTS)
+    float effective (int param) const noexcept { return eff[(size_t) param].load (std::memory_order_relaxed); }
 
 private:
     struct Patch
@@ -198,6 +201,9 @@ private:
     std::array<std::array<bool, kMaxJacks>, kNumInst> patched {}, outPatched {};
     std::array<int, kNumInst> numIn {};
     Patch live, pending;
+    std::unique_ptr<std::atomic<float>[]> eff;          // see Params; only the modulatable knobs are used
+    std::vector<std::atomic<float>*> raw;                 // the APVTS, by parameter index
+    std::vector<int> mirrored;                            // the modulatable knobs
     juce::SpinLock patchLock;
     std::atomic<bool> patchDirty { false };
     void applyPending() noexcept;

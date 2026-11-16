@@ -4,13 +4,13 @@ namespace wc
 {
 constexpr float M296::kCentre[];
 
-M296::M296 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M296::M296 (const Params& params, const juce::String& p)
 {
-    for (int b = 0; b < kBands; ++b) sliderP[b] = apvts.getRawParameterValue (p + "att" + juce::String (b));
-    decayP = apvts.getRawParameterValue (p + "decay"); freqP = apvts.getRawParameterValue (p + "freq");
-    fcvP = apvts.getRawParameterValue (p + "fcv"); widthP = apvts.getRawParameterValue (p + "width");
-    preEP = apvts.getRawParameterValue (p + "pre_even"); preOP = apvts.getRawParameterValue (p + "pre_odd");
-    trEP = apvts.getRawParameterValue (p + "tr_even"); trOP = apvts.getRawParameterValue (p + "tr_odd");
+    for (int b = 0; b < kBands; ++b) sliderP[b] = params.getRawParameterValue (p + "att" + juce::String (b));
+    decayP = params.getRawParameterValue (p + "decay"); freqP = params.getRawParameterValue (p + "freq");
+    fcvP = params.getRawParameterValue (p + "fcv"); widthP = params.getRawParameterValue (p + "width");
+    preEP = params.getRawParameterValue (p + "pre_even"); preOP = params.getRawParameterValue (p + "pre_odd");
+    trEP = params.getRawParameterValue (p + "tr_even"); trOP = params.getRawParameterValue (p + "tr_odd");
 }
 
 void M296::prepare (double sampleRate)

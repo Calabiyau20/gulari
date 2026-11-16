@@ -270,6 +270,17 @@ std::optional<TypedValue> parseValueText (const juce::RangedAudioParameter& p, c
     return parseFloat (it->second, text, shown);
 }
 
+bool isModulatable (const juce::RangedAudioParameter& p)
+{
+    // levers and selectors jump: only knobs and faders
+    if (dynamic_cast<const APB*> (&p) != nullptr || dynamic_cast<const APC*> (&p) != nullptr) return false;
+    const auto id = p.getParameterID();
+    for (int i = 0; i < kMax666; ++i) if (id.startsWith (prefix666 (i))) return false;   // display settings of the scopes
+    for (auto* e : { "pp_row", "pp_col", "sq_edit", "rg_ring", "rg_cell", "rg_pattern", "rg_cvsel", "rg_layer", "mf_edit", "tm_edit", "tm_node", "sq_set", "sq_setstep" })
+        if (id == e) return false;                                                         // knobs that pick what the panel edits
+    return true;
+}
+
 juce::String valueTextExample (const juce::RangedAudioParameter& p)
 {
     auto labelsHint = [] (const juce::StringArray& l) { return l.size() > 1 ? l[0] + " or " + l[1] : l[0]; };

@@ -2,20 +2,20 @@
 
 namespace wc
 {
-M242::M242 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M242::M242 (const Params& params, const juce::String& p)
 {
     const char rows[3] = { 'a', 'b', 'c' };
     for (int r = 0; r < 3; ++r)
         for (int s = 0; s < kSteps; ++s)
         {
-            cell[r][s] = apvts.getRawParameterValue (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (s + 1));
+            cell[r][s] = params.getRawParameterValue (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (s + 1));
             jassert (cell[r][s] != nullptr);
         }
-    lenP = apvts.getRawParameterValue (p + "len");
-    cvP = apvts.getRawParameterValue (p + "cv");
-    perP = apvts.getRawParameterValue (p + "period");
-    rowP = apvts.getRawParameterValue (p + "row");
-    colP = apvts.getRawParameterValue (p + "col");
+    lenP = params.getRawParameterValue (p + "len");
+    cvP = params.getRawParameterValue (p + "cv");
+    perP = params.getRawParameterValue (p + "period");
+    rowP = params.getRawParameterValue (p + "row");
+    colP = params.getRawParameterValue (p + "col");
 }
 
 void M242::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

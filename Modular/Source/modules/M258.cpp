@@ -2,16 +2,16 @@
 
 namespace wc
 {
-M258::M258 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M258::M258 (const Params& params, const juce::String& p)
 {
     for (int o = 0; o < 2; ++o)
     {
         const juce::String n (o + 1);
-        freqP[o] = apvts.getRawParameterValue (p + "freq" + n);
-        procP[o] = apvts.getRawParameterValue (p + "proc" + n);
-        fmP[o] = apvts.getRawParameterValue (p + "fm" + n);
-        shapeP[o] = apvts.getRawParameterValue (p + "shape" + n);
-        fineP[o] = apvts.getRawParameterValue (p + "fine" + n);
+        freqP[o] = params.getRawParameterValue (p + "freq" + n);
+        procP[o] = params.getRawParameterValue (p + "proc" + n);
+        fmP[o] = params.getRawParameterValue (p + "fm" + n);
+        shapeP[o] = params.getRawParameterValue (p + "shape" + n);
+        fineP[o] = params.getRawParameterValue (p + "fine" + n);
         jassert (freqP[o] && procP[o] && fmP[o] && shapeP[o]);
     }
 }

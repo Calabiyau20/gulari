@@ -2,12 +2,12 @@
 
 namespace wc
 {
-OutputModule::OutputModule (juce::AudioProcessorValueTreeState& apvts)
+OutputModule::OutputModule (const Params& params)
 {
-    level = apvts.getRawParameterValue ("out_level");
-    cvAmt = apvts.getRawParameterValue ("out_cv");
-    lag = apvts.getRawParameterValue ("out_lag");
-    master = apvts.getRawParameterValue ("out_master");
+    level = params.getRawParameterValue ("out_level");
+    cvAmt = params.getRawParameterValue ("out_cv");
+    lag = params.getRawParameterValue ("out_lag");
+    master = params.getRawParameterValue ("out_master");
 }
 
 void OutputModule::prepare (double sampleRate)

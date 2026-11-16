@@ -19,7 +19,7 @@ public:
                Led_Sym, Led_Order, Led_MoGate, Led_PoGate, Led_Count };
     float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
 
-    M259 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M259 (const Params& params, const juce::String& prefix);
 
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;

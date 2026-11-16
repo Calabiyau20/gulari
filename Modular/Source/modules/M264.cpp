@@ -2,15 +2,15 @@
 
 namespace wc
 {
-M264::M264 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M264::M264 (const Params& params, const juce::String& p)
 {
-    for (int c = 0; c < 4; ++c) modeP[c] = apvts.getRawParameterValue (p + "track" + juce::String (c + 1));
-    commonP = apvts.getRawParameterValue (p + "common");
-    voicesP = apvts.getRawParameterValue (p + "voices");
-    offP = apvts.getRawParameterValue (p + "offset");
-    modP = apvts.getRawParameterValue (p + "mod");
-    scaleP = apvts.getRawParameterValue (p + "scale");
-    keyP = apvts.getRawParameterValue (p + "key");
+    for (int c = 0; c < 4; ++c) modeP[c] = params.getRawParameterValue (p + "track" + juce::String (c + 1));
+    commonP = params.getRawParameterValue (p + "common");
+    voicesP = params.getRawParameterValue (p + "voices");
+    offP = params.getRawParameterValue (p + "offset");
+    modP = params.getRawParameterValue (p + "mod");
+    scaleP = params.getRawParameterValue (p + "scale");
+    keyP = params.getRawParameterValue (p + "key");
 }
 
 void M264::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

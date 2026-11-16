@@ -15,7 +15,7 @@ public:
     enum Led { Led_1, Led_2, Led_Count };
     static int inOf (int section, int k) { return section * 4 + k; }   // k: 0 a, 1 b, 2 m, 3 c
 
-    M257 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M257 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override { rampLen = juce::jmax (1, (int) (0.012 * sampleRate)); first = true; }
     void reset() override { first = true; }
     void beginBlock (int numSamples) override;

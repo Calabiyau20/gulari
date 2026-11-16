@@ -2,13 +2,13 @@
 
 namespace wc
 {
-M666::M666 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M666::M666 (const Params& params, const juce::String& p)
 {
-    vaP = apvts.getRawParameterValue (p + "va"); vbP = apvts.getRawParameterValue (p + "vb");
-    hposP = apvts.getRawParameterValue (p + "hpos"); xgP = apvts.getRawParameterValue (p + "xgain");
-    srcP = apvts.getRawParameterValue (p + "src"); lvlP = apvts.getRawParameterValue (p + "level");
-    timeP = apvts.getRawParameterValue (p + "time"); modeP = apvts.getRawParameterValue (p + "mode");
-    coupP = apvts.getRawParameterValue (p + "coupling"); powP = apvts.getRawParameterValue (p + "power");
+    vaP = params.getRawParameterValue (p + "va"); vbP = params.getRawParameterValue (p + "vb");
+    hposP = params.getRawParameterValue (p + "hpos"); xgP = params.getRawParameterValue (p + "xgain");
+    srcP = params.getRawParameterValue (p + "src"); lvlP = params.getRawParameterValue (p + "level");
+    timeP = params.getRawParameterValue (p + "time"); modeP = params.getRawParameterValue (p + "mode");
+    coupP = params.getRawParameterValue (p + "coupling"); powP = params.getRawParameterValue (p + "power");
     jassert (vaP && vbP && hposP && xgP && srcP && lvlP && timeP && modeP && coupP && powP);
 }
 

@@ -23,7 +23,7 @@ public:
     // 0.2.0 indices (TRIG, ATT, DEC per channel) -> current
     static int inFromV2 (int old) { const int n = old / 3, k = old % 3; return n * 4 + (k == 0 ? 0 : k + 1); }
 
-    M281 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M281 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

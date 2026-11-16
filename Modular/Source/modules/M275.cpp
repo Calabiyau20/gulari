@@ -2,14 +2,14 @@
 
 namespace wc
 {
-M275::M275 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M275::M275 (const Params& params, const juce::String& p)
 {
     for (int c = 0; c < 2; ++c)
     {
         const juce::String n (c + 1);
-        trebP[c] = apvts.getRawParameterValue (p + "treb" + n); bassP[c] = apvts.getRawParameterValue (p + "bass" + n);
-        mixP[c] = apvts.getRawParameterValue (p + "mix" + n); recP[c] = apvts.getRawParameterValue (p + "rec" + n);
-        hotP[c] = apvts.getRawParameterValue (p + "hot" + n);
+        trebP[c] = params.getRawParameterValue (p + "treb" + n); bassP[c] = params.getRawParameterValue (p + "bass" + n);
+        mixP[c] = params.getRawParameterValue (p + "mix" + n); recP[c] = params.getRawParameterValue (p + "rec" + n);
+        hotP[c] = params.getRawParameterValue (p + "hot" + n);
         jassert (trebP[c] && bassP[c] && mixP[c] && recP[c] && hotP[c]);
     }
 }

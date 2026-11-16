@@ -2,11 +2,11 @@
 
 namespace wc
 {
-M285::M285 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M285::M285 (const Params& params, const juce::String& p)
 {
-    ctlP = apvts.getRawParameterValue (p + "ctl"); refP = apvts.getRawParameterValue (p + "ref");
-    fmP = apvts.getRawParameterValue (p + "fm"); intP = apvts.getRawParameterValue (p + "int");
-    bmCtlP = apvts.getRawParameterValue (p + "bmctl"); ampP = apvts.getRawParameterValue (p + "amp");
+    ctlP = params.getRawParameterValue (p + "ctl"); refP = params.getRawParameterValue (p + "ref");
+    fmP = params.getRawParameterValue (p + "fm"); intP = params.getRawParameterValue (p + "int");
+    bmCtlP = params.getRawParameterValue (p + "bmctl"); ampP = params.getRawParameterValue (p + "amp");
 }
 
 void M285::prepare (double sampleRate) { fs = (float) sampleRate; rampLen = juce::jmax (1, (int) (0.012f * fs)); reset(); }

@@ -35,33 +35,50 @@ juce::String instName (int inst)
     switch (typeOfInst (inst)) { case MT_218: return "218"; case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_250: return "250"; case MT_252: return "252"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_267: return "267"; case MT_275: return "275"; case MT_284: return "284"; case MT_291: return "291"; case MT_666: return "SC-666 " + juce::String (subIndex (inst) + 1); case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; default: return "259 " + letter; }
 }
 
-Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
+std::atomic<float>* Params::getRawParameterValue (const juce::String& id) const
 {
-    mods[(size_t) kInstMidi] = std::make_unique<MidiInterface> (apvts);
-    mods[(size_t) kInst218] = std::make_unique<M218> (apvts, "kb_");
-    mods[(size_t) kInst242] = std::make_unique<M242> (apvts, "pp_");
-    mods[(size_t) kInst245] = std::make_unique<M245> (apvts, "sv_");
-    mods[(size_t) kInst248] = std::make_unique<M248> (apvts, "mf_");
-    mods[(size_t) kInst250] = std::make_unique<M250> (apvts, "sq_");
-    mods[(size_t) kInst252] = std::make_unique<M252> (apvts, "rg_");
-    mods[(size_t) kInst266] = std::make_unique<M266> (apvts, "ua_");
-    mods[(size_t) kInst230] = std::make_unique<M230> (apvts, "ef_");
-    mods[(size_t) kInst264] = std::make_unique<M264> (apvts, "sh_");
-    mods[(size_t) kInst257] = std::make_unique<M257> (apvts, "vp_");
-    for (int i = 0; i < kMax258; ++i) mods[(size_t) (kInst258 + i)] = std::make_unique<M258> (apvts, prefix258 (i));
-    for (int i = 0; i < kMax281; ++i) mods[(size_t) (kInst281 + i)] = std::make_unique<M281> (apvts, prefix281 (i));
-    for (int i = 0; i < kMax259; ++i) mods[(size_t) (kInst259 + i)] = std::make_unique<M259> (apvts, prefix259 (i));
-    for (int i = 0; i < kMax292; ++i) mods[(size_t) (kInst292 + i)] = std::make_unique<M292> (apvts, prefix292 (i));
-    mods[(size_t) kInst285] = std::make_unique<M285> (apvts, "fs_");
-    mods[(size_t) kInst296] = std::make_unique<M296> (apvts, "sp_");
-    mods[(size_t) kInst277] = std::make_unique<M277> (apvts, "dl_");
-    mods[(size_t) kInst207] = std::make_unique<M207> (apvts, "mx_");
-    mods[(size_t) kInst267] = std::make_unique<M267> (apvts, "us_");
-    mods[(size_t) kInst275] = std::make_unique<M275> (apvts, "rv_");
-    mods[(size_t) kInst284] = std::make_unique<M284> (apvts, "ev_");
-    mods[(size_t) kInst291] = std::make_unique<M291> (apvts, "tm_");
-    for (int i = 0; i < kMax666; ++i) mods[(size_t) (kInst666 + i)] = std::make_unique<M666> (apvts, prefix666 (i));
-    mods[(size_t) kInstOutput] = std::make_unique<OutputModule> (apvts);
+    auto* p = apvts.getParameter (id);
+    if (p == nullptr) return nullptr;
+    return isModulatable (*p) ? eff + p->getParameterIndex() : apvts.getRawParameterValue (id);
+}
+
+Rack::Rack (juce::AudioProcessorValueTreeState& state)
+{
+    const auto& all = state.processor.getParameters();
+    eff.reset (new std::atomic<float>[(size_t) all.size()]);
+    for (auto* prm : all)
+    {
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm);
+        raw.push_back (rp != nullptr ? state.getRawParameterValue (rp->getParameterID()) : nullptr);
+        if (rp != nullptr && isModulatable (*rp)) mirrored.push_back (prm->getParameterIndex());
+    }
+    updateParams();
+    const Params params { state, eff.get() };
+    mods[(size_t) kInstMidi] = std::make_unique<MidiInterface> (params);
+    mods[(size_t) kInst218] = std::make_unique<M218> (params, "kb_");
+    mods[(size_t) kInst242] = std::make_unique<M242> (params, "pp_");
+    mods[(size_t) kInst245] = std::make_unique<M245> (params, "sv_");
+    mods[(size_t) kInst248] = std::make_unique<M248> (params, "mf_");
+    mods[(size_t) kInst250] = std::make_unique<M250> (params, "sq_");
+    mods[(size_t) kInst252] = std::make_unique<M252> (params, "rg_");
+    mods[(size_t) kInst266] = std::make_unique<M266> (params, "ua_");
+    mods[(size_t) kInst230] = std::make_unique<M230> (params, "ef_");
+    mods[(size_t) kInst264] = std::make_unique<M264> (params, "sh_");
+    mods[(size_t) kInst257] = std::make_unique<M257> (params, "vp_");
+    for (int i = 0; i < kMax258; ++i) mods[(size_t) (kInst258 + i)] = std::make_unique<M258> (params, prefix258 (i));
+    for (int i = 0; i < kMax281; ++i) mods[(size_t) (kInst281 + i)] = std::make_unique<M281> (params, prefix281 (i));
+    for (int i = 0; i < kMax259; ++i) mods[(size_t) (kInst259 + i)] = std::make_unique<M259> (params, prefix259 (i));
+    for (int i = 0; i < kMax292; ++i) mods[(size_t) (kInst292 + i)] = std::make_unique<M292> (params, prefix292 (i));
+    mods[(size_t) kInst285] = std::make_unique<M285> (params, "fs_");
+    mods[(size_t) kInst296] = std::make_unique<M296> (params, "sp_");
+    mods[(size_t) kInst277] = std::make_unique<M277> (params, "dl_");
+    mods[(size_t) kInst207] = std::make_unique<M207> (params, "mx_");
+    mods[(size_t) kInst267] = std::make_unique<M267> (params, "us_");
+    mods[(size_t) kInst275] = std::make_unique<M275> (params, "rv_");
+    mods[(size_t) kInst284] = std::make_unique<M284> (params, "ev_");
+    mods[(size_t) kInst291] = std::make_unique<M291> (params, "tm_");
+    for (int i = 0; i < kMax666; ++i) mods[(size_t) (kInst666 + i)] = std::make_unique<M666> (params, prefix666 (i));
+    mods[(size_t) kInstOutput] = std::make_unique<OutputModule> (params);
     for (int i = 0; i < kNumInst; ++i)
     {
         mods[(size_t) i]->patched = patched[(size_t) i].data();
@@ -153,9 +170,15 @@ void Rack::applyPending() noexcept
     patchDirty.store (false);
 }
 
+void Rack::updateParams() noexcept
+{
+    for (int i : mirrored) eff[(size_t) i].store (raw[(size_t) i]->load (std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
 void Rack::beginBlock (int numSamples)
 {
     applyPending();
+    updateParams();
     for (int i = 0; i < kNumInst; ++i)
         if (live.present[(size_t) i]) mods[(size_t) i]->beginBlock (numSamples);
 }

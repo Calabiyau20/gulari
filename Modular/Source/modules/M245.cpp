@@ -2,19 +2,19 @@
 
 namespace wc
 {
-M245::M245 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M245::M245 (const Params& params, const juce::String& p)
 {
     const char rows[4] = { 'a', 'b', 'c', 'd' };
     for (int r = 0; r < 4; ++r)
         for (int s = 0; s < 5; ++s)
         {
-            knob[r][s] = apvts.getRawParameterValue (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (s + 1));
+            knob[r][s] = params.getRawParameterValue (p + juce::String::charToString ((juce::juce_wchar) rows[r]) + juce::String (s + 1));
             jassert (knob[r][s] != nullptr);
         }
-    for (int i = 0; i < 4; ++i) sw[i] = apvts.getRawParameterValue (p + "sw" + juce::String (i + 1));
-    lenP = apvts.getRawParameterValue (p + "len");
-    tcvP = apvts.getRawParameterValue (p + "tcv");
-    timeP = apvts.getRawParameterValue (p + "time");
+    for (int i = 0; i < 4; ++i) sw[i] = params.getRawParameterValue (p + "sw" + juce::String (i + 1));
+    lenP = params.getRawParameterValue (p + "len");
+    tcvP = params.getRawParameterValue (p + "tcv");
+    timeP = params.getRawParameterValue (p + "time");
 }
 
 void M245::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

@@ -30,5 +30,9 @@ struct TypedValue
     int limited = 0;      // -1 / +1: the text asked for less than the minimum / more than the maximum
 };
 std::optional<TypedValue> parseValueText (const juce::RangedAudioParameter&, const juce::String& text, const juce::String& shown = {});
-juce::String valueTextExample (const juce::RangedAudioParameter&);   // what to suggest when the text was not understood: "440 Hz or 1.2k"
+juce::String valueTextExample (const juce::RangedAudioParameter&);
+
+// Can an output jack modulate this knob (modulation by drag)? Not levers and selectors (bool and choice), not the
+// knobs that pick what a panel edits, not the scopes. The one rule: the rack, the processor and the editor all ask here.
+bool isModulatable (const juce::RangedAudioParameter&);   // what to suggest when the text was not understood: "440 Hz or 1.2k"
 } // namespace wc

@@ -15,7 +15,7 @@ public:
     enum Out { Out_Env1, Out_Env2, Out_Env3, Out_Pulse1, Out_Pulse2, Out_Pulse3, Out_EnvB1, Out_EnvB2, Out_EnvB3, Out_Count };   // two c.v. outs per channel
     enum Led { Led_Env1, Led_Env2, Led_Env3, Led_Pulse1, Led_Pulse2, Led_Pulse3, Led_Count };
 
-    M230 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M230 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

@@ -2,20 +2,20 @@
 
 namespace wc
 {
-M281::M281 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M281::M281 (const Params& params, const juce::String& p)
 {
     for (int n = 0; n < 4; ++n)
     {
         const juce::String s (n + 1);
-        att[n] = apvts.getRawParameterValue (p + "att" + s);
-        dec[n] = apvts.getRawParameterValue (p + "dec" + s);
-        mode[n] = apvts.getRawParameterValue (p + "mode" + s);
+        att[n] = params.getRawParameterValue (p + "att" + s);
+        dec[n] = params.getRawParameterValue (p + "dec" + s);
+        mode[n] = params.getRawParameterValue (p + "mode" + s);
         jassert (att[n] != nullptr && dec[n] != nullptr && mode[n] != nullptr);
     }
-    quad[0] = apvts.getRawParameterValue (p + "quad12");
-    quad[1] = apvts.getRawParameterValue (p + "quad34");
-    mix[0] = apvts.getRawParameterValue (p + "mix12");
-    mix[1] = apvts.getRawParameterValue (p + "mix34");
+    quad[0] = params.getRawParameterValue (p + "quad12");
+    quad[1] = params.getRawParameterValue (p + "quad34");
+    mix[0] = params.getRawParameterValue (p + "mix12");
+    mix[1] = params.getRawParameterValue (p + "mix34");
 }
 
 void M281::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

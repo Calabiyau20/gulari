@@ -2,13 +2,13 @@
 
 namespace wc
 {
-M266::M266 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M266::M266 (const Params& params, const juce::String& p)
 {
-    rateP = apvts.getRawParameterValue (p + "rate");
-    rate2P = apvts.getRawParameterValue (p + "rate2");
-    smoothP = apvts.getRawParameterValue (p + "smooth");
-    stepsP = apvts.getRawParameterValue (p + "steps");
-    distP = apvts.getRawParameterValue (p + "dist");
+    rateP = params.getRawParameterValue (p + "rate");
+    rate2P = params.getRawParameterValue (p + "rate2");
+    smoothP = params.getRawParameterValue (p + "smooth");
+    stepsP = params.getRawParameterValue (p + "steps");
+    distP = params.getRawParameterValue (p + "dist");
     jassert (rateP && rate2P && smoothP && stepsP && distP);
 }
 

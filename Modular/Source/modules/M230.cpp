@@ -2,15 +2,15 @@
 
 namespace wc
 {
-M230::M230 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M230::M230 (const Params& params, const juce::String& p)
 {
     for (int c = 0; c < 3; ++c)
     {
         const juce::String n (c + 1);
-        sensP[c] = apvts.getRawParameterValue (p + "sens" + n);
-        decP[c] = apvts.getRawParameterValue (p + "decay" + n);
-        thrP[c] = apvts.getRawParameterValue (p + "thr" + n);
-        modeP[c] = apvts.getRawParameterValue (p + "mode" + n);
+        sensP[c] = params.getRawParameterValue (p + "sens" + n);
+        decP[c] = params.getRawParameterValue (p + "decay" + n);
+        thrP[c] = params.getRawParameterValue (p + "thr" + n);
+        modeP[c] = params.getRawParameterValue (p + "mode" + n);
         jassert (sensP[c] && decP[c] && thrP[c] && modeP[c]);
     }
 }

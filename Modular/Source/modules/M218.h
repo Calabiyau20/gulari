@@ -19,7 +19,7 @@ public:
     enum Out { Out_Pulse, Out_Pressure, Out_Pitch, Out_Strip, Out_StripPulse, Out_Preset, Out_PresetPulse, Out_Count };
     enum Led { Led_Pulse, Led_Pad0 = 10, Led_Key0 = 20, Led_Strip0 = 60, Led_Count = 80 };
 
-    M218 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M218 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

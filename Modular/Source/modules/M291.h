@@ -23,7 +23,7 @@ public:
     //       30..35 amplitude ring, 40..45 bandwidth ring, 50..57 frequency ring, 60..65 index ring
     float led (int id) const noexcept override;
 
-    M291 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M291 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

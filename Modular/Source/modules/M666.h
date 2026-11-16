@@ -27,7 +27,7 @@ public:
         bool xy = false, dual = true;
     };
 
-    M666 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M666 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

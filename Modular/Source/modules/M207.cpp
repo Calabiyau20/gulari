@@ -2,19 +2,19 @@
 
 namespace wc
 {
-M207::M207 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M207::M207 (const Params& params, const juce::String& p)
 {
     for (int c = 0; c < 6; ++c)
     {
         const juce::String ch = juce::String::charToString ((juce::juce_wchar) ('a' + c));
-        lvlP[c] = apvts.getRawParameterValue (p + "lvl_" + ch);
-        progP[c] = apvts.getRawParameterValue (p + "prog_" + ch);
-        monP[c] = apvts.getRawParameterValue (p + "mon_" + ch);
+        lvlP[c] = params.getRawParameterValue (p + "lvl_" + ch);
+        progP[c] = params.getRawParameterValue (p + "prog_" + ch);
+        monP[c] = params.getRawParameterValue (p + "mon_" + ch);
         jassert (lvlP[c] && progP[c] && monP[c]);
     }
-    for (int k = 0; k < 4; ++k) panP[k] = apvts.getRawParameterValue (p + "pan" + juce::String (k + 1));
-    gainP = apvts.getRawParameterValue (p + "gain");
-    rangeP = apvts.getRawParameterValue (p + "range");
+    for (int k = 0; k < 4; ++k) panP[k] = params.getRawParameterValue (p + "pan" + juce::String (k + 1));
+    gainP = params.getRawParameterValue (p + "gain");
+    rangeP = params.getRawParameterValue (p + "range");
 }
 
 void M207::prepare (double sampleRate)

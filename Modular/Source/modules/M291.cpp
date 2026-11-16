@@ -4,7 +4,7 @@ namespace wc
 {
 static const char* kNode291[3] = { "a", "b", "c" };
 
-M291::M291 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M291::M291 (const Params& params, const juce::String& p)
 {
     for (int s = 0; s < kStages; ++s)
     {
@@ -12,17 +12,17 @@ M291::M291 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
         for (int n = 0; n < kNodes; ++n)
         {
             const juce::String suf = sn + "_" + kNode291[n];
-            fP[s][n] = apvts.getRawParameterValue (p + "f_" + suf);
-            bwP[s][n] = apvts.getRawParameterValue (p + "bw_" + suf);
-            ampP[s][n] = apvts.getRawParameterValue (p + "amp_" + suf);
+            fP[s][n] = params.getRawParameterValue (p + "f_" + suf);
+            bwP[s][n] = params.getRawParameterValue (p + "bw_" + suf);
+            ampP[s][n] = params.getRawParameterValue (p + "amp_" + suf);
             jassert (fP[s][n] && bwP[s][n] && ampP[s][n]);
         }
-        timeP[s] = apvts.getRawParameterValue (p + "time_" + sn);
+        timeP[s] = params.getRawParameterValue (p + "time_" + sn);
     }
-    nodeP = apvts.getRawParameterValue (p + "node"); editP = apvts.getRawParameterValue (p + "edit");
-    playP = apvts.getRawParameterValue (p + "play"); indexP = apvts.getRawParameterValue (p + "index");
-    modP = apvts.getRawParameterValue (p + "modtype"); soloP = apvts.getRawParameterValue (p + "solo");
-    remP = apvts.getRawParameterValue (p + "remote");
+    nodeP = params.getRawParameterValue (p + "node"); editP = params.getRawParameterValue (p + "edit");
+    playP = params.getRawParameterValue (p + "play"); indexP = params.getRawParameterValue (p + "index");
+    modP = params.getRawParameterValue (p + "modtype"); soloP = params.getRawParameterValue (p + "solo");
+    remP = params.getRawParameterValue (p + "remote");
 }
 
 void M291::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

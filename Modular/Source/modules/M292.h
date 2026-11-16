@@ -35,7 +35,7 @@ public:
     static int outSig (int n) { return n; }
     static constexpr int outAll = 4;     // 4-to-1 mix of the four outputs
 
-    M292 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M292 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

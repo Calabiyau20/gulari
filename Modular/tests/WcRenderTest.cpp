@@ -42,6 +42,7 @@ static constexpr double SR = 48000.0;
 static void setP (WcProcessor& p, const juce::String& id, float v)
 {
     if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v));
+    p.rack.updateParams();   // many checks drive a module's beginBlock by hand: its knobs come from the rack's mirror
 }
 
 // Two texts of the same parameter that show the same value: "1.00 s" and "1000 ms" are both one second, within

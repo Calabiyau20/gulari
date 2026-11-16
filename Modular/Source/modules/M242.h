@@ -17,7 +17,7 @@ public:
     enum Led { Led_Stop = 0, Led_Start = 1, Led_Matrix = 100 };   // matrix: 100 + row * 12 + column, rows n, A, B, C
     static constexpr int kSteps = 12;
 
-    M242 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M242 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

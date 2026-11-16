@@ -2,11 +2,11 @@
 
 namespace wc
 {
-MidiInterface::MidiInterface (juce::AudioProcessorValueTreeState& apvts)
+MidiInterface::MidiInterface (const Params& params)
 {
-    glide = apvts.getRawParameterValue ("midi_glide");
-    bendRange = apvts.getRawParameterValue ("midi_bend");
-    transpose = apvts.getRawParameterValue ("midi_trans");
+    glide = params.getRawParameterValue ("midi_glide");
+    bendRange = params.getRawParameterValue ("midi_bend");
+    transpose = params.getRawParameterValue ("midi_trans");
 }
 
 void MidiInterface::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

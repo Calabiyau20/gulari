@@ -18,7 +18,7 @@ public:
     static float quantize (float v, int scale, int key) noexcept;
     enum Led { Led_1, Led_2, Led_3, Led_4, Led_Count };
 
-    M264 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M264 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

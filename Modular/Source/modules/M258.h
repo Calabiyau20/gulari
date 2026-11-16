@@ -14,7 +14,7 @@ public:
     enum Out { Out_1, Out_2, Out_1b, Out_2b, Out_Count };   // two (multiple) outputs per oscillator
     static int inOf (int osc, int k) { return osc * 4 + k; }    // k: 0 kbd, 1 processing, 2 f.m., 3 waveshape c.v.
 
-    M258 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M258 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

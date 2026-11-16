@@ -2,17 +2,17 @@
 
 namespace wc
 {
-M267::M267 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M267::M267 (const Params& params, const juce::String& p)
 {
     const char* ab[2] = { "a", "b" };
     for (int i = 0; i < 2; ++i)
     {
-        rateP[i] = apvts.getRawParameterValue (p + "rate" + ab[i]); randP[i] = apvts.getRawParameterValue (p + "rand" + ab[i]);
-        freqP[i] = apvts.getRawParameterValue (p + "freq" + ab[i]); bwP[i] = apvts.getRawParameterValue (p + "bw" + ab[i]);
-        idxP[i] = apvts.getRawParameterValue (p + "idx" + ab[i]); modP[i] = apvts.getRawParameterValue (p + "mod" + ab[i]);
+        rateP[i] = params.getRawParameterValue (p + "rate" + ab[i]); randP[i] = params.getRawParameterValue (p + "rand" + ab[i]);
+        freqP[i] = params.getRawParameterValue (p + "freq" + ab[i]); bwP[i] = params.getRawParameterValue (p + "bw" + ab[i]);
+        idxP[i] = params.getRawParameterValue (p + "idx" + ab[i]); modP[i] = params.getRawParameterValue (p + "mod" + ab[i]);
         jassert (rateP[i] && randP[i] && freqP[i] && bwP[i] && idxP[i] && modP[i]);
     }
-    remP = apvts.getRawParameterValue (p + "remote");
+    remP = params.getRawParameterValue (p + "remote");
     white.seed (0x2671u); chance.seed (0xc0ffeeu);
 }
 

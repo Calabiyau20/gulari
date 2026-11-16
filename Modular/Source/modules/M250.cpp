@@ -5,20 +5,20 @@ namespace wc
 {
 static const char* kF[12] = { "p1", "p2", "tq", "ti", "vq", "vi", "trng", "vrng", "mode", "text", "vext", "fix" };
 
-M250::M250 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M250::M250 (const Params& params, const juce::String& p)
 {
     for (int s = 0; s < kStages; ++s)
     {
         const juce::String n (s + 1);
-        vP[0][s] = apvts.getRawParameterValue (p + "v1_" + n); vP[1][s] = apvts.getRawParameterValue (p + "v2_" + n);
-        tP[s] = apvts.getRawParameterValue (p + "t_" + n);
-        for (int k = 0; k < F_Count; ++k) { fP[k][s] = apvts.getRawParameterValue (p + kF[k] + "_" + n); jassert (fP[k][s] != nullptr); }
+        vP[0][s] = params.getRawParameterValue (p + "v1_" + n); vP[1][s] = params.getRawParameterValue (p + "v2_" + n);
+        tP[s] = params.getRawParameterValue (p + "t_" + n);
+        for (int k = 0; k < F_Count; ++k) { fP[k][s] = params.getRawParameterValue (p + kF[k] + "_" + n); jassert (fP[k][s] != nullptr); }
     }
-    multP = apvts.getRawParameterValue (p + "mult"); mcvP = apvts.getRawParameterValue (p + "mcv");
-    addrP = apvts.getRawParameterValue (p + "addr"); offP = apvts.getRawParameterValue (p + "offset");
-    lEndP = apvts.getRawParameterValue (p + "loopend"); lToP = apvts.getRawParameterValue (p + "loopto"); lCntP = apvts.getRawParameterValue (p + "loops");
-    editModeP = apvts.getRawParameterValue (p + "editmode");
-    editP = apvts.getRawParameterValue (p + "edit"); setP = apvts.getRawParameterValue (p + "set"); remP = apvts.getRawParameterValue (p + "remote");
+    multP = params.getRawParameterValue (p + "mult"); mcvP = params.getRawParameterValue (p + "mcv");
+    addrP = params.getRawParameterValue (p + "addr"); offP = params.getRawParameterValue (p + "offset");
+    lEndP = params.getRawParameterValue (p + "loopend"); lToP = params.getRawParameterValue (p + "loopto"); lCntP = params.getRawParameterValue (p + "loops");
+    editModeP = params.getRawParameterValue (p + "editmode");
+    editP = params.getRawParameterValue (p + "edit"); setP = params.getRawParameterValue (p + "set"); remP = params.getRawParameterValue (p + "remote");
 }
 
 void M250::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

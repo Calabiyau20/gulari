@@ -71,6 +71,16 @@ struct ModuleSpec
 
 const ModuleSpec& specFor (ModuleType t);
 
+// Where a module reads its parameters from, by id (the constructors keep the pointer). A knob that can be modulated
+// is read from the rack's mirror: the knob plus its modulation, refreshed on every control tick. The rest is read
+// straight from the APVTS, which only ever holds what the knob shows.
+struct Params
+{
+    juce::AudioProcessorValueTreeState& apvts;
+    std::atomic<float>* eff;   // the mirror, by parameter index (Rack)
+    std::atomic<float>* getRawParameterValue (const juce::String& id) const;
+};
+
 class Module
 {
 public:

@@ -4,13 +4,13 @@ namespace wc
 {
 static const char* k284[5] = { "del", "att", "dur", "dec", "ctl" };
 
-M284::M284 (juce::AudioProcessorValueTreeState& apvts, const juce::String& pre)
+M284::M284 (const Params& params, const juce::String& pre)
 {
     for (int k = 0; k < kCh; ++k)
     {
         const juce::String n (k + 1);
-        for (int f = 0; f < 5; ++f) { p[f][k] = apvts.getRawParameterValue (pre + k284[f] + n); jassert (p[f][k] != nullptr); }
-        susRaw[k] = apvts.getRawParameterValue (pre + "sus" + n);
+        for (int f = 0; f < 5; ++f) { p[f][k] = params.getRawParameterValue (pre + k284[f] + n); jassert (p[f][k] != nullptr); }
+        susRaw[k] = params.getRawParameterValue (pre + "sus" + n);
     }
 }
 

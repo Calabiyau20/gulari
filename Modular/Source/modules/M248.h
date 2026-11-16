@@ -32,7 +32,7 @@ public:
     // 200 + fn*8 + value: programming LED of the edit stage; 300 + i: number buttons, 320 load, 321 save, 322 scale, 323 key
     float led (int id) const noexcept override;
 
-    M248 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M248 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

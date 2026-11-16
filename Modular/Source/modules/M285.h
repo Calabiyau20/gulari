@@ -40,7 +40,7 @@ public:
     enum In { In_FsControl, In_FsRef, In_FsSignal, In_FsMod, In_BmControl, In_BmSignal, In_BmRef, In_Count };
     enum Out { Out_Diff, Out_Diff2, Out_Sum, Out_Sum2, Out_Ring, Out_Ring2, Out_Var, Out_Var2, Out_Count };
 
-    M285 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M285 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

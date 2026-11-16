@@ -2,12 +2,12 @@
 
 namespace wc
 {
-M218::M218 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M218::M218 (const Params& params, const juce::String& p)
 {
-    portaP = apvts.getRawParameterValue (p + "porta"); arpP = apvts.getRawParameterValue (p + "arp");
-    rateP = apvts.getRawParameterValue (p + "rate"); addP = apvts.getRawParameterValue (p + "add");
-    for (int i = 0; i < 4; ++i) presetP[i] = apvts.getRawParameterValue (p + "preset" + juce::String (i + 1));
-    selP = apvts.getRawParameterValue (p + "sel");
+    portaP = params.getRawParameterValue (p + "porta"); arpP = params.getRawParameterValue (p + "arp");
+    rateP = params.getRawParameterValue (p + "rate"); addP = params.getRawParameterValue (p + "add");
+    for (int i = 0; i < 4; ++i) presetP[i] = params.getRawParameterValue (p + "preset" + juce::String (i + 1));
+    selP = params.getRawParameterValue (p + "sel");
 }
 
 void M218::prepare (double sampleRate)

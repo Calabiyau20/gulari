@@ -11,7 +11,7 @@ class MidiInterface : public Module
 public:
     enum Out { Out_Pitch, Out_Gate, Out_Pulse, Out_Vel, Out_Press, Out_Mod, Out_Bend, Out_Pitch2, Out_Count };
 
-    explicit MidiInterface (juce::AudioProcessorValueTreeState& apvts);
+    explicit MidiInterface (const Params& params);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

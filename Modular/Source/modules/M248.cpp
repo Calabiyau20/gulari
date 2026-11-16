@@ -9,23 +9,23 @@ const char* M248::fnName (int f)
     return n[f];
 }
 
-M248::M248 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p) : state (apvts), pre (p)
+M248::M248 (const Params& params, const juce::String& p) : state (params.apvts), pre (p)
 {
     for (int s = 0; s < kStages; ++s)
     {
         const juce::String n (s + 1);
-        lvlP[s] = apvts.getRawParameterValue (p + "lvl" + n);
-        timP[s] = apvts.getRawParameterValue (p + "tim" + n);
-        for (int f = 0; f < F_Count; ++f) { fnP[f][s] = apvts.getRawParameterValue (p + fnName (f) + "_" + n); jassert (fnP[f][s] != nullptr); }
+        lvlP[s] = params.getRawParameterValue (p + "lvl" + n);
+        timP[s] = params.getRawParameterValue (p + "tim" + n);
+        for (int f = 0; f < F_Count; ++f) { fnP[f][s] = params.getRawParameterValue (p + fnName (f) + "_" + n); jassert (fnP[f][s] != nullptr); }
     }
     for (int k = 0; k < 2; ++k)
     {
         const juce::String n (k + 1);
-        multP[k] = apvts.getRawParameterValue (p + "mult" + n); mcvP[k] = apvts.getRawParameterValue (p + "mcv" + n);
-        addrP[k] = apvts.getRawParameterValue (p + "addr" + n); contP[k] = apvts.getRawParameterValue (p + "cont" + n);
-        extP[k] = apvts.getRawParameterValue (p + "ext" + n); artP[k] = apvts.getRawParameterValue (p + "art" + n);
+        multP[k] = params.getRawParameterValue (p + "mult" + n); mcvP[k] = params.getRawParameterValue (p + "mcv" + n);
+        addrP[k] = params.getRawParameterValue (p + "addr" + n); contP[k] = params.getRawParameterValue (p + "cont" + n);
+        extP[k] = params.getRawParameterValue (p + "ext" + n); artP[k] = params.getRawParameterValue (p + "art" + n);
     }
-    editP = apvts.getRawParameterValue (p + "edit"); keyP = apvts.getRawParameterValue (p + "key"); scaleP = apvts.getRawParameterValue (p + "scale");
+    editP = params.getRawParameterValue (p + "edit"); keyP = params.getRawParameterValue (p + "key"); scaleP = params.getRawParameterValue (p + "scale");
 }
 
 void M248::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }

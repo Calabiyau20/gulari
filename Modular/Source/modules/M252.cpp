@@ -4,17 +4,17 @@ namespace wc
 {
 constexpr int M252::kSize[];
 
-M252::M252 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
+M252::M252 (const Params& params, const juce::String& p)
 {
-    bpmP = apvts.getRawParameterValue (p + "bpm"); pdurP = apvts.getRawParameterValue (p + "pdur");
-    syncP = apvts.getRawParameterValue (p + "sync"); playP = apvts.getRawParameterValue (p + "play");
+    bpmP = params.getRawParameterValue (p + "bpm"); pdurP = params.getRawParameterValue (p + "pdur");
+    syncP = params.getRawParameterValue (p + "sync"); playP = params.getRawParameterValue (p + "play");
     for (int k = 0; k < 3; ++k)
     {
         const juce::String n (k + 1);
-        clkP[k] = apvts.getRawParameterValue (p + "clk" + n); dtP[k] = apvts.getRawParameterValue (p + "dt" + n); dtsP[k] = apvts.getRawParameterValue (p + "dts" + n);
+        clkP[k] = params.getRawParameterValue (p + "clk" + n); dtP[k] = params.getRawParameterValue (p + "dt" + n); dtsP[k] = params.getRawParameterValue (p + "dts" + n);
     }
-    layerP = apvts.getRawParameterValue (p + "layer"); euclidP = apvts.getRawParameterValue (p + "euclid");
-    editP = apvts.getRawParameterValue (p + "edit"); remP = apvts.getRawParameterValue (p + "remote");
+    layerP = params.getRawParameterValue (p + "layer"); euclidP = params.getRawParameterValue (p + "euclid");
+    editP = params.getRawParameterValue (p + "edit"); remP = params.getRawParameterValue (p + "remote");
     clearAll();
 }
 

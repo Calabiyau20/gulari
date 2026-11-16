@@ -11,7 +11,7 @@ class OutputModule : public Module
 public:
     enum In { In_Left, In_Right, In_LevelCv, In_Count };
 
-    explicit OutputModule (juce::AudioProcessorValueTreeState& apvts);
+    explicit OutputModule (const Params& params);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;

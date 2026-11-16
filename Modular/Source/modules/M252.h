@@ -21,7 +21,7 @@ public:
     enum In { In_Clk1Cv, In_Clk1Pulse, In_Clk2Cv, In_Clk2Pulse, In_Clk3Cv, In_Clk3Pulse, In_Count };
     enum Out { Out_R, Out_G, Out_B, Out_Sub, Out_Cell1, Out_Cv1, Out_Cv2, Out_Cv3, Out_Cv4, Out_Cv5, Out_Cv6, Out_Count };
 
-    M252 (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix);
+    M252 (const Params& params, const juce::String& prefix);
     void prepare (double sampleRate) override;
     void beginBlock (int numSamples) override;
     void tick (const float* in, float* out) noexcept override;
