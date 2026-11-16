@@ -68,6 +68,8 @@ void WcProcessor::prepareToPlay (double sampleRate, int)
 {
     rack.prepare (sampleRate);
     keyboardState.reset();
+    tickLen = juce::jmax (1, juce::roundToInt (32.0 * sampleRate / 48000.0));
+    tickLeft = 0;
 }
 
 void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -78,14 +80,16 @@ void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         if (auto pos = ph->getPosition())
             if (auto bpm = pos->getBpm()) rack.m250()->hostBpm.store (*bpm, std::memory_order_relaxed);
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
-    rack.beginBlock (n);
     auto* L = buffer.getWritePointer (0);
     auto* R = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
     auto it = midi.cbegin();
     for (int i = 0; i < n; ++i)
     {
-        // MIDI goes in at its sample position; a learned CC writes its parameter, which the modules read in
-        // beginBlock: it is heard from the next block on
+        // the control tick: the modules read their knobs every 32 samples at 48 kHz (0.67 ms), counted across host
+        // blocks, so what they hear does not depend on the host's buffer size
+        if (--tickLeft < 0) { rack.beginBlock (tickLen); tickLeft = tickLen - 1; }
+        // MIDI goes in at its sample position; a learned CC writes its parameter, which the modules read on the
+        // control tick: it is heard from the next one on
         while (it != midi.cend() && (*it).samplePosition <= i)
         {
             const auto msg = (*it).getMessage();

@@ -1512,6 +1512,45 @@ int main (int argc, char** argv)
         if (! good) ok = false;
     }
 
+    // ---- the control tick: the knobs are read every 32 samples whatever the host's buffer ----
+    // A learned CC sweeps 259 A Timbre every 100 samples, at its sample position: the same second of audio comes out
+    // bit for bit at buffers of 32, 333, 512 and 2048. With the knobs read once per host buffer it changed with it.
+    {
+        auto render = [] (int blk)
+        {
+            WcProcessor p;
+            p.prepareToPlay (SR, blk);
+            p.loadBuiltinPatch (0);
+            p.assignCc (20, "a_timbre");
+            std::vector<float> out;
+            for (int s = 0; s < (int) SR; s += blk)
+            {
+                juce::AudioBuffer<float> buf (2, blk);
+                juce::MidiBuffer midi;
+                if (s == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 100), 0);
+                for (int i = 0; i < blk; ++i)
+                    if ((s + i) % 100 == 0) midi.addEvent (juce::MidiMessage::controllerEvent (1, 20, ((s + i) / 100) % 128), i);
+                p.processBlock (buf, midi);
+                for (int i = 0; i < blk; ++i) out.push_back (buf.getSample (0, i));
+            }
+            out.resize ((size_t) SR);
+            return out;
+        };
+        const auto ref = render (32);
+        juce::String res;
+        bool good = true;
+        for (int blk : { 333, 512, 2048 })
+        {
+            const auto x = render (blk);
+            int diff = 0;
+            for (size_t i = 0; i < ref.size(); ++i) diff += x[i] != ref[i] ? 1 : 0;
+            res << " " << blk << ": " << diff;
+            good = good && diff == 0;
+        }
+        std::printf ("CONTROL TICK: samples that differ from buffers of 32 (want 0) -%s %s\n", res.toRawUTF8(), good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
     // ---- rows on screen: LAYOUT comes back as it went, a hand-edited one is cleaned up, every state carries one ----
     {
         auto text = [] (const WcProcessor& p)

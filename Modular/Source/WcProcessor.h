@@ -131,6 +131,7 @@ private:
     std::vector<std::atomic<juce::uint64>> midiPending;       // one bit per parameter a CC moved (audio sets, timer takes)
     std::vector<juce::uint32> midiGesture;                    // ms of the last CC of an open gesture, 0: none
     int lastCcIn = -1;                                        // audio thread: the learnable CC before this one
+    int tickLen = 32, tickLeft = 0;                           // audio thread: the control tick (see processBlock)
     void syncMidiMovesToTree (bool take);
     void timerCallback() override { flushMidiMoves(); }
     bool applyMidiMap (const juce::MidiMessage&) noexcept;    // audio thread; true: the CC was taken
