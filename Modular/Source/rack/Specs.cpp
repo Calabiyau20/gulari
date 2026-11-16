@@ -137,7 +137,7 @@ static ModuleSpec make259()
         L (4, 22, 618, 22), L (4, 392, 618, 392),
         L (150, 22, 150, 92), L (200, 22, 200, 392), L (270, 22, 270, 392), L (400, 22, 400, 92), L (455, 22, 455, 392), L (560, 22, 560, 392),
         L (4, 92, 200, 92), L (270, 92, 455, 92), L (4, 150, 200, 150), L (270, 150, 455, 150),
-        L (105, 92, 105, 150), L (335, 92, 335, 150), L (455, 250, 560, 250), L (200, 196, 270, 196),
+        L (105, 92, 105, 150), L (455, 250, 560, 250), L (200, 196, 270, 196),
         L (255, 34, 215, 34, 1.4f, false, true),                    // the arrow in the modulation column
         L (370, 124, 405, 124, 1.2f),                                // phase lock input -> gain
     };
@@ -607,7 +607,7 @@ static ModuleSpec make258()
     for (int o = 0; o < 2; ++o)
     {
         const float y = yb[o] + 70;
-        s.jacks.push_back (JT ("", K::Banana, false, 375, y, kTintGrey));   // kbd (1V/OCT)
+        s.jacks.push_back (JT ("", K::Banana, false, 375, y, kTintGrey));   // kbd input (1,2 V/oct)
         s.jacks.push_back (J ("", K::Banana, false, 85, y));                // processing
         s.jacks.push_back (J ("", K::Mini, false, 185, y));                 // f.m.
         s.jacks.push_back (J ("", K::Banana, false, 280, y));               // waveshape c.v.
@@ -626,7 +626,7 @@ static ModuleSpec make258()
         s.controls.push_back (C (pr[o], "", CtrlStyle::Knob, 85, y + 345, kSkirt));
         s.controls.push_back (C (sh[o], "", CtrlStyle::Knob, 280, y + 365, kSkirt));
         s.controls.push_back (C (fr[o], "", CtrlStyle::BigKnob, 552, y + 345, kSkirt, "5cps|*|*|*|*|*|20kc"));
-        s.texts.push_back (T ("INPUTS", 185, y + 25, 10.0f, 1)); s.texts.push_back (T ("1V/OCT", 375, y + 25, 10.0f, 1)); s.texts.push_back (T ("OUTPUTS", 540, y + 25, 10.0f, 1));
+        s.texts.push_back (T ("INPUTS", 185, y + 25, 10.0f, 1)); s.texts.push_back (T ("kbd input", 375, y + 25, 9.0f)); s.texts.push_back (T ("OUTPUTS", 540, y + 25, 10.0f, 1));
         s.lines.push_back (L (512, y + 70, 568, y + 70, 1.4f));
         s.lines.push_back (L (8, y + 120, 667, y + 120));
         s.lines.push_back (L (85, y + 95, 85, y + 280, 1.4f)); s.lines.push_back (L (185, y + 95, 185, y + 140, 1.4f)); s.lines.push_back (L (280, y + 95, 280, y + 300, 1.4f));
