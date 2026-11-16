@@ -1780,7 +1780,44 @@ static ModuleSpec makeOutput()
 
 // ---------------------------------------------------------------------------------------------
 // LF-111 Classic LFO - a Calabi Yau original, drawn at panel size (384 x 430, no scaleSpec).
+// Columns: TIME (x 4-192) | WAVEFORM (x 192-380); band below (y 294-400): LEVEL | OUTPUTS.
+// Lit buttons = a Button picking one value ("=k") + LED above it + caption / icon above the LED (button y = caption y + 34).
 // ---------------------------------------------------------------------------------------------
+static void iconRamp (ModuleSpec& s, float x, float y) { s.lines.push_back (L (x - 8, y - 4, x - 8, y + 4, 1.2f)); s.lines.push_back (L (x - 8, y - 4, x, y + 4, 1.2f)); s.lines.push_back (L (x, y + 4, x, y - 4, 1.2f)); s.lines.push_back (L (x, y - 4, x + 8, y + 4, 1.2f)); }
+static void iconStep (ModuleSpec& s, float x, float y)   // stepped random (S&H): four 4.5-unit steps
+{
+    const float v[4] = { 2, -4, 4, -1 };
+    for (int i = 0; i < 4; ++i)
+    {
+        const float x0 = x - 9 + 4.5f * (float) i;
+        s.lines.push_back (L (x0, y + v[i], x0 + 4.5f, y + v[i], 1.2f));
+        if (i > 0) s.lines.push_back (L (x0, y + v[i - 1], x0, y + v[i], 1.2f));
+    }
+}
+static void iconSmooth (ModuleSpec& s, float x, float y)   // smooth random: cosine between five uneven levels
+{
+    const float v[5] = { 3, -4, 2, -1, 4 };
+    float px = x - 9, py = y + v[0];
+    for (int k = 1; k <= 12; ++k)
+    {
+        const int seg = (k - 1) / 3;
+        const float f = (float) ((k - 1) % 3 + 1) / 3.0f;
+        const float nx = x - 9 + 1.5f * (float) k, ny = y + v[seg] + (v[seg + 1] - v[seg]) * 0.5f * (1.0f - std::cos (3.14159265f * f));
+        s.lines.push_back (L (px, py, nx, ny, 1.2f)); px = nx; py = ny;
+    }
+}
+static void iconWalk (ModuleSpec& s, float x, float y)   // random walk: uneven 2-unit zigzag drifting up
+{
+    const float v[10] = { 4, 1, 3, -1, 1, -2.5f, 0, -4, -2, -3 };
+    for (int i = 1; i < 10; ++i) s.lines.push_back (L (x - 9 + 2.0f * (float) (i - 1), y + v[i - 1], x - 9 + 2.0f * (float) i, y + v[i], 1.2f));
+}
+static void iconNote (ModuleSpec& s, float x, float y, bool dotted)   // quarter note: no note glyph in Montserrat
+{
+    s.lines.push_back (L (x - 3.2f, y + 4.4f, x + 1.0f, y + 2.6f, 3.2f));   // head
+    s.lines.push_back (L (x + 1.0f, y + 3.4f, x + 1.0f, y - 5.0f, 1.2f));   // stem
+    if (dotted) s.lines.push_back (L (x + 3.6f, y + 3.6f, x + 5.4f, y + 3.6f, 1.8f));
+}
+
 static ModuleSpec make111()
 {
     using K = JackKind;
@@ -1798,7 +1835,60 @@ static ModuleSpec make111()
         J ("inv out", K::Banana, true, 312, 350),   // out 2
         J ("sync out", K::Banana, true, 354, 350, true),   // out 3
     };
-    s.texts = { T ("CLASSIC LFO  LF-111", 192, 14, 10.5f, 4), T ("@foot", 192, 415, 9.0f, 1) };
+    s.controls = {
+        C ("mode", "=0", CtrlStyle::Button, 24, 88),    // Free Hz
+        C ("mode", "=1", CtrlStyle::Button, 58, 88),    // Free Sec
+        C ("mode", "=2", CtrlStyle::Button, 102, 88),   // Sync
+        C ("mode", "=3", CtrlStyle::Button, 136, 88),   // Sync Dotted
+        C ("mode", "=4", CtrlStyle::Button, 170, 88),   // Sync Triplet
+        C ("rate", "rate / freq", CtrlStyle::BigKnob, 72, 178, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("retrig", "", CtrlStyle::Button, 160, 146),
+        C ("wave", "=0", CtrlStyle::Button, 226, 88),
+        C ("wave", "=1", CtrlStyle::Button, 266, 88),
+        C ("wave", "=2", CtrlStyle::Button, 306, 88),
+        C ("wave", "=3", CtrlStyle::Button, 346, 88),
+        C ("wave", "=4", CtrlStyle::Button, 226, 146),
+        C ("wave", "=5", CtrlStyle::Button, 266, 146),
+        C ("wave", "=6", CtrlStyle::Button, 306, 146),
+        C ("wave", "=7", CtrlStyle::Button, 346, 146),
+        C ("phase", "phase", CtrlStyle::Knob, 246, 206, kSkirt, "0|90|180|270|360"),
+        C ("polarity", "bipolar|unipolar", CtrlStyle::Toggle, 306, 206, kSkirt),
+        C ("amount", "amount", CtrlStyle::Knob, 52, 346, kSkirt, "0|*|*|*|*|10"),
+    };
+    { auto a = C ("assign", "LFO", CtrlStyle::Assign, 182, 350); a.jack = 0; s.controls.push_back (a); }   // the main LFO OUT
+    s.leds = {   // red, as D() (decision 11); 6: the speed, following LFO OUT (decision 14)
+        D (24, 68, 0), D (58, 68, 1), D (102, 68, 2), D (136, 68, 3), D (170, 68, 4), D (160, 126, 5), D (226, 68, 10), D (266, 68, 11), D (306, 68, 12), D (346, 68, 13), D (226, 126, 14), D (266, 126, 15), D (306, 126, 16), D (346, 126, 17),
+        D (140, 214, 6)
+    };
+    s.lines = {
+        L (4, 26, 380, 26),
+        L (4, 400, 380, 400),
+        L (192, 26, 192, 294),
+        L (4, 294, 380, 294),
+        L (80, 32, 80, 100, 1.2f),
+        L (152, 294, 152, 400),
+        L (196, 350, 214, 350, 1.2f),
+        L (164, 324, 250, 324, 1.2f),
+        L (250, 324, 250, 380, 1.2f),
+        L (250, 380, 164, 380, 1.2f),
+        L (164, 380, 164, 324, 1.2f),
+    };
+    iconNote (s, 102, 54, false); iconNote (s, 136, 54, true); iconNote (s, 167, 54, false);
+    iconSine (s, 226, 54); iconTri (s, 266, 54); iconSqr (s, 306, 54); iconSaw (s, 346, 54);
+    iconRamp (s, 226, 112); iconStep (s, 266, 112); iconSmooth (s, 306, 112); iconWalk (s, 346, 112);
+    s.texts = {
+        T ("CLASSIC LFO  LF-111", 192, 14, 10.5f, 4),
+        T ("FREE", 41, 37, 9.5f, 1),
+        T ("SYNC", 136, 37, 9.5f, 1),
+        T ("Hz", 24, 54, 9.0f, 0),
+        T ("sec", 58, 54, 9.0f, 0),
+        T ("3", 175, 51, 8.0f, 0),
+        T ("note retrig", 160, 112, 9.0f, 0),
+        T ("WAVEFORM", 286, 37, 9.5f, 1),
+        T ("OUTPUTS", 268, 306, 9.5f, 1),
+        T ("assign", 182, 367, 9.0f, 0),
+        T ("@foot", 192, 415, 9.0f, 1),
+    };
     return s;
 }
 

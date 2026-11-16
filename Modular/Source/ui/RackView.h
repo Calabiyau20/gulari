@@ -45,6 +45,7 @@ public:
     bool dynamic = false;                          // follows an edit selector ({e} / {n} / {s}): shows one stage
     std::function<bool (ReadoutText&)> describe;    // a knob that is not a parameter (252 cells) says what it shows
     std::function<void()> onMenu, onType;
+    std::function<void (ReadoutText&)> amend;      // what its module adds to the readout (the LF-111 RATE: the clock, the tempo)
     bool readoutText (ReadoutText&) override;
     juce::Rectangle<float> readoutAnchor() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -88,11 +89,13 @@ private:
     juce::ParameterAttachment attach;
 };
 
-// white panel button that steps a parameter (259t RANGE)
+// white panel button that steps a parameter (259t RANGE), or that picks one value of it (pick >= 0: "=k" in Specs,
+// the LF-111 mode and wave buttons; a click on the one that is on does nothing). Its light is a panel LED.
 class ParamButton : public juce::Component, public juce::SettableTooltipClient, public ReadoutSource
 {
 public:
-    explicit ParamButton (juce::RangedAudioParameter& p);
+    explicit ParamButton (juce::RangedAudioParameter& p, int pick = -1);
+    std::function<void (ReadoutText&)> amend;      // what its module adds to the readout
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override { down = false; repaint(); }
@@ -107,6 +110,7 @@ private:
     juce::ParameterAttachment attach;
     float value = 0.0f;
     bool down = false;
+    const int pick;
 };
 
 // momentary panel button (281 manual triggers)

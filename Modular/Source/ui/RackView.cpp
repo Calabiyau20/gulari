@@ -14,6 +14,7 @@
 #include "../modules/M267.h"
 #include "../modules/M291.h"
 #include "../modules/M666.h"
+#include "../modules/M111.h"
 #include "WcData.h"
 #include "../WcParams.h"
 
@@ -63,6 +64,31 @@ static juce::String depthHint()
    #endif
 }
 static juce::String midDot() { return juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")); }
+
+// LF-111: what the readout of RATE (k: the knob) adds in each state of CLOCK IN, and in SYNC with or without a tempo
+static void lfoRateNote (const wc::M111& m, float k, int mode, ReadoutText& t)
+{
+    using wc::M111;
+    const int clock = m.clockState.load (std::memory_order_relaxed);
+    const double bpm = juce::jlimit (20.0, 400.0, m.hostBpm.load (std::memory_order_relaxed));
+    t.warn = false;
+    if (clock == M111::ClockLocked)
+    {
+        const double r = wc::lfoRatio (wc::lfoStep (k));
+        t.value = wc::lfoRateText (k, 5);
+        t.note = (r < 1.0 ? "1 cycle every " + juce::String (juce::roundToInt (1.0 / r)) + " pulses"
+                          : juce::String (juce::roundToInt (r)) + (r > 1.0 ? " cycles" : " cycle") + " per pulse")
+                 + midDot() + juce::String (m.cycleSecs.load (std::memory_order_relaxed), 2) + " s";
+    }
+    else if (clock == M111::ClockWaiting) t.note = "CLOCK IN: waiting for pulses";
+    else if (clock == M111::ClockLost) t.note = "CLOCK IN: no pulses - keeps the last speed";
+    else if (mode >= M111::Sync && ! m.hostTempo.load (std::memory_order_relaxed)) { t.note = "No tempo from the host: " + juce::String (juce::roundToInt (bpm)) + " BPM"; t.warn = true; }
+    else if (mode >= M111::Sync)
+    {
+        const double secs = wc::lfoBeats (wc::lfoStep (k)) * (mode == M111::SyncDotted ? 1.5 : (mode == M111::SyncTriplet ? 2.0 / 3.0 : 1.0)) * 60.0 / bpm;
+        t.note = juce::String (secs, 2) + " s at " + juce::String (juce::roundToInt (bpm)) + " BPM";
+    }
+}
 
 // italic silkscreen: the 200-series panels are lettered in lowercase italics
 static void drawItalic (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, juce::Justification j, const juce::Font& f, juce::Colour c)
@@ -253,13 +279,13 @@ void ParamSwitch::mouseDown (const juce::MouseEvent& e)
     attach.setValueAsCompleteGesture ((float) v);
 }
 
-ParamButton::ParamButton (juce::RangedAudioParameter& p)
+ParamButton::ParamButton (juce::RangedAudioParameter& p, int k)
     : param (p), attach (p, [this] (float v)
       {
           value = v;
           repaint();
           if (auto* r = RackView::readoutFor (*this)) r->refresh();
-      })
+      }), pick (k)
 {
     attach.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -268,13 +294,15 @@ ParamButton::ParamButton (juce::RangedAudioParameter& p)
 bool ParamButton::readoutText (ReadoutText& t)
 {
     t.name = param.getName (64);
-    t.value = param.getCurrentValueAsText();
+    t.value = pick >= 0 ? param.getText (param.convertTo0to1 ((float) pick), 64) : param.getCurrentValueAsText();   // a picker: its own value
+    if (pick >= 0 && juce::roundToInt (value) != pick) { t.note = "Now: " + param.getCurrentValueAsText(); t.warn = false; }
+    if (amend != nullptr) amend (t);
     RackView::ccNote (*this, param.getParameterID(), t);
     return true;
 }
-void ParamButton::mouseEnter (const juce::MouseEvent&) { if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
+void ParamButton::mouseEnter (const juce::MouseEvent&) { repaint(); if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
 void ParamButton::mouseMove (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this); }
-void ParamButton::mouseExit (const juce::MouseEvent&)  { if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this); }
+void ParamButton::mouseExit (const juce::MouseEvent&)  { repaint(); if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this); }
 
 void ParamButton::mouseDown (const juce::MouseEvent& e)
 {
@@ -284,6 +312,12 @@ void ParamButton::mouseDown (const juce::MouseEvent& e)
         return;
     }
     down = true;
+    if (pick >= 0)
+    {
+        if (juce::roundToInt (value) != pick) attach.setValueAsCompleteGesture ((float) pick);
+        repaint();
+        return;
+    }
     const int steps = juce::jmax (2, param.getNumSteps());
     const float hi = param.convertFrom0to1 (1.0f), lo = param.convertFrom0to1 (0.0f);
     float next = value + (hi - lo) / (float) (steps - 1);
@@ -302,6 +336,11 @@ void ParamButton::paint (juce::Graphics& g)
     const float r = down ? 8.0f : 9.0f;
     g.setGradientFill (juce::ColourGradient (juce::Colour (down ? 0xffd5d5d1 : 0xffffffff), c.x - 4, c.y - 6, juce::Colour (0xffc4c4bf), c.x + 4, c.y + 6, false));
     g.fillEllipse (c.x - r, c.y - r, 2.0f * r, 2.0f * r);
+    if (isMouseOver())   // as AssignButton: a white ring on hover
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.drawEllipse (c.x - 12.5f, c.y - 12.5f, 25.0f, 25.0f, 1.5f);
+    }
 }
 
 // white momentary button, as on the 281t
@@ -414,6 +453,7 @@ bool WcKnob::readoutText (ReadoutText& t)
         if (param == nullptr) return false;
         t.name = param->getName (64);
         t.value = param->getCurrentValueAsText();
+        if (amend != nullptr) amend (t);
         if (depthDrag) { if (auto* rv = findParentComponentOfClass<RackView>()) rv->depthReadout (*this, t); }
         else { RackView::ccNote (*this, paramId, t); RackView::modNote (*this, paramId, t); }
     }
@@ -636,7 +676,7 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     {
         if (c.style == CtrlStyle::Assign)
         {
-            auto b = std::make_unique<AssignButton> (rack, inst, c.jack, c.label);
+            auto b = std::make_unique<AssignButton> (rack, inst, c.jack, typeOfInst (inst) == MT_111 ? instName (inst) : juce::String (c.label));   // "LFO A" (H3)
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
             assigns.push_back (std::move (b));
@@ -841,7 +881,19 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         auto* param = proc.apvts.getParameter (resolveId (c.suffix));
         if (param != nullptr && c.style == CtrlStyle::Button)
         {
-            auto b = std::make_unique<ParamButton> (*param);
+            const juce::String lab (c.label);
+            const int pick = lab.startsWithChar ('=') ? lab.substring (1).getIntValue() : -1;
+            auto b = std::make_unique<ParamButton> (*param, pick);
+            if (typeOfInst (inst) == MT_111 && juce::String (c.suffix) == "mode")
+            {
+                auto* m = proc.rack.m111 (subIndex (inst));
+                b->amend = [m, pick] (ReadoutText& t)
+                {
+                    if (m->clockState.load (std::memory_order_relaxed) != wc::M111::ClockNone) { t.note = "CLOCK IN is patched: the clock sets the speed"; t.warn = false; }
+                    else if (pick >= wc::M111::Sync && ! m->hostTempo.load (std::memory_order_relaxed))
+                    { t.note = "No tempo from the host: " + juce::String (juce::roundToInt (juce::jlimit (20.0, 400.0, m->hostBpm.load()))) + " BPM"; t.warn = true; }
+                };
+            }
             b->setBounds ((int) c.x - 14, (int) c.y - 14, 28, 28);
             addAndMakeVisible (*b);
             buttons.push_back (std::move (b));
@@ -882,6 +934,13 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         s->setBounds ((int) c.x - size / 2, (int) c.y - size / 2, size, size);
         addAndMakeVisible (*s);
         attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, resolveId (c.suffix), *s));
+        if (typeOfInst (inst) == MT_111 && juce::String (c.suffix) == "rate")
+        {
+            auto* m = proc.rack.m111 (subIndex (inst));
+            auto* k = proc.apvts.getRawParameterValue (prefix + "rate");
+            auto* mode = proc.apvts.getRawParameterValue (prefix + "mode");
+            s->amend = [m, k, mode] (ReadoutText& t) { lfoRateNote (*m, k->load(), (int) std::lround (mode->load()), t); };
+        }
         sliders.push_back (std::move (s));
         sliderIds.push_back (c.suffix);
         boundIds.push_back (resolveId (c.suffix));
@@ -1623,7 +1682,7 @@ void ModulePanel::paint (juce::Graphics& g)
     for (auto& t : spec.texts)
     {
         juce::String txt (t.text);
-        if (t.style == 4 && isRemovable (inst) && (typeOfInst (inst) == MT_281 || typeOfInst (inst) == MT_258 || typeOfInst (inst) == MT_259 || typeOfInst (inst) == MT_292)) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
+        if (t.style == 4 && isRemovable (inst) && (typeOfInst (inst) == MT_281 || typeOfInst (inst) == MT_258 || typeOfInst (inst) == MT_259 || typeOfInst (inst) == MT_292 || typeOfInst (inst) == MT_111)) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
         const auto f = t.style == 0 ? WcLook::label (t.size) : WcLook::title (t.size);
         const float w = juce::GlyphArrangement::getStringWidth (f, txt) + 10.0f;
         juce::Rectangle<float> box;
@@ -2583,7 +2642,8 @@ void RackView::typeValue (juce::Component& c, const juce::String& id)
     ValueEdit ed;
     ed.name = p->getName (64);
     ed.text = p->getCurrentValueAsText();
-    ed.example = wc::valueTextExample (*p);
+    if (auto* k = dynamic_cast<WcKnob*> (&c); k != nullptr && k->amend != nullptr) { ReadoutText t; t.value = ed.text; k->amend (t); ed.text = t.value; }   // "x1/4" with a clock
+    ed.example = wc::valueTextExample (*p, ed.text);
     auto* pr = &proc;
     const auto shown = ed.text;
     ed.apply = [pr, id, shown] (const juce::String& text, juce::String& limited) -> bool
@@ -2667,13 +2727,23 @@ std::vector<AssignButton*> RackView::sourcesFree (const juce::String& id) const
 
 bool RackView::modRange (const juce::RangedAudioParameter& p, bool preview, float& lo, float& hi, bool& cutLo, bool& cutHi) const
 {
-    // shortcut: every source today is 0..10 V (the 281 cycling); the Classic LFO (-10..+10 V) declares its range when it exists
-    constexpr float vMin = 0.0f, vMax = 10.0f;
+    // the volts a source sweeps: 0..10 V, the LF-111's LFO and INV OUT their own range as the knobs set it now, AMOUNT
+    // included (H4, decision 4)
     float dLo = 0.0f, dHi = 0.0f;
     bool any = preview;
-    auto add = [&] (float depth) { dLo += juce::jmin (depth * vMin, depth * vMax) * 0.1f; dHi += juce::jmax (depth * vMin, depth * vMax) * 0.1f; };
-    for (auto& a : proc.getAssignments()) if (a.param == p.getParameterIndex()) { add (a.depth); any = true; }
-    if (preview) add (kStartDepth);
+    auto add = [&] (int inst, int jack, float depth)
+    {
+        float vMin = 0.0f, vMax = 10.0f;
+        if (typeOfInst (inst) == MT_111 && jack != wc::M111::Out_Sync)
+        {
+            const auto pre = instPrefix (inst);
+            vMax = 10.0f * proc.apvts.getRawParameterValue (pre + "amount")->load();
+            if (proc.apvts.getRawParameterValue (pre + "polarity")->load() < 0.5f) vMin = -vMax;
+        }
+        dLo += juce::jmin (depth * vMin, depth * vMax) * 0.1f; dHi += juce::jmax (depth * vMin, depth * vMax) * 0.1f;
+    };
+    for (auto& a : proc.getAssignments()) if (a.param == p.getParameterIndex()) { add (a.srcInst, a.srcJack, a.depth); any = true; }
+    if (preview && assignFrom != nullptr) add (assignFrom->inst, assignFrom->jack, kStartDepth);
     if (! any) return false;
     const float base = p.getValue();
     cutLo = base + dLo < 0.0f;

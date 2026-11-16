@@ -5,6 +5,7 @@
 #include "modules/M259.h"
 #include "modules/M281.h"
 #include "modules/MidiInterface.h"
+#include "modules/M111.h"
 #include "ui/RackView.h"
 #include <set>
 #if JUCE_LINUX
@@ -1404,6 +1405,209 @@ int main (int argc, char** argv)
             pump (20);
         }
         std::printf ("modulation by drag: button, lever and the other refusals, Esc, drop and preview, again, Ctrl+drag (none, depth, Alt, cut), ring, live dot, hover, menus, typing, 64, module out  %s\n",
+                     bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
+        if (! bad.isEmpty()) return 1;
+    }
+
+    // ---- LF-111 Classic LFO: the panel as built, its lit buttons, its readouts, its ASSIGN and the range it declares ----
+    {
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        const auto left = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+        auto at = [] (juce::Component& c, juce::Point<float> screen, juce::ModifierKeys mods)
+        {
+            const auto pos = c.getLocalPoint (nullptr, screen);
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, 1, false);
+        };
+        const int A = wc::kInst111, B = wc::kInst111 + 1;
+        WcProcessor proc;
+        proc.license.status = wc::License::Status::Licensed;
+        proc.prepareToPlay (48000.0, 512);
+        for (int i : { A, B, wc::kInst259 }) proc.setPresent (i, true);
+        auto setP = [&proc] (const juce::String& id, float plain) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (plain)); };
+        auto raw = [&proc] (const juce::String& id) { return proc.apvts.getRawParameterValue (id)->load(); };
+        auto run = [&proc] (int blocks) { for (int b = 0; b < blocks; ++b) { juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer m; proc.processBlock (buf, m); } };
+        setP ("lf1_wave", 6.0f); setP ("lf1_rate", 0.55f);   // smooth random: the boceto's square is not what a capture needs
+        run (20);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        pump (40);
+        wc::ui::RackView* rv = nullptr;
+        wc::ui::ValueReadout* ro = nullptr;
+        juce::Viewport* vp = nullptr;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+            if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+            if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+            for (auto* ch : c.getChildren()) walk (*ch);
+        };
+        walk (*ed);
+        auto panelOf = [&] (int inst) -> wc::ui::ModulePanel*
+        {
+            for (auto* c : rv->content.getChildren()) if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (c)) if (p->inst == inst) return p;
+            return nullptr;
+        };
+        juce::StringArray bad;
+        auto check = [&] (bool ok, const juce::String& what) { if (! ok) bad.add (what); };
+        auto* pa = panelOf (A);
+        auto* pb = panelOf (B);
+        if (rv == nullptr || ro == nullptr || vp == nullptr || pa == nullptr || pb == nullptr) { std::printf ("LF-111: no panel  BAD\n"); return 1; }
+        // every control of the spec is on the panel (a Push with no branch of its own in ModulePanel vanished in silence)
+        std::vector<wc::ui::ParamButton*> buttons;
+        int knobs = 0, levers = 0;
+        wc::ui::AssignButton* assignA = nullptr;
+        wc::ui::WcKnob* rate = nullptr;
+        for (auto* ch : pa->getChildren())
+        {
+            if (auto* b = dynamic_cast<wc::ui::ParamButton*> (ch)) buttons.push_back (b);
+            if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch)) { ++knobs; if (k->paramId == "lf1_rate") rate = k; }
+            if (dynamic_cast<wc::ui::ParamSwitch*> (ch) != nullptr) ++levers;
+            if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) assignA = a;
+        }
+        wc::ui::AssignButton* assignB = nullptr;
+        for (auto* ch : pb->getChildren()) if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) assignB = a;
+        const auto& spec = wc::specFor (wc::MT_111);
+        check ((int) spec.controls.size() == 19 && buttons.size() == 14 && knobs == 3 && levers == 1 && assignA != nullptr && rate != nullptr,
+               "controls on the panel: " + juce::String ((int) buttons.size()) + " buttons, " + juce::String (knobs) + " knobs, " + juce::String (levers) + " levers");
+        check (assignA != nullptr && assignB != nullptr && assignA->name == "LFO A" && assignB->name == "LFO B" && assignA->jack == wc::M111::Out_Lfo
+               && rv->sourceName (A, wc::M111::Out_Lfo) == "LFO A", "ASSIGN names: " + (assignA ? assignA->name : juce::String ("-")) + " / " + (assignB ? assignB->name : juce::String ("-")));
+        if (rate == nullptr || assignA == nullptr || buttons.size() != 14) { std::printf ("LF-111: BAD: %s\n", bad.joinIntoString ("; ").toRawUTF8()); return 1; }
+        auto buttonFor = [&] (const juce::String& name, const juce::String& value) -> wc::ui::ParamButton*
+        {
+            for (auto* b : buttons) { wc::ui::ReadoutText t; b->readoutText (t); if (t.name == name && t.value == value) return b; }
+            return nullptr;
+        };
+        auto click = [&] (juce::Component& c) { const auto pt = c.localPointToGlobal (c.getLocalBounds().toFloat().getCentre()); c.mouseDown (at (c, pt, left)); c.mouseUp (at (c, pt, left)); pump (5); };
+        auto text = [] (wc::ui::ReadoutSource& s) { wc::ui::ReadoutText t; s.readoutText (t); return t; };
+        auto* m = proc.rack.m111 (0);
+        // the lit buttons pick a value; the one that is on does nothing; the LED says which
+        auto* hz = buttonFor ("LFO A Rate Mode", "Free Hz");
+        auto* sync = buttonFor ("LFO A Rate Mode", "Sync");
+        auto* sqr = buttonFor ("LFO A Wave", "Square");
+        auto* retrig = buttonFor ("LFO A Note Retrigger", "Off");
+        check (hz && sync && sqr && retrig && buttonFor ("LFO A Rate Mode", "Sync Triplet") && buttonFor ("LFO A Wave", "Random Walk"), "a lit button is missing");
+        if (hz && sync && sqr && retrig)
+        {
+            click (*sync);
+            const bool picked = raw ("lf1_mode") == 2.0f && m->led (2) == 1.0f && m->led (0) == 0.0f;
+            click (*sync);
+            const bool stays = raw ("lf1_mode") == 2.0f;
+            const auto hzText = text (*hz), syncText = text (*sync);
+            click (*sqr);
+            click (*retrig);
+            const bool wave = raw ("lf1_wave") == 2.0f && m->led (12) == 1.0f && m->led (16) == 0.0f && raw ("lf1_retrig") > 0.5f && m->led (5) == 1.0f;
+            click (*retrig);
+            check (picked && stays && wave && raw ("lf1_retrig") < 0.5f, "picking: mode " + juce::String (raw ("lf1_mode")) + " wave " + juce::String (raw ("lf1_wave")));
+            check (hzText.value == "Free Hz" && hzText.note == "Now: Sync" && ! hzText.warn && syncText.value == "Sync" && syncText.note.contains ("No tempo from the host"),
+                   "button readouts: " + hzText.value + " / " + hzText.note + " | " + syncText.value + " / " + syncText.note);
+        }
+        // RATE: SYNC dotted 1/8 at 120 BPM, with and without a tempo from the host
+        setP ("lf1_mode", 3.0f); setP ("lf1_rate", 0.7f);
+        const auto noTempo = text (*rate);
+        m->hostTempo.store (true);
+        const auto tempo = text (*rate);
+        check (noTempo.value == "1/8 D" && noTempo.note == "No tempo from the host: 120 BPM" && noTempo.warn && tempo.note == "0.38 s at 120 BPM" && ! tempo.warn,
+               "RATE readout: " + noTempo.value + " / " + noTempo.note + " | " + tempo.note);
+        // a capture: the readout over RATE in SYNC with the tempo (the processor would say "no tempo": this test has no host)
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto save = [&] (const juce::Image& img, const juce::String& name)
+        {
+            auto file = shots.getChildFile (name);
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        auto bring = [&] (juce::Component& c)
+        {
+            const auto r = rv->getLocalArea (&c, c.getLocalBounds());
+            vp->setViewPosition (juce::jmax (0, r.getCentreX() - 300), juce::jmax (0, r.getCentreY() - 220));
+            pump (20);
+        };
+        auto crop = [&] (std::initializer_list<juce::Component*> cs, int margin = 40, float scale = 2.0f)
+        {
+            juce::Rectangle<int> area;
+            for (auto* c : cs) area = area.isEmpty() ? ed->getLocalArea (c, c->getLocalBounds()) : area.getUnion (ed->getLocalArea (c, c->getLocalBounds()));
+            if (ro->isVisible()) area = area.getUnion (ro->getBounds());
+            return ed->createComponentSnapshot (area.expanded (margin).getIntersection (ed->getLocalBounds()), true, scale);
+        };
+        auto hover = [&] (juce::Component& c)
+        {
+            bring (c);
+            ro->hoverEnter (c);
+            pump (500);
+            m->hostTempo.store (true);   // the processor is not running here: keep the mark as this capture wants it
+            ro->refresh();
+            pump (40);
+        };
+        hover (*rate);
+        check (ro->isUp() && ro->current().value == "1/8 D" && ro->current().note == "0.38 s at 120 BPM", "hover RATE: " + ro->current().value + " / " + ro->current().note);
+        save (crop ({ rate }), "lfo_sync_tempo.png");
+        ro->hoverExit (*rate);
+        m->hostTempo.store (false);
+        ro->refresh(); pump (20);
+        hover (*rate);
+        m->hostTempo.store (false); ro->refresh(); pump (40);
+        save (crop ({ rate }), "lfo_sync_no_tempo.png");
+        ro->hoverExit (*rate);
+        pump (700);
+        // CLOCK IN: LFO B's 2 Hz square into A, x1/4: the readout says the ratio, the mode light goes to 40 %
+        setP ("lf2_wave", 2.0f); setP ("lf2_rate", (float) (std::log10 (200.0) / 4.0));
+        setP ("lf1_rate", 0.2f);
+        proc.connect (B, wc::M111::Out_Lfo, A, wc::M111::In_Clock);
+        run (200);
+        const auto clocked = text (*rate);
+        const auto modeNote = hz != nullptr ? text (*hz) : wc::ui::ReadoutText();
+        check (m->clockState.load() == wc::M111::ClockLocked && clocked.value == "x1/4" && clocked.note.startsWith ("1 cycle every 4 pulses") && clocked.note.endsWith ("2.00 s")
+               && modeNote.note == "CLOCK IN is patched: the clock sets the speed" && m->led (3) == 0.4f && m->led (0) == 0.0f,
+               "with a clock: " + clocked.value + " / " + clocked.note + " | " + modeNote.note + " | led " + juce::String (m->led (3)));
+        proc.disconnectInput (A, wc::M111::In_Clock);
+        run (4);
+        // the range the LFO declares (H4): +25 % of a bipolar LFO is +-25 % round the knob, unipolar 0 .. +25 %, AMOUNT scales it
+        auto* tp = proc.apvts.getParameter ("a_timbre");
+        setP ("a_timbre", 0.5f);
+        proc.assign (A, wc::M111::Out_Lfo, "a_timbre", 0.25f);
+        pump (20);
+        float lo, hi; bool cl, ch;
+        rv->modRange (*tp, false, lo, hi, cl, ch);
+        const bool bip = std::abs (lo - 0.25f) < 1e-5f && std::abs (hi - 0.75f) < 1e-5f;
+        setP ("lf1_polarity", 1.0f);
+        rv->modRange (*tp, false, lo, hi, cl, ch);
+        const bool uni = std::abs (lo - 0.5f) < 1e-5f && std::abs (hi - 0.75f) < 1e-5f;
+        setP ("lf1_polarity", 0.0f); setP ("lf1_amount", 0.5f);
+        rv->modRange (*tp, false, lo, hi, cl, ch);
+        const bool half = std::abs (lo - 0.375f) < 1e-5f && std::abs (hi - 0.625f) < 1e-5f;
+        check (bip && uni && half, "range: bipolar " + juce::String ((int) bip) + " unipolar " + juce::String ((int) uni) + " amount 50 % " + juce::String ((int) half)
+               + " (" + juce::String (lo, 3) + " .. " + juce::String (hi, 3) + ")");
+        setP ("lf1_amount", 1.0f); setP ("lf1_mode", 0.0f); setP ("lf1_rate", 0.55f); setP ("lf1_wave", 0.0f);
+        // captures: the ASSIGN free (LFO B) and assigned (LFO A), the knob it moves with its ring, the panel in both skins
+        run (40);
+        pump (100);
+        wc::ui::WcKnob* timbre = nullptr;
+        if (auto* p259 = panelOf (wc::kInst259)) for (auto* c : p259->getChildren()) if (auto* k = dynamic_cast<wc::ui::WcKnob*> (c)) if (k->paramId == "a_timbre") timbre = k;
+        bring (*assignB); save (crop ({ assignB }, 30), "lfo_assign_free.png");
+        bring (*assignA); save (crop ({ assignA }, 30), "lfo_assign_assigned.png");
+        if (timbre != nullptr) { bring (*timbre); for (int i = 0; i < 6; ++i) { run (4); pump (40); } save (crop ({ timbre }, 30), "lfo_modulating_timbre.png"); }
+        proc.unassignSource (A, wc::M111::Out_Lfo);
+        setP ("lf1_wave", 2.0f); setP ("lf1_mode", 0.0f);   // the boceto's settings: Hz, square
+        run (10); pump (60);
+        for (float z : { 1.0f, 0.5f })
+            for (int sk : { 0, 1 })
+            {
+                wc::ui::skin::current = sk;
+                rv->setZoom (z);
+                pump (20);
+                bring (*pa);
+                vp->setViewPosition (juce::roundToInt ((float) pa->getX() * z) - 10, juce::roundToInt ((float) pa->getY() * z) - 10);
+                for (auto* c : rv->content.getChildren()) c->repaint();
+                pump (60);
+                save (crop ({ pa }, 0, 1.0f), juce::String ("lfo_panel_") + (sk ? "neon" : "classic") + "_" + juce::String (juce::roundToInt (z * 100)) + ".png");
+            }
+        wc::ui::skin::current = 0;
+        rv->setZoom (1.0f);
+        std::printf ("LF-111: 19 controls on the panel, ASSIGN \"LFO A\" / \"LFO B\", lit buttons pick, readouts (buttons, RATE in SYNC, tempo, clock), 40 %% light, range  %s\n",
                      bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
         if (! bad.isEmpty()) return 1;
     }
