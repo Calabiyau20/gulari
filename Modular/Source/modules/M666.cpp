@@ -38,15 +38,17 @@ void M666::beginBlock (int)
     if (rearm.exchange (false)) { singleDone = false; armed = true; }
 }
 
-void M666::publish() noexcept
+bool M666::publish() noexcept
 {
-    if (mode != 2 && sincePub < (int) (fs / 90.0f)) return;   // SINGLE always keeps its one sweep      // the screen refreshes at 30 Hz: no need to copy faster
+    if (mode != 2 && sincePub < (int) (fs / 90.0f)) return false;   // SINGLE always keeps its one sweep      // the screen refreshes at 30 Hz: no need to copy faster
     sincePub = 0;
-    const juce::SpinLock::ScopedLockType sl (lock);
+    const juce::SpinLock::ScopedTryLockType sl (lock);
+    if (! sl.isLocked()) return false;   // the screen is copying a frame: drop this one, the audio thread never waits
     const int slot = ready.load (std::memory_order_relaxed) == 0 ? 1 : 0;
     buf[slot] = work;
     ready.store (slot, std::memory_order_relaxed);
     seqNo.fetch_add (1, std::memory_order_relaxed);
+    return true;
 }
 
 bool M666::latest (Frame& dst, int& seq) const
@@ -142,9 +144,9 @@ void M666::tick (const float* in, float* out) noexcept
         if (sweepT >= sweepLen || filled >= kPoints)
         {
             work.n = filled; work.xy = false; work.dual = isPatched (In_B);
-            publish();
+            const bool shown = publish();
             sweeping = false;
-            if (mode == 2) singleDone = true;
+            if (mode == 2 && shown) singleDone = true;   // a SINGLE sweep the screen did not get is taken again
         }
     }
     else { out[Out_Sweep] = 0.0f; out[Out_Gate] = 0.0f; }

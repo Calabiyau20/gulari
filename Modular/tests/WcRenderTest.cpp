@@ -34,6 +34,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
+#include <thread>
 
 using namespace wc;
 static constexpr double SR = 48000.0;
@@ -133,6 +134,11 @@ static void spectrum (const std::vector<float>& x, double f0, double& rmsOut, do
     }
     offDb = 10.0 * std::log10 ((off + 1e-30) / (on + off + 1e-30));
 }
+
+// the 666 frame lock is private: an explicit instantiation may name it (the standard skips access checks there)
+juce::SpinLock& lock666 (M666&);
+template <juce::SpinLock M666::* P> struct Lock666 { friend juce::SpinLock& lock666 (M666& m) { return m.*P; } };
+template struct Lock666<&M666::lock>;
 
 static void writeWav (const juce::File& f, const std::vector<float>& L, const std::vector<float>& R)
 {
@@ -1210,6 +1216,28 @@ int main (int argc, char** argv)
             std::printf ("  GND coupling: trace spans %.3f .. %.3f (flat)\n", lo, hi);
             if (fr.n > 0 && hi - lo > 0.02f) ok = false;
             setP (p, pre + "coupling", 1.0f);
+        }
+        // the audio thread never waits for the screen: while the UI holds the frame lock the ticks go on and the frame is
+        // dropped, and a SINGLE sweep that could not be shown is taken again once the lock is free
+        {
+            setP (p, pre + "mode", 2.0f);                                      // SINGLE
+            s.beginBlock (256); s.reset();
+            M666::Frame fr; int seq = -1;
+            s.latest (fr, seq);                                                // skip the frames of the checks above
+            std::atomic<bool> ran { false };
+            std::thread audio;
+            {
+                const juce::SpinLock::ScopedLockType held (lock666 (s));
+                audio = std::thread ([&] { for (int i = 0; i < (int) (SR * 0.3); ++i) { in[M666::In_A] = 5.0f * std::sin (6.283185f * 100.0f * (float) i / (float) SR); s.tick (in, out); } ran = true; });
+                for (int w = 0; w < 200 && ! ran; ++w) juce::Thread::sleep (10);
+            }
+            const bool ranLocked = ran;
+            audio.join();
+            bool got = false;
+            for (int i = 0; i < (int) (SR * 0.3) && ! got; ++i) { in[M666::In_A] = 5.0f * std::sin (6.283185f * 100.0f * (float) i / (float) SR); s.tick (in, out); got = s.latest (fr, seq); }
+            std::printf ("  UI holding the lock: audio %s, SINGLE sweep %s afterwards\n", ranLocked ? "kept running" : "WAITED", got ? "shown" : "LOST");
+            if (! ranLocked || ! got) ok = false;
+            setP (p, pre + "mode", 0.0f);
         }
         // four independent instances
         {

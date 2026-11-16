@@ -61,6 +61,6 @@ private:
     int xyPos = 0; double xyAcc = 0.0;
     int sincePub = 1 << 30;
     std::atomic<bool> trigLed { false };
-    void publish() noexcept;
+    bool publish() noexcept;
 };
 } // namespace wc
