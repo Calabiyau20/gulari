@@ -195,7 +195,7 @@ private:
     };
     std::array<std::unique_ptr<Module>, kNumInst> mods;
     std::array<std::array<float, kMaxJacks>, kNumInst> outVal {};
-    std::array<std::array<bool, kMaxJacks>, kNumInst> patched {};
+    std::array<std::array<bool, kMaxJacks>, kNumInst> patched {}, outPatched {};
     std::array<int, kNumInst> numIn {};
     Patch live, pending;
     juce::SpinLock patchLock;

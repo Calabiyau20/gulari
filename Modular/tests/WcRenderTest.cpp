@@ -81,7 +81,8 @@ static std::vector<float> run (WcProcessor& p, int n, int inst = -1, int jack = 
         if (inst < 0) { p.processBlock (buf, midi); for (int i = 0; i < len; ++i) out.push_back (buf.getSample (0, i)); }
         else
         {
-            // same as processBlock, sample by sample, reading the jack
+            // same as processBlock, sample by sample, reading the jack (a probe on it: the module runs all its outputs)
+            p.rack.module (inst)->outPatched = nullptr;
             p.rack.beginBlock (len);
             auto it = midi.cbegin();
             for (int i = 0; i < len; ++i)
@@ -538,6 +539,7 @@ int main (int argc, char** argv)
         std::printf ("259 PAST NYQUIST\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m259 (0);
+        m.outPatched = nullptr;   // ticked by hand, outside the rack: every output runs
         float in[24] {}, out[24] {};
         setP (p, "a_volt1", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_po_fm", 1.0f);
         auto audibleDb = [&] (int inJack, float v, int outJack)   // energy from 20 Hz to 20 kHz
@@ -573,6 +575,7 @@ int main (int argc, char** argv)
         std::printf ("259 DECIMATOR\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m259 (0);
+        m.outPatched = nullptr;   // ticked by hand, outside the rack: every output runs
         float in[24] {}, out[24] {};
         setP (p, "a_volt1", 1.0f); setP (p, "a_po_freq", 0.5f); setP (p, "a_po_fine", 0.0f);
         setP (p, "a_order", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_idx", 0.0f);
@@ -610,6 +613,39 @@ int main (int argc, char** argv)
         }
         std::printf ("\n  taps: worst from 24 kHz up %.1f dB (want <= -60)\n", worstStop);
         if (worstPass > 0.5 || worstStop > -60.0) ok = false;
+    }
+    {
+        // an output with no cable skips its decimator and reads 0; patched in the middle of a note it has to come in
+        // bit for bit as if it had always been patched (the decimator kept its history), not from an empty or stale one.
+        // MO signal in LOW range: the one decimated output with no AC coupling (a coupling starts from rest when patched)
+        std::printf ("259 OUTPUT PATCHED MID-PLAY\n");
+        WcProcessor a, b;
+        bool cabled = true;
+        for (auto* q : { &a, &b })
+        {
+            q->prepareToPlay (SR, 256); q->resetAll(); q->setPresent (kInst259, true);
+            setP (*q, "a_mo_range", 1.0f); setP (*q, "a_mo_freq", 1.0f);
+            cabled &= q->connect (kInst259, M259::Out_Final1, kInstOutput, OutputModule::In_Left);
+        }
+        auto patchMo = [] (WcProcessor& q) { return q.connect (kInst259, M259::Out_MoSignal, kInst259, M259::In_PoFm); };
+        auto tickRead = [] (WcProcessor& q, int n)   // the rack as processBlock runs it, reading MO signal
+        {
+            std::vector<float> x;
+            for (int s = 0; s < n; s += 256)
+            {
+                q.rack.beginBlock (256);
+                for (int i = 0; i < 256; ++i) { q.rack.tick(); x.push_back (q.rack.jackValue (kInst259, M259::Out_MoSignal)); }
+            }
+            return x;
+        };
+        cabled &= patchMo (a);
+        tickRead (a, 48000); const auto idle = tickRead (b, 48000);
+        cabled &= patchMo (b);
+        const auto xa = tickRead (a, 4800), xb = tickRead (b, 4800);
+        float worst = 0.0f, peak = 0.0f;
+        for (size_t i = 0; i < xa.size(); ++i) { worst = std::max (worst, std::fabs (xa[i] - xb[i])); peak = std::max (peak, std::fabs (xa[i])); }
+        std::printf ("  idle MO signal reads %.3f; patched mid-play vs always patched: worst %.2e (signal peak %.2f)\n", idle.back(), worst, peak);
+        if (! cabled || idle.back() != 0.0f || peak < 0.5f || worst != 0.0f) ok = false;
     }
     {
         std::printf ("264 QUAD SAMPLE & HOLD\n");

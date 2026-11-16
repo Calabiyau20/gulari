@@ -82,5 +82,7 @@ public:
     virtual float led (int) const noexcept { return 0.0f; }    // panel LEDs (0..1), read by the UI
     const bool* patched = nullptr;   // per input: is a cable plugged in (set by the rack)
     bool isPatched (int in) const noexcept { return patched != nullptr && patched[in]; }
+    const bool* outPatched = nullptr;   // per output: does a cable leave it (set by the rack; unknown counts as patched)
+    bool isOutPatched (int o) const noexcept { return outPatched == nullptr || outPatched[o]; }
 };
 } // namespace wc

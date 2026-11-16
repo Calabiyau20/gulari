@@ -65,6 +65,7 @@ Rack::Rack (juce::AudioProcessorValueTreeState& apvts)
     for (int i = 0; i < kNumInst; ++i)
     {
         mods[(size_t) i]->patched = patched[(size_t) i].data();
+        mods[(size_t) i]->outPatched = outPatched[(size_t) i].data();
         numIn[(size_t) i] = juce::jmin (kMaxJacks, specFor (typeOfInst (i)).numIn());
         live.srcInst[(size_t) i].fill (-1);
         pending.srcInst[(size_t) i].fill (-1);
@@ -141,8 +142,14 @@ void Rack::applyPending() noexcept
         else if (! live.present[(size_t) i] && pending.present[(size_t) i])
             mods[(size_t) i]->reset();
     live = pending;
+    for (auto& o : outPatched) o.fill (false);
     for (int i = 0; i < kNumInst; ++i)
-        for (int j = 0; j < kMaxJacks; ++j) patched[(size_t) i][(size_t) j] = live.srcInst[(size_t) i][(size_t) j] >= 0;
+        for (int j = 0; j < kMaxJacks; ++j)
+        {
+            const int si = live.srcInst[(size_t) i][(size_t) j];
+            patched[(size_t) i][(size_t) j] = si >= 0;
+            if (si >= 0) outPatched[(size_t) si][(size_t) live.srcJack[(size_t) i][(size_t) j]] = true;
+        }
     patchDirty.store (false);
 }
 

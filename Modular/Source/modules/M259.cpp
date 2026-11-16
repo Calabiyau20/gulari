@@ -235,15 +235,18 @@ void M259::tick (const float* in, float* out) noexcept
     std::copy (in, in + In_Count, prevIn);
 
     // ---- stage 08: outputs (AC coupled audio, DC control) ----
-    const float f = acFinal.process (decFinal.output (taps));
+    // the decimators above are always fed (so one patched mid-play starts with real history); only the product of
+    // the taps runs for an output with a cable, an idle one reads 0 (as an input with no cable)
+    // shortcut: an idle output's AC coupling holds its last state, so one patched again after a big Sym/Timbre change
+    // starts with that DC step and settles in ~20 ms; feed the couplings too if a patch is heard thumping
+    const float f = isOutPatched (Out_Final1) || isOutPatched (Out_Final2) ? acFinal.process (decFinal.output (taps)) : 0.0f;
     out[Out_Final1] = out[Out_Final2] = f;
-    out[Out_Sine] = acSine.process (decSine.output (taps));
-    out[Out_Square] = acSquare.process (decSquare.output (taps));
-    const float m = decMo.output (taps);
-    const float moTriOs = lowRange ? decTri.output (taps) : acTri.process (decTri.output (taps));
-    out[Out_MoSignal] = lowRange ? m : acMo.process (m);
+    out[Out_Sine] = isOutPatched (Out_Sine) ? acSine.process (decSine.output (taps)) : 0.0f;
+    out[Out_Square] = isOutPatched (Out_Square) ? acSquare.process (decSquare.output (taps)) : 0.0f;
+    if (isOutPatched (Out_MoSignal)) { const float m = decMo.output (taps); out[Out_MoSignal] = lowRange ? m : acMo.process (m); }
+    else out[Out_MoSignal] = 0.0f;
     out[Out_MoCv] = 5.0f + 5.0f * moLast;
-    out[Out_MoTri] = moTriOs;
+    out[Out_MoTri] = ! isOutPatched (Out_MoTri) ? 0.0f : lowRange ? decTri.output (taps) : acTri.process (decTri.output (taps));
     out[Out_MoPulse] = moPhase < 0.5 ? 10.0f : 0.0f;          // GATE OUT: the modulation oscillator as a pulse
     out[Out_PoPulse] = poPhase >= 0.25 && poPhase < 0.75 ? 10.0f : 0.0f;
     moLed.store (moLast, std::memory_order_relaxed);
