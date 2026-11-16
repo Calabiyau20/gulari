@@ -22,15 +22,15 @@ inline float polyBlep (float t, float dt) noexcept
     return 0.0f;
 }
 
-// one-pole low pass, bilinear (matches the analog RC pole)
+// one-pole low pass, bilinear prewarped (the -3 dB point is fc at any sample rate)
 struct OnePoleLP
 {
     float b = 1.0f, a = 0.0f, z = 0.0f;
     void set (float fc, float fs) noexcept
     {
-        const float wcT = kTwoPi * fc / fs;
-        b = wcT / (2.0f + wcT);
-        a = (wcT - 2.0f) / (wcT + 2.0f);
+        const float g = std::tan (kPi * fc / fs);
+        b = g / (1.0f + g);
+        a = (g - 1.0f) / (g + 1.0f);
     }
     // H(z) = b (1 + z^-1) / (1 + a z^-1), transposed direct form II
     float process (float x) noexcept

@@ -641,6 +641,32 @@ int main (int argc, char** argv)
         for (int k = 0; k < 4; ++k) if (std::fabs (at[k] * 1000.0 / SR - 25.0 * (k + 1)) > 1.0) ok = false;
     }
     {
+        // the clock-limited bandwidth of the line is 9 kHz in short mode at any sample rate: -3 dB of the tap's impulse response
+        std::printf ("277 BANDWIDTH\n");
+        for (double sr : { 48000.0, 96000.0 })
+        {
+            WcProcessor p; p.prepareToPlay (sr, 256);
+            auto& m = *p.rack.m277();
+            float in[24] {}, out[24] {};
+            setP (p, "dl_time", 1.0f / 3.0f); setP (p, "dl_lvla", 1.0f); setP (p, "dl_long", 0.0f); m.reset(); m.beginBlock (256);   // .10 s: whole-sample taps
+            for (int i = 0; i < (int) sr; ++i) m.tick (in, out);   // let the time slew settle
+            std::vector<double> h;
+            const int tap = (int) std::lround (0.025 * sr);
+            for (int i = 0; i < tap + 1024; ++i) { in[M277::In_A] = i == 0 ? 0.01f : 0.0f; m.tick (in, out); if (i >= tap - 4) h.push_back (out[M277::Out_Q1]); }
+            auto mag = [&] (double f)
+            {
+                double re = 0.0, im = 0.0;
+                for (size_t n = 0; n < h.size(); ++n) { re += h[n] * std::cos (6.283185307179586 * f * (double) n / sr); im -= h[n] * std::sin (6.283185307179586 * f * (double) n / sr); }
+                return std::sqrt (re * re + im * im);
+            };
+            double lo = 1000.0, hi = 0.45 * sr;
+            for (int it = 0; it < 40; ++it) { const double mid = 0.5 * (lo + hi); (mag (mid) / mag (0.0) > std::sqrt (0.5) ? lo : hi) = mid; }
+            const double err = 100.0 * (lo / 9000.0 - 1.0);
+            std::printf ("  %.0f kHz: -3 dB at %.0f Hz (%+.2f %% re 9 kHz)\n", sr / 1000.0, lo, err);
+            if (std::fabs (err) > 1.0) ok = false;
+        }
+    }
+    {
         std::printf ("207 MIXER\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m207();
