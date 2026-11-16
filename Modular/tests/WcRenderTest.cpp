@@ -1462,19 +1462,53 @@ int main (int argc, char** argv)
         }
     }
 
-    // ---- the ramp lands in 12 ms with short blocks re-sending the same target, and it is curved ----
+    // ---- the ramp settles in 12 ms with short blocks re-sending the same target, never overshoots, lands on it ----
     {
         dsp::Ramp r; r.snap (0.0f);
         const int len = 576;                              // 12 ms at 48 kHz
-        float quarter = 0.0f;
-        for (int n = 0; n < len; n += 32)
+        float at12 = 0.0f, prev = 0.0f;
+        bool rising = true;
+        for (int n = 0; n < 3 * len; n += 32)
         {
             r.to (1.0f, len);                             // every block re-sends the knob, unchanged
-            for (int i = 0; i < 32; ++i) { const float v = r.next(); if (n + i + 1 == len / 4) quarter = v; }
+            for (int i = 0; i < 32; ++i)
+            {
+                const float v = r.next();
+                rising = rising && v >= prev && v <= 1.0f; prev = v;
+                if (n + i + 1 == len) at12 = v;
+            }
         }
-        // a raised cosine is at (1 - cos (pi / 4)) / 2 = 0.146 a quarter of the way; a straight line at 0.25
-        const bool good = r.v == 1.0f && r.left == 0 && std::abs (quarter - 0.1464f) < 0.002f;
-        std::printf ("RAMP blocks of 32, same target: %.6f after %d samples (want 1), %.4f at a quarter (want 0.1464) %s\n", r.v, len, quarter, good ? "ok" : "BAD");
+        const bool good = at12 > 0.985f && at12 < 0.995f && rising && r.v == 1.0f && r.left == 0;
+        std::printf ("RAMP blocks of 32, same target: %.4f after 12 ms (want 0.99), %.6f after 36 ms (want 1), monotonic %s %s\n", at12, r.v, rising ? "yes" : "NO", good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
+    // ---- automation: a knob written once per host block, 20 Hz: the glide follows it the same at any block size ----
+    // Measured against the steps it is given (the host's own steps lose 0.66 dB more at 512). A ramp restarted from
+    // rest on every new target lost 21 dB at 32-sample blocks and 0.6 dB at 512.
+    {
+        double db[2] {};
+        for (int k = 0; k < 2; ++k)
+        {
+            const int blk = k == 0 ? 32 : 512;
+            dsp::Ramp r; r.snap (0.5f);
+            const double w = 2.0 * 3.141592653589793 * 20.0 / SR;
+            const int warm = (int) SR / 2, n = (int) SR;      // 20 whole periods measured
+            double re = 0.0, im = 0.0, tre = 0.0, tim = 0.0;
+            for (int s = 0; s < warm + n; ++s)
+            {
+                if (s % blk == 0) r.to ((float) (0.5 + 0.25 * std::sin (w * s)), 576);
+                const float v = r.next();
+                if (s >= warm)
+                {
+                    re += (v - 0.5) * std::cos (w * s); im += (v - 0.5) * std::sin (w * s);
+                    tre += (r.target - 0.5) * std::cos (w * s); tim += (r.target - 0.5) * std::sin (w * s);
+                }
+            }
+            db[k] = 20.0 * std::log10 (std::hypot (re, im) / std::hypot (tre, tim));
+        }
+        const bool good = std::abs (db[0]) < 1.0 && std::abs (db[1]) < 1.0 && std::abs (db[0] - db[1]) < 0.2;
+        std::printf ("RAMP automated at 20 Hz: %+.2f dB at blocks of 32, %+.2f dB at 512 (want within 1 dB, and the same) %s\n", db[0], db[1], good ? "ok" : "BAD");
         if (! good) ok = false;
     }
 

@@ -109,25 +109,29 @@ struct Decimator4
     void reset() noexcept { buf.fill (0.0f); pos = 0; }
 };
 
-// smoothed control value: raised-cosine ramp to a target over a fixed number of samples (no corner where it starts
-// or lands, so a jump leaves far less above a few kHz than a straight line); a new target starts from where it is
+// smoothed control value: two one-poles in series (critically damped), tau = n / 6.6, within 1 % of a jump after n
+// samples. It runs per sample and keeps its speed when the target moves, so a knob automated block by block glides
+// the same at any block size or rate (a ramp restarted on every new target crawled from rest each block).
+// It holds the distances to the target, which never stall short of it in float, and lands after 3 n (5e-8 off).
 struct Ramp
 {
-    float v = 0.0f, target = 0.0f, from = 0.0f;
-    int left = 0, len = 1;
-    void snap (float x) noexcept { v = from = target = x; left = 0; }
+    float v = 0.0f, target = 0.0f, e1 = 0.0f, e2 = 0.0f, p = 0.0f;
+    int left = 0, len = 0;
+    void snap (float x) noexcept { v = target = x; e1 = e2 = 0.0f; left = 0; }
     void to (float x, int n) noexcept
     {
-        if (x == target) return;   // the same target keeps the ramp on course: restarting it never lands with short blocks
-        from = v; target = x;
-        left = len = std::max (1, n);
+        if (x == target) return;
+        n = std::max (1, n);
+        if (n != len) { len = n; p = std::exp (-6.6f / (float) n); }
+        e1 += target - x; e2 = v - x; target = x;
+        left = 3 * n;
     }
     float next() noexcept
     {
         if (left > 0)
         {
-            if (--left == 0) v = target;
-            else v = from + (target - from) * (0.5f - 0.5f * std::cos (kPi * (float) (len - left) / (float) len));
+            if (--left == 0) { v = target; e1 = e2 = 0.0f; }
+            else { e1 *= p; e2 = p * e2 + (1.0f - p) * e1; v = target + e2; }
         }
         return v;
     }
