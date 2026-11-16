@@ -43,6 +43,7 @@ private:
     float held[16] {}; int nHeld = 0;
     int uiKeyWas = -1, padWas = -1; bool stripWas = false, arpInWas = false;
     float pitchTarget = 1.2f, pitch = 1.2f, pressure = 0.0f, midiPressure = 0.0f;
+    float pressUp = 0.02f, pressDown = 0.004f;
     float strip = 0.0f;
     int sel = 0;
     double arpPhase = 0.0; int arpIdx = 0;

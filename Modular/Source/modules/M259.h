@@ -63,6 +63,7 @@ private:
     double lockSamplesSince = 0.0, lockPeriod = 0.0;
     int lockDivCount = 0;
     float lockRatio = 1.0f;   // smoothed frequency correction factor
+    float lockK = 0.02f;      // its smoothing per sample, tau 1.03 ms
 
     Wavefolder259 folder;
     float foldGain[33] {};     // compensation vs A (0.25 .. 10 V)

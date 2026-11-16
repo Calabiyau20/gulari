@@ -139,6 +139,9 @@ static void spectrum (const std::vector<float>& x, double f0, double& rmsOut, do
 juce::SpinLock& lock666 (M666&);
 template <juce::SpinLock M666::* P> struct Lock666 { friend juce::SpinLock& lock666 (M666& m) { return m.*P; } };
 template struct Lock666<&M666::lock>;
+float& lockRatio259 (M259&);
+template <float M259::* P> struct LockRatio259 { friend float& lockRatio259 (M259& m) { return m.*P; } };
+template struct LockRatio259<&M259::lockRatio>;
 
 static void writeWav (const juce::File& f, const std::vector<float>& L, const std::vector<float>& R)
 {
@@ -1076,6 +1079,53 @@ int main (int argc, char** argv)
             // "reverberated only" carries the tank alone, so it keeps ringing with the mix knob down
             if (! std::isfinite (rec)) ok = false;
         }
+    }
+
+    // ---- per-sample smoothing comes from fs: the same times at 48 and 96 kHz ----
+    {
+        std::printf ("TIME CONSTANTS VS SAMPLE RATE (48 / 96 kHz)\n");
+        double up[2], down[2], lock[2], tail[2];
+        for (int r = 0; r < 2; ++r)
+        {
+            const double sr = r == 0 ? 48000.0 : 96000.0;
+            WcProcessor p; p.prepareToPlay (sr, 256);
+            float in[48] {}, out[48] {};
+            {   // 218 pressure: 90 % rise of a touch at 8 V, 90 % fall on release
+                auto& m = *p.rack.m218(); m.reset(); m.beginBlock (256);
+                m.touchPressure.store (0.8f); m.touchKey.store (7);
+                int n = 0; do { m.tick (in, out); ++n; } while (out[M218::Out_Pressure] < 7.2f && n < (int) sr);
+                up[r] = n * 1000.0 / sr;
+                for (int i = 0; i < (int) (sr * 0.1); ++i) m.tick (in, out);
+                m.touchKey.store (-1);
+                n = 0; do { m.tick (in, out); ++n; } while (out[M218::Out_Pressure] > 0.8f && n < (int) sr);
+                down[r] = n * 1000.0 / sr;
+            }
+            {   // 259 lock correction relaxing back to 1 with the lock off: 90 % of a step from 2
+                auto& m = *p.rack.m259 (0); m.reset(); m.beginBlock (256);
+                lockRatio259 (m) = 2.0f;
+                int n = 0; do { m.tick (in, out); ++n; } while (lockRatio259 (m) > 1.1f && n < (int) sr);
+                lock[r] = n * 1000.0 / sr;
+            }
+            {   // 275 tank: a 4 kHz tone dies at the same rate, energy 250-350 ms after it stops re 50-150 ms
+                auto& t = *p.rack.m275(); t.reset(); t.beginBlock (256);
+                const int burst = (int) (sr * 0.05);
+                double e1 = 0.0, e2 = 0.0;
+                for (int i = 0; i < burst + (int) (sr * 0.35); ++i)
+                {
+                    in[M275::In_Audio1] = i < burst ? (float) std::sin (6.283185307179586 * 4000.0 * i / sr) : 0.0f;
+                    t.tick (in, out);
+                    const double e = (double) out[M275::Out_Rev1] * out[M275::Out_Rev1];
+                    if (i >= burst + (int) (sr * 0.05) && i < burst + (int) (sr * 0.15)) e1 += e;
+                    if (i >= burst + (int) (sr * 0.25)) e2 += e;
+                }
+                tail[r] = 10.0 * std::log10 (e2 / e1);
+            }
+        }
+        std::printf ("  218 pressure 90 %%: up %.2f / %.2f ms, down %.2f / %.2f ms\n", up[0], up[1], down[0], down[1]);
+        std::printf ("  259 lock correction 90 %%: %.2f / %.2f ms\n", lock[0], lock[1]);
+        std::printf ("  275 tank, 4 kHz decay over 200 ms: %.1f / %.1f dB\n", tail[0], tail[1]);
+        auto same = [] (double a, double b) { return std::fabs (a / b - 1.0) < 0.03; };
+        if (! same (up[0], up[1]) || ! same (down[0], down[1]) || ! same (lock[0], lock[1]) || std::fabs (tail[0] - tail[1]) > 1.0) ok = false;
     }
 
     // ---- 3h. 291 Triple Morphing Filter ----

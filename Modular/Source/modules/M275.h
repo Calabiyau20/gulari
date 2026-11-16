@@ -31,6 +31,7 @@ private:
         Line comb[4], ap[2];
         int combLen[4] {}, apLen[2] {};
         float combLp[4] {}, disp[8] {};
+        float damp = 0.42f;
         void prepare (float fs, float spread);
         float process (float x) noexcept;
         void clear();

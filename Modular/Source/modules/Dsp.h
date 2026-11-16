@@ -42,6 +42,10 @@ struct OnePoleLP
     void reset() noexcept { z = 0.0f; }
 };
 
+// one-pole smoothing coefficient 1 - exp(-1/(tau fs)), with the tau that gave c48 per sample at 48 kHz:
+// exactly c48 at 48 kHz, the same time constant at any other rate
+inline float coefFrom48k (float c48, float fs) noexcept { return (float) (1.0 - std::exp (std::log (1.0 - (double) c48) * 48000.0 / (double) fs)); }
+
 // AC coupling (one-pole high pass)
 struct DcBlock
 {

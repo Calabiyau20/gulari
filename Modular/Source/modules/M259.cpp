@@ -24,6 +24,7 @@ void M259::prepare (double sampleRate)
     fsOs = fs * (float) kOs;
     rampLen = juce::jmax (1, (int) (0.012f * fs));   // 12 ms glide on every knob: no zipper, no clicks
     folder.prepare (fsOs);
+    lockK = coefFrom48k (0.02f, fs);
     amVactrol.set (3.0f, 40.0f, fs);                 // LED/LDR: fast on, slow off
     for (auto* d : { &acSine, &acSquare, &acFinal, &acMo, &acTri }) d->set (8.0f, fs);   // AC-coupled outputs
 
@@ -136,7 +137,7 @@ void M259::tick (const float* in, float* out) noexcept
             if (r >= 1.0f) { div = juce::jmax (1, (int) std::lround (r)); target = fin / (float) div; }
             else target = fin * (float) juce::jmax (1, (int) std::lround (1.0f / r));
             const float want = std::pow (target / poHz, lockA);
-            lockRatio += (want - lockRatio) * 0.02f;
+            lockRatio += (want - lockRatio) * lockK;
             if (event && ++lockDivCount >= div)
             {
                 lockDivCount = 0;
@@ -147,7 +148,7 @@ void M259::tick (const float* in, float* out) noexcept
             }
             lockLed.store (std::fabs (want - lockRatio) < 0.003f && lockA > 0.2f, std::memory_order_relaxed);
         }
-        else { lockRatio += (1.0f - lockRatio) * 0.02f; lockLed.store (false, std::memory_order_relaxed); }
+        else { lockRatio += (1.0f - lockRatio) * lockK; lockLed.store (false, std::memory_order_relaxed); }
         poHz *= lockRatio;
     }
 

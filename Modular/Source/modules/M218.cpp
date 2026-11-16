@@ -10,7 +10,12 @@ M218::M218 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     selP = apvts.getRawParameterValue (p + "sel");
 }
 
-void M218::prepare (double sampleRate) { fs = (float) sampleRate; reset(); }
+void M218::prepare (double sampleRate)
+{
+    fs = (float) sampleRate;
+    pressUp = dsp::coefFrom48k (0.02f, fs); pressDown = dsp::coefFrom48k (0.004f, fs);   // tau 1.03 ms up, 5.20 ms down
+    reset();
+}
 
 void M218::reset()
 {
@@ -71,7 +76,7 @@ void M218::tick (const float* in, float* out) noexcept
     }
     const float touchP = k >= 0 ? 10.0f * touchPressure.load (std::memory_order_relaxed) : 0.0f;
     const float pTarget = juce::jmax (touchP, nHeld > 0 ? midiPressure : 0.0f);
-    pressure += (pTarget - pressure) * (pTarget > pressure ? 0.02f : 0.004f);
+    pressure += (pTarget - pressure) * (pTarget > pressure ? pressUp : pressDown);
     // ---- arpeggiator ----
     if (arp != 2 && nHeld > 0)
     {

@@ -17,6 +17,7 @@ M275::M275 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
 void M275::Tank::prepare (float fs, float spread)
 {
     static const float combMs[4] = { 29.7f, 37.1f, 41.1f, 43.7f }, apMs[2] = { 5.0f, 1.7f };
+    damp = dsp::coefFrom48k (0.42f, fs);   // tau 38 us: the loop's damping corner stays near 4.2 kHz
     for (int i = 0; i < 4; ++i)
     {
         combLen[i] = juce::jmax (8, (int) ((combMs[i] + spread) * 0.001f * fs));
@@ -53,7 +54,7 @@ float M275::Tank::process (float x) noexcept
     for (int i = 0; i < 4; ++i)
     {
         const float d = comb[i].read (combLen[i]);
-        combLp[i] += (d - combLp[i]) * 0.42f;          // high-frequency damping in the loop
+        combLp[i] += (d - combLp[i]) * damp;           // high-frequency damping in the loop
         comb[i].push (y + combLp[i] * 0.84f);
         sum += d;
     }
