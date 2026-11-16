@@ -568,6 +568,50 @@ int main (int argc, char** argv)
         std::printf ("\n");
     }
     {
+        // the 4:1 decimator on every 259 output: flat to 18 kHz and 60 dB down from the host Nyquist up (what folds back).
+        // Sine on Final (Order 1, Timbre 0: Order 0 runs through the folder's 1.33 kHz pole), swept at 1 V/oct from 440 Hz
+        std::printf ("259 DECIMATOR\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m259 (0);
+        float in[24] {}, out[24] {};
+        setP (p, "a_volt1", 1.0f); setP (p, "a_po_freq", 0.5f); setP (p, "a_po_fine", 0.0f);
+        setP (p, "a_order", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_idx", 0.0f);
+        auto levelDb = [&] (double hz)   // the fundamental on Final, one Hann-windowed DFT bin
+        {
+            std::fill (std::begin (in), std::end (in), 0.0f); in[M259::In_PoPitch] = (float) std::log2 (hz / 440.0);
+            m.reset(); m.beginBlock (256);
+            for (int i = 0; i < 4800; ++i) m.tick (in, out);
+            const int N = 9600;
+            double re = 0.0, im = 0.0;
+            for (int i = 0; i < N; ++i)
+            {
+                m.tick (in, out);
+                const double w = 0.5 - 0.5 * std::cos (6.283185307 * i / N), ph = 6.283185307 * hz * i / SR;
+                re += out[M259::Out_Final1] * w * std::cos (ph); im += out[M259::Out_Final1] * w * std::sin (ph);
+            }
+            return 20.0 * std::log10 (4.0 * std::sqrt (re * re + im * im) / N);
+        };
+        const double ref = levelDb (1000.0);
+        double worstPass = 0.0;
+        std::printf ("  sine on Final re 1 kHz (want within 0.5 dB to 18 kHz):");
+        for (double hz : { 4000.0, 8000.0, 12000.0, 14000.0, 16000.0, 17000.0, 18000.0 })
+        {
+            const double db = levelDb (hz) - ref;
+            std::printf (" %.0fk %+.2f", hz / 1000.0, db);
+            worstPass = std::max (worstPass, std::fabs (db));
+        }
+        const auto h = dsp::Decimator4::makeTaps();
+        double worstStop = -999.0;
+        for (double f = SR / 2.0; f <= 2.0 * SR; f += 25.0)
+        {
+            double a = 0.0;
+            for (int n = 0; n < dsp::Decimator4::kTaps; ++n) a += h[(size_t) n] * std::cos (6.283185307 * f / (4.0 * SR) * (n - (dsp::Decimator4::kTaps - 1) / 2.0));
+            worstStop = std::max (worstStop, 20.0 * std::log10 (std::fabs (a) + 1e-30));
+        }
+        std::printf ("\n  taps: worst from 24 kHz up %.1f dB (want <= -60)\n", worstStop);
+        if (worstPass > 0.5 || worstStop > -60.0) ok = false;
+    }
+    {
         std::printf ("264 QUAD SAMPLE & HOLD\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m264();

@@ -67,15 +67,16 @@ struct Vactrol
     float process (float x) noexcept { y += (x - y) * (x > y ? up : down); return y; }
 };
 
-// Linear-phase FIR decimator 4:1 (63 taps, Kaiser beta 8, passband to ~0.42 fs_out)
+// Linear-phase FIR decimator 4:1 (99 taps, Kaiser beta 5.75): +-0.5 dB to 0.375 fs_out (18 kHz at 48 kHz),
+// at least 60 dB down from fs_out / 2, where the 4x rate folds back
 struct Decimator4
 {
-    static constexpr int kTaps = 63;
+    static constexpr int kTaps = 99;
     static std::array<float, kTaps> makeTaps()
     {
         std::array<float, kTaps> h {};
-        const double fc = 0.105;     // cycles / sample at the 4x rate
-        const double beta = 8.0;
+        const double fc = 0.106;     // cycles / sample at the 4x rate
+        const double beta = 5.75;
         auto bessel0 = [] (double x) { double s = 1.0, t = 1.0; for (int k = 1; k < 30; ++k) { t *= (x / (2.0 * k)) * (x / (2.0 * k)); s += t; } return s; };
         double sum = 0.0;
         for (int n = 0; n < kTaps; ++n)
