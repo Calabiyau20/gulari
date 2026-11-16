@@ -176,7 +176,7 @@ void WcEditor::updateLicenseUi()
 {
     const bool demo = proc.demo();
     licenseButton.setButtonText (demo ? "DEMO" : "LICENSED");
-    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, presets disabled.\nClick to pick your " + wc::License::keyFileName()
+    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, four LFOs, presets disabled.\nClick to pick your " + wc::License::keyFileName()
                                    : proc.license.summary());
     licenseButton.setColour (juce::TextButton::textColourOffId, demo ? juce::Colour (0xffe8a33a) : wc::ui::col::ledGreen);
     loadButton.setEnabled (! demo);
@@ -245,6 +245,14 @@ void WcEditor::refreshPatchMenu()
 
 void WcEditor::addModuleMenu()
 {
+    buildModuleMenu (proc).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
+    {
+        if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) rack.addModule (r - 1);
+    });
+}
+
+juce::PopupMenu WcEditor::buildModuleMenu (const WcProcessor& proc)
+{
     juce::PopupMenu m;
     m.addSectionHeader ("Add to the rack");
     auto addType = [&] (int first, int count, const juce::String& title)
@@ -254,11 +262,13 @@ void WcEditor::addModuleMenu()
             if (! proc.isPresent (first + i))
             {
                 const bool ok = proc.canAdd (first + i);
-                m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")" + (ok ? "" : "  - demo: 2 oscillators"), ok);
+                const auto why = typeOfInst (first + i) == MT_111 ? "  - demo: 4 LFOs" : "  - demo: 2 oscillators";
+                m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")" + (ok ? "" : why), ok);
                 any = true;
             }
         if (! any) m.addItem (999, title + "  - all slots in use", false);
     };
+    addType (kInst111, kMax111, "LF-111 Classic LFO");
     addType (kInst218, kMax218, "KB-218 Touch Activated Voltage Source");
     addType (kInst242, kMax242, "PP-242 Programmable Pulser");
     addType (kInst245, kMax245, "SV-245 Sequential Voltage Source");
@@ -282,10 +292,7 @@ void WcEditor::addModuleMenu()
     addType (kInst284, kMax284, "QE-284 Quad Envelope Generator");
     addType (kInst291, kMax291, "TM-291 Triple Morphing Filter");
     addType (kInst666, kMax666, "SC-666 Oscilloscope");
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton), [this] (int r)
-    {
-        if (r >= 1 && r <= kNumInst && isRemovable (r - 1)) rack.addModule (r - 1);
-    });
+    return m;
 }
 
 void WcEditor::paint (juce::Graphics& g)

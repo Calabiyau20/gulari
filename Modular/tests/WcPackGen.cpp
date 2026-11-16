@@ -805,7 +805,7 @@ int main (int argc, char** argv)
     outDir.createDirectory();
 
     // The generator has to run licensed. In demo mode setPresent() silently refuses the third and
-    // fourth oscillator, so a pack built without a licence would quietly be a two-voice pack - which
+    // fourth oscillator (and the fifth LFO on), so a pack built without a licence would quietly be a two-voice pack - which
     // is exactly how the 300-preset library ended up never using the 259 C and D.
     juce::TemporaryFile keyHolder (".key");
     const juce::File keyFile = keyHolder.getFile().getParentDirectory().getChildFile (wc::License::keyFileName());
@@ -823,9 +823,9 @@ int main (int argc, char** argv)
         probe.recheckLicense (keyFile);
         if (probe.demo())
         {
-            std::printf ("FAILED: the generator is in demo mode, so the rack caps at %d oscillators.\n"
+            std::printf ("FAILED: the generator is in demo mode, so the rack caps at %d oscillators and %d LFOs.\n"
                          "Pass the private signing key file as the third argument.\n",
-                         wc::License::kDemoMaxOscillators);
+                         wc::License::kDemoMaxOscillators, wc::License::kDemoMaxLfos);
             return 1;
         }
     }

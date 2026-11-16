@@ -1607,7 +1607,69 @@ int main (int argc, char** argv)
             }
         wc::ui::skin::current = 0;
         rv->setZoom (1.0f);
-        std::printf ("LF-111: 19 controls on the panel, ASSIGN \"LFO A\" / \"LFO B\", lit buttons pick, readouts (buttons, RATE in SYNC, tempo, clock), 40 %% light, range  %s\n",
+        pump (20);
+        // the free ASSIGN is in the Calabi Yau cyan (decision 8), the assigned one orange
+        proc.assign (A, wc::M111::Out_Lfo, "a_timbre", 0.25f);
+        pump (20);
+        auto pixel = [&] (juce::Component& c)
+        {
+            auto* pn = c.getParentComponent();
+            const auto pt = pn->getLocalPoint (&c, juce::Point<float> (13.0f, 13.0f)).roundToInt();
+            return pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f).getPixelAt (pt.x, pt.y);
+        };
+        auto same = [] (juce::Colour a, juce::Colour b) { return std::abs (a.getRed() - b.getRed()) < 12 && std::abs (a.getGreen() - b.getGreen()) < 12 && std::abs (a.getBlue() - b.getBlue()) < 12; };
+        check (same (pixel (*assignB), juce::Colour (0xff27c7d8)) && same (pixel (*assignA), wc::ui::col::mod),
+               "ASSIGN colours: free " + pixel (*assignB).toDisplayString (false) + ", assigned " + pixel (*assignA).toDisplayString (false));
+        proc.unassignSource (A, wc::M111::Out_Lfo);
+        // demo: "+ MODULE" with four LFOs in the rack greys the other four and says why; the DEMO tooltip names them
+        {
+            WcProcessor demo;
+            demo.license = wc::License();
+            demo.prepareToPlay (48000.0, 512);
+            for (int i = 0; i < wc::kMax111; ++i) demo.setPresent (wc::kInst111 + i, true);   // the fifth on: refused
+            std::unique_ptr<juce::AudioProcessorEditor> de (demo.createEditor());
+            de->setSize (1400, 900);
+            pump (40);
+            auto menu = WcEditor::buildModuleMenu (demo);
+            juce::StringArray lfos;
+            for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+                if (it.getItem().text.startsWith ("LF-111")) lfos.add (it.getItem().text + (it.getItem().isEnabled ? "" : " (off)"));
+            WcProcessor full;
+            full.license.status = wc::License::Status::Licensed;
+            juce::StringArray lfosLicensed;
+            const auto menuLicensed = WcEditor::buildModuleMenu (full);
+            for (juce::PopupMenu::MenuItemIterator it (menuLicensed); it.next();)
+                if (it.getItem().text.startsWith ("LF-111")) lfosLicensed.add (it.getItem().text + (it.getItem().isEnabled ? "" : " (off)"));
+            juce::String tip;
+            for (auto* c : de->getChildren()) if (auto* tb = dynamic_cast<juce::TextButton*> (c)) if (tb->getButtonText() == "DEMO") tip = tb->getTooltip();
+            const bool fourIn = ! demo.isPresent (wc::kInst111 + 4) && demo.isPresent (wc::kInst111 + 3);
+            check (fourIn && lfos.joinIntoString ("|") == "LF-111 Classic LFO  (LFO E)  - demo: 4 LFOs (off)|LF-111 Classic LFO  (LFO F)  - demo: 4 LFOs (off)|"
+                                                     "LF-111 Classic LFO  (LFO G)  - demo: 4 LFOs (off)|LF-111 Classic LFO  (LFO H)  - demo: 4 LFOs (off)"
+                   && lfosLicensed.size() == 8 && lfosLicensed[0] == "LF-111 Classic LFO  (LFO A)"
+                   && tip == "Demo mode: two oscillators, four LFOs, presets disabled.\nClick to pick your WestCoastModular.key",
+                   "demo menu: " + lfos.joinIntoString (" | ") + " / licensed " + lfosLicensed[0] + " / tip " + tip);
+            // a capture of it open, next to the "+ MODULE" button
+            juce::TextButton* add = nullptr;
+            for (auto* c : de->getChildren()) if (auto* tb = dynamic_cast<juce::TextButton*> (c)) if (tb->getButtonText() == "+ MODULE") add = tb;
+            if (add != nullptr)
+            {
+                quietXErrors();
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (add));
+                juce::Component* win = nullptr;
+                for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                    if (auto* c = juce::Desktop::getInstance().getComponent (i)) if (c->isVisible() && c != de.get() && c != ed.get()) win = c;
+                if (win != nullptr)
+                {
+                    const auto img = win->createComponentSnapshot (win->getLocalBounds().withHeight (juce::jmin (win->getHeight(), 260)), true, 1.0f);
+                    save (img, "lfo_demo_menu.png");
+                }
+                check (win != nullptr, "the demo menu did not open");
+                juce::PopupMenu::dismissAllActiveMenus();
+                pump (60);
+            }
+            ed->toFront (false);
+        }
+        std::printf ("LF-111: 19 controls on the panel, ASSIGN \"LFO A\" / \"LFO B\", lit buttons pick, readouts (buttons, RATE in SYNC, tempo, clock), 40 %% light, range, ASSIGN colours, demo menu and tooltip  %s\n",
                      bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
         if (! bad.isEmpty()) return 1;
     }
