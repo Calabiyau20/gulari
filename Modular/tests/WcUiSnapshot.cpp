@@ -1042,6 +1042,370 @@ int main (int argc, char** argv)
         if (! bad.isEmpty()) { std::printf ("rows: BAD: %s\n", bad.joinIntoString ("; ").toRawUTF8()); return 1; }
     }
 
+    // ---- modulation by drag: an ASSIGN button (made here: no published panel has one yet) on the 281 A, cycling ----
+    {
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        const auto left = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+        const auto ctrl = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::commandModifier);
+        auto at = [] (juce::Component& c, juce::Point<float> screen, juce::ModifierKeys mods)   // an event at a screen point
+        {
+            const auto pos = c.getLocalPoint (nullptr, screen);
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, 1, false);
+        };
+        WcProcessor proc;
+        proc.license.status = wc::License::Status::Licensed;
+        proc.prepareToPlay (48000.0, 512);
+        for (int i : { wc::kInst281, wc::kInst259, wc::kInst292, wc::kInst207, wc::kInst250, wc::kInst252, wc::kInst666 }) proc.setPresent (i, true);
+        auto setP = [&proc] (const juce::String& id, float plain) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (plain)); };
+        auto norm = [&proc] (const juce::String& id) { return proc.apvts.getParameter (id)->getValue(); };
+        setP ("fa_mode1", 2.0f); setP ("fa_att1", 0.4f); setP ("fa_dec1", 0.4f);   // 281 A cycling, 0 .. 10 V
+        auto run = [&proc] (int blocks) { for (int b = 0; b < blocks; ++b) { juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer m; proc.processBlock (buf, m); } };
+        run (20);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        pump (40);
+        wc::ui::RackView* rv = nullptr;
+        wc::ui::ValueReadout* ro = nullptr;
+        juce::Viewport* vp = nullptr;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+            if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+            if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+            for (auto* ch : c.getChildren()) walk (*ch);
+        };
+        walk (*ed);
+        auto panelOf = [&] (int inst) -> wc::ui::ModulePanel*
+        {
+            for (auto* c : rv->content.getChildren()) if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (c)) if (p->inst == inst) return p;
+            return nullptr;
+        };
+        auto knob = [&] (int inst, std::function<bool (wc::ui::WcKnob&)> want) -> wc::ui::WcKnob*
+        {
+            if (auto* p = panelOf (inst)) for (auto* ch : p->getChildren()) if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch)) if (want (*k)) return k;
+            return nullptr;
+        };
+        auto byId = [&] (int inst, const juce::String& id) { return knob (inst, [id] (wc::ui::WcKnob& k) { return k.paramId == id; }); };
+        auto bySize = [&] (int inst, float w) { return knob (inst, [&proc, w] (wc::ui::WcKnob& k) { return k.param != nullptr && k.isRotary() && k.readoutAnchor().getWidth() == w && proc.isModulatable (k.paramId); }); };
+        auto* p281 = panelOf (wc::kInst281);
+        auto* timbre = byId (wc::kInst259, "a_timbre");
+        auto* freq = byId (wc::kInst259, "a_po_freq");
+        auto* big = bySize (wc::kInst259, 66.0f);
+        auto* small = bySize (wc::kInst259, 28.0f);
+        auto* fader = byId (wc::kInst207, "mx_lvl_a");
+        auto* scope = knob (wc::kInst666, [] (wc::ui::WcKnob& k) { return k.param != nullptr; });
+        auto* cell = knob (wc::kInst252, [] (wc::ui::WcKnob& k) { return k.param == nullptr && k.describe != nullptr; });
+        auto* ring = byId (wc::kInst252, "rg_ring");
+        auto* stage = knob (wc::kInst250, [] (wc::ui::WcKnob& k) { return k.paramId.startsWith ("sq_v"); });   // v{s}_n: follows the voltage set
+        juce::Component* lever = nullptr;
+        if (auto* p = panelOf (wc::kInst292))
+            for (auto* ch : p->getChildren())
+                if (auto* src = dynamic_cast<wc::ui::ReadoutSource*> (ch)) { wc::ui::ReadoutText t; if (dynamic_cast<wc::ui::ParamSwitch*> (ch) && src->readoutText (t) && t.name == "292 A 1 Mode") lever = ch; }
+        if (rv == nullptr || ro == nullptr || vp == nullptr || p281 == nullptr || timbre == nullptr || freq == nullptr || big == nullptr || small == nullptr || fader == nullptr
+            || scope == nullptr || cell == nullptr || ring == nullptr || stage == nullptr || lever == nullptr)
+        { std::printf ("modulation: a control is missing  BAD\n"); return 1; }
+        const int src = wc::M281::outFunc (0);
+        wc::ui::AssignButton lfo (*rv, wc::kInst281, src, "LFO");   // next to the FUNC output of A, as a panel would place it
+        lfo.setBounds (325 - 13, 101 - 13, 26, 26);
+        p281->addAndMakeVisible (lfo);
+        quietXErrors();
+
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto save = [&] (const juce::Image& img, const juce::String& name)
+        {
+            auto file = shots.getChildFile (name);
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        auto bring = [&] (juce::Component& c)
+        {
+            const auto r = rv->getLocalArea (&c, c.getLocalBounds());
+            vp->setViewPosition (juce::jmax (0, r.getCentreX() - 300), juce::jmax (0, r.getCentreY() - 220));
+            pump (20);
+        };
+        // what is around the controls (and the readout, if up), at 2x
+        auto crop = [&] (std::initializer_list<juce::Component*> cs, int margin = 40)
+        {
+            juce::Rectangle<int> area;
+            for (auto* c : cs) area = area.isEmpty() ? ed->getLocalArea (c, c->getLocalBounds()) : area.getUnion (ed->getLocalArea (c, c->getLocalBounds()));
+            if (ro->isVisible()) area = area.getUnion (ro->getBounds());
+            return ed->createComponentSnapshot (area.expanded (margin).getIntersection (ed->getLocalBounds()), true, 2.0f);
+        };
+        auto pixel = [&] (juce::Component& c, juce::Point<float> local)   // as the panel paints it, children and all
+        {
+            auto* pn = c.getParentComponent();
+            const auto pt = pn->getLocalPoint (&c, local).roundToInt();
+            return pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f).getPixelAt (pt.x, pt.y);
+        };
+        auto near = [] (juce::Colour a, juce::Colour b) { return std::abs (a.getRed() - b.getRed()) < 40 && std::abs (a.getGreen() - b.getGreen()) < 40 && std::abs (a.getBlue() - b.getBlue()) < 40; };
+        const auto centre = juce::Point<float> (13.0f, 13.0f);
+        // the middle of a control as it is drawn (a lever: its nut, not its labels)
+        auto middle = [] (juce::Component& c) { auto* src = dynamic_cast<wc::ui::ReadoutSource*> (&c); return src != nullptr ? src->readoutAnchor().getCentre() : c.getLocalBounds().toFloat().getCentre(); };
+        // a drag from the button to the middle of a control (released or not)
+        auto dragTo = [&] (juce::Component& target, bool release)
+        {
+            bring (target);
+            const auto from = lfo.localPointToGlobal (centre);
+            lfo.mouseDown (at (lfo, from, left));
+            lfo.mouseDrag (at (lfo, from + juce::Point<float> (6.0f, 0.0f), left));   // past 4 px: the drag starts (and may scroll the view)
+            bring (target);
+            const auto to = target.localPointToGlobal (middle (target));
+            lfo.mouseDrag (at (lfo, to, left));
+            if (release) lfo.mouseUp (at (lfo, to, left));
+            pump (10);
+        };
+        auto release = [&] (juce::Component& target) { lfo.mouseUp (at (lfo, target.localPointToGlobal (middle (target)), left)); pump (10); };
+        auto rows = [&proc] { return (int) proc.getAssignments().size(); };
+        juce::StringArray bad;
+        auto check = [&] (bool ok, const juce::String& what) { if (! ok) bad.add (what); };
+        using D = wc::ui::RackView::Drop;
+
+        // free: blue, its tooltip, a click says what it does
+        bring (lfo);
+        check (near (pixel (lfo, centre), wc::ui::col::modFree), "free button not blue: " + pixel (lfo, centre).toDisplayString (false));
+        check (lfo.getTooltip() == "Drag onto a knob or fader to modulate it", "free tooltip: " + lfo.getTooltip());
+        lfo.mouseDown (at (lfo, lfo.localPointToGlobal (centre), left));
+        lfo.mouseUp (at (lfo, lfo.localPointToGlobal (centre), left));
+        pump (20);
+        check (ro->isUp() && ro->targetComponent() == &lfo && ro->current().name == "LFO" && ro->current().value == "Drag this button onto a knob" && rows() == 0, "click on a free button: " + ro->current().value);
+        save (crop ({ &lfo }), "assign_free.png");
+        ro->release();
+
+        // 2. onto a lever: red line, the readout says why, the drop does nothing
+        dragTo (*lever, false);
+        check (rv->assigning() && rv->assignDrop == D::Lever && ro->isHolding() && ro->targetComponent() == lever && ro->current().value == "Can't be modulated"
+               && ro->current().note == "Levers and selectors jump: only knobs and faders" && ro->current().warn, "over a lever: " + ro->current().value + " / " + ro->current().note
+);
+        save (crop ({ lever, &lfo }), "assign_drag_lever.png");
+        release (*lever);
+        check (rows() == 0 && ! rv->assigning() && ! ro->isHolding(), "a drop on a lever assigned something");
+        // the other knobs that cannot be modulated, each with its reason
+        for (auto [c, d, note] : { std::tuple<juce::Component*, D, const char*> { scope, D::Scope, "Display settings of the 666" },
+                                   { cell, D::Cell, "It edits the cell under the cursor, not a parameter" },
+                                   { ring, D::EditKnob, "This knob picks what the panel edits" } })
+        {
+            dragTo (*c, false);
+            check (rv->assignDrop == d && ro->isHolding() && ro->current().value == "Can't be modulated" && ro->current().note == note, juce::String ("over ") + note + ": " + ro->current().note);
+            release (*c);
+        }
+        dragTo (*stage, false);
+        check (rv->assignDrop == D::Valid && ro->current().note == "This stage only - the knob shows other stages too", "over a 250 stage knob: " + ro->current().note);
+        // Esc: nothing changes
+        ed->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+        release (*stage);
+        check (rows() == 0 && ! rv->assigning() && ! ro->isHolding(), "Esc did not cancel the drag");
+        check (rv->candidate (*timbre) == 0, "a candidate with no drag");
+
+        // 3. onto 259 Timbre: the preview, then +25 % and the button turns orange
+        dragTo (*timbre, false);
+        check (rv->assignDrop == D::Valid && rv->candidate (*timbre) == 2 && rv->candidate (*freq) == 1 && ro->current().value == "Release to modulate", "over Timbre: " + ro->current().value);
+        save (crop ({ timbre, &lfo }), "assign_drag_valid.png");
+        release (*timbre);
+        const bool one = rows() == 1 && proc.getAssignments()[0].depth == 0.25f && proc.getAssignments()[0].srcJack == src;
+        check (one && ro->current().value == juce::String (juce::CharPointer_UTF8 ("LFO: +25 %")) && ro->current().note.endsWith ("drag the knob to change the depth"), "dropped on Timbre: " + ro->current().value);
+        save (crop ({ timbre }), "assign_dropped.png");
+        pump (30);
+        check (near (pixel (lfo, centre), wc::ui::col::mod), "assigned button not orange: " + pixel (lfo, centre).toDisplayString (false));
+        check (lfo.getTooltip().startsWith ("Modulates 1 control. "), "assigned tooltip: " + lfo.getTooltip());
+        pump (wc::ui::RackView::kLearnedMs + wc::ui::ValueReadout::kFadeMs + 200);
+        check (! ro->isUp(), "the \"LFO: +25 %\" readout stayed");
+        bring (lfo);
+        save (crop ({ &lfo }), "assign_assigned.png");
+        // again on it: no second row; it says so while over it
+        dragTo (*timbre, false);
+        check (rv->assignDrop == D::Already && ro->current().value == "Already modulated by LFO", "over Timbre again: " + ro->current().value);
+        release (*timbre);
+        check (rows() == 1, "a second row for the same pair");
+
+        // 6. Ctrl+drag: on a knob with no modulation the knob stays and the readout says why; on Timbre the depth moves
+        auto ctrlDrag = [&] (wc::ui::WcKnob& k, float px, juce::ModifierKeys mods, bool up)
+        {
+            bring (k);
+            const auto c = k.getLocalBounds().toFloat().getCentre();
+            k.mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), c, mods, 1.0f, 0, 0, 0, 0, &k, &k, juce::Time::getCurrentTime(), c, juce::Time::getCurrentTime(), 1, false));
+            k.mouseDrag (at (k, k.localPointToGlobal (c + juce::Point<float> (px, 0.0f)), mods));
+            if (up) k.mouseUp (at (k, k.localPointToGlobal (c + juce::Point<float> (px, 0.0f)), mods));
+        };
+        setP ("a_po_freq", 400.0f);
+        const float f0 = norm ("a_po_freq");
+        ctrlDrag (*freq, 60.0f, ctrl, false);
+        check (norm ("a_po_freq") == f0 && ro->current().note == "No modulation here: drag an ASSIGN button onto it" && ! ro->current().warn, "Ctrl+drag with no modulation: " + juce::String (norm ("a_po_freq") - f0) + " " + ro->current().note);
+        freq->mouseUp (at (*freq, freq->localPointToGlobal (juce::Point<float> (60.0f, 0.0f)), ctrl));
+        setP ("a_timbre", 0.0f);
+        const float t0 = norm ("a_timbre");
+        ctrlDrag (*timbre, 125.0f, ctrl, false);   // half a turn: +50 %
+        const float d1 = proc.getAssignments()[0].depth;
+        check (norm ("a_timbre") == t0 && std::abs (d1 - 0.75f) < 1.0e-4f && ro->current().value == juce::String (juce::CharPointer_UTF8 ("LFO: +75 %"))
+               && ro->current().note.startsWith ("Sweeps ") && ! ro->current().warn, "Ctrl+drag on Timbre: depth " + juce::String (d1) + " \"" + ro->current().value + "\" " + ro->current().note);
+        save (crop ({ timbre }), "assign_ctrl_drag_depth.png");
+        timbre->mouseUp (at (*timbre, timbre->localPointToGlobal (juce::Point<float> (125.0f, 0.0f)), ctrl));
+        // with Alt: 10 % steps, said in the readout; down through 0 to negative
+        ctrlDrag (*timbre, -255.0f, juce::ModifierKeys (ctrl.getRawFlags() | juce::ModifierKeys::altModifier), false);
+        const float d2 = proc.getAssignments()[0].depth;
+        check (std::abs (d2 - (-0.3f)) < 1.0e-4f && ro->current().note.endsWith ("10 % steps"), "Alt+Ctrl+drag: depth " + juce::String (d2) + " " + ro->current().note);
+        timbre->mouseUp (at (*timbre, timbre->localPointToGlobal (juce::Point<float> (-255.0f, 0.0f)), ctrl));
+
+        // the ring: big, normal and small knobs and a fader; the arc is orange half way along it, the live dot moves
+        proc.setDepth (wc::kInst281, src, "a_timbre", 0.5f);
+        setP ("a_timbre", 0.3f);
+        for (auto* k : { big, small, (wc::ui::WcKnob*) fader }) check (proc.assign (wc::kInst281, src, k->paramId, 0.4f), "assign " + k->paramId);
+        run (10);
+        pump (wc::ui::ValueReadout::kLingerMs + 300);   // the readout of the last drag gone
+        auto arcAt = [&] (wc::ui::WcKnob& k, float n)   // a point on the arc, in the knob's coordinates
+        {
+            const auto a = k.readoutAnchor();
+            const float r = a.getWidth() * 0.5f + 5.0f, th = juce::MathConstants<float>::pi * (1.2f + 1.6f * n);
+            return a.getCentre() + juce::Point<float> (r * std::sin (th), -r * std::cos (th));
+        };
+        bring (*timbre);
+        check (near (pixel (*timbre, arcAt (*timbre, 0.3f + 0.25f)), wc::ui::col::mod), "no arc on Timbre: " + pixel (*timbre, arcAt (*timbre, 0.55f)).toDisplayString (false));
+        check (! near (pixel (*timbre, arcAt (*timbre, 0.15f)), wc::ui::col::mod), "arc below the base on Timbre");
+        save (crop ({ timbre }), "assign_ring_normal.png");
+        bring (*big);   save (crop ({ big }), "assign_ring_big.png");
+        bring (*small); save (crop ({ small }), "assign_ring_small.png");
+        bring (*fader); save (crop ({ fader }), "assign_ring_fader.png");
+        check (near (pixel (*fader, { 13.0f, (float) fader->getPositionOfValue (fader->proportionOfLengthToValue (fader->valueToProportionOfLength (fader->getValue()) + 0.25)) }), wc::ui::col::mod),
+               "no bar in the fader");
+        const auto liveA = proc.rack.effective (timbre->param->getParameterIndex());
+        run (3);
+        check (liveA != proc.rack.effective (timbre->param->getParameterIndex()), "the 281 does not move Timbre");
+        // hover: the sources on the third line, the readout keeps off the ring
+        bring (*timbre);
+        timbre->mouseEnter (at (*timbre, timbre->localPointToGlobal (timbre->getLocalBounds().toFloat().getCentre()), {}));
+        pump (500);
+        check (ro->isUp() && ro->current().note == juce::String (juce::CharPointer_UTF8 ("LFO +50 %")) && ! ro->getBounds().toFloat().intersects (ed->getLocalArea (timbre, timbre->readoutAnchor()).expanded (5.0f + 2.0f)),
+               "hover on Timbre: " + ro->current().note);
+        save (crop ({ timbre }), "assign_hover.png");
+        timbre->mouseExit (at (*timbre, { -5.0f, -5.0f }, {}));
+        // cut: base 0.9 + 50 % goes past the max
+        setP ("a_timbre", 0.9f);
+        pump (40);
+        check (near (pixel (*timbre, arcAt (*timbre, 0.95f)), wc::ui::col::mod), "no arc to the max on a cut ring: " + pixel (*timbre, arcAt (*timbre, 0.95f)).toDisplayString (false) + " base " + juce::String (norm ("a_timbre")));
+        save (crop ({ timbre }), "assign_ring_cut.png");
+        ctrlDrag (*timbre, 0.0f, ctrl, false);
+        timbre->mouseDrag (at (*timbre, timbre->localPointToGlobal (timbre->getLocalBounds().toFloat().getCentre() + juce::Point<float> (5.0f, 0.0f)), ctrl));
+        check (ro->current().warn && ro->current().note.endsWith ("cut at the max"), "a cut ring, Ctrl+drag: " + ro->current().note);
+        save (crop ({ timbre }), "assign_ctrl_drag_cut.png");
+        timbre->mouseUp (at (*timbre, timbre->localPointToGlobal (juce::Point<float> (5.0f, 0.0f)), ctrl));
+        setP ("a_timbre", 0.3f);
+        proc.setDepth (wc::kInst281, src, "a_timbre", 0.5f);
+
+        // the menus: the knob's and the button's; what their items do
+        auto grabMenu = [&] (juce::Component& c, const juce::String& file)
+        {
+            juce::Component* menu = nullptr;
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                if (auto* w = juce::Desktop::getInstance().getComponent (i)) if (w->isVisible() && w != ed.get()) menu = w;
+            if (menu == nullptr) { check (false, "no menu for " + file); return; }
+            auto img = menu->createComponentSnapshot (menu->getLocalBounds(), true, 2.0f);
+            const auto ca = ed->getLocalArea (&c, c.getLocalBounds());
+            const juce::Rectangle<int> box (ca.getCentreX(), ca.getCentreY(), menu->getWidth(), menu->getHeight());
+            const auto area = ca.getUnion (box).expanded (40).getIntersection (ed->getLocalBounds());
+            auto base = ed->createComponentSnapshot (area, true, 2.0f);
+            juce::Graphics g (base);
+            g.drawImageAt (img, (box.getX() - area.getX()) * 2, (box.getY() - area.getY()) * 2);
+            save (base, file);
+            juce::PopupMenu::dismissAllActiveMenus();
+            pump (60);
+        };
+        bring (*timbre);
+        rv->paramMenu (*timbre, "a_timbre", true);
+        grabMenu (*timbre, "assign_menu_knob.png");
+        rv->menuChoice ("a_timbre", 300, false, timbre);   // Set depth: the field, with the depth selected
+        check (ro->isEditing() && ro->field.getText() == juce::String (juce::CharPointer_UTF8 ("+50 %")) && ro->current().name.endsWith ("LFO depth"), "Set depth: " + ro->field.getText());
+        ro->field.setText ("forty");
+        ro->commitEdit (true);
+        check (ro->isEditing() && ro->showsError() && ro->current().note == juce::String (juce::CharPointer_UTF8 ("Not a depth \xe2\x80\x93 try +40 % or -25")), "a bad depth: " + ro->current().note);
+        save (crop ({ timbre }), "assign_type_depth_error.png");
+        ro->field.setText ("- 40");
+        ro->commitEdit (true);
+        check (! ro->isEditing() && std::abs (proc.getAssignments()[0].depth + 0.4f) < 1.0e-6f, "-40 typed: " + juce::String (proc.getAssignments()[0].depth));
+        rv->menuChoice ("a_timbre", 300, false, timbre);
+        ro->field.setText ("150%");
+        ro->commitEdit (true);
+        check (proc.getAssignments()[0].depth == 1.0f && ro->current().note == "Limited to +100 % (max)", "150 % typed: " + ro->current().note);
+        rv->menuChoice ("a_timbre", 332, false, timbre);   // Remove LFO
+        check (rows() == 3 && rv->modsOf ("a_timbre").empty(), "Remove LFO from the knob's menu");
+        rv->menuChoice ("a_timbre", 364, false, timbre);   // Modulate with > LFO
+        check (rows() == 4 && rv->modsOf ("a_timbre").size() == 1 && proc.getAssignments().back().depth == 0.25f, "Modulate with > LFO");
+        pump (wc::ui::RackView::kLearnedMs + 300);
+        bring (lfo);
+        rv->assignMenu (wc::kInst281, src);
+        grabMenu (lfo, "assign_menu_button.png");
+        rv->assignChoice (wc::kInst281, src, 101);         // Remove the first (the big knob)
+        check (rows() == 3 && ro->isHolding() && ro->current().note.startsWith ("Removed from 259 A"), "Remove from the button's menu: " + ro->current().note);
+        rv->assignChoice (wc::kInst281, src, 200);         // Remove all
+        pump (30);
+        check (rows() == 0 && near (pixel (lfo, centre), wc::ui::col::modFree), "Remove all: " + juce::String (rows()) + " rows left");
+        ro->release();
+
+        // 4. 64 in use: the drag says so over the button the whole way, no candidates, the drop adds nothing; a knob it
+        //    modulates already can still be made the current one
+        {
+            juce::StringArray ids;
+            for (auto* prm : proc.getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                    for (auto* pre : { "fa_", "a_", "mx_", "sq_" })
+                        if (rp->getParameterID().startsWith (pre) && rp->getParameterID() != "a_timbre" && proc.isModulatable (rp->getParameterID())) { ids.add (rp->getParameterID()); break; }
+            proc.assign (wc::kInst281, src, "a_po_freq", 0.1f);
+            for (int k = 0; rows() < 64 && k < ids.size(); ++k) proc.assign (wc::kInst281, src, ids[k], 0.1f);
+            pump (30);
+            dragTo (*timbre, false);
+            check (rv->assignFull && rv->assignDrop == D::None && rv->candidate (*timbre) == 0 && ro->isHolding() && ro->targetComponent() == &lfo
+                   && ro->current().value == "64 of 64 modulations in use", "full table: " + ro->current().value);
+            save (crop ({ timbre, &lfo }), "assign_table_full.png");
+            release (*timbre);
+            check (rows() == 64 && rv->modsOf ("a_timbre").empty(), "full table: the drop added one");
+            dragTo (*freq, true);
+            check (rows() == 64 && ro->current().value.startsWith ("LFO: "), "full table: a knob it modulates already");
+        }
+        // 5. a module out of the rack takes its rows; the button follows
+        proc.unassignSource (wc::kInst281, src);
+        proc.assign (wc::kInst281, src, "a_timbre", 0.25f);
+        proc.assign (wc::kInst281, src, "mx_lvl_b", 0.25f);
+        proc.setPresent (wc::kInst259, false);
+        pump (30);
+        check (rows() == 1 && rv->modCount (wc::kInst281, src) == 1, "259 out of the rack: " + juce::String (rows()) + " rows");
+        p281 = panelOf (wc::kInst281);   // the rebuild made the panels again: the button made here goes on the new one
+        p281->addAndMakeVisible (lfo);
+        proc.setPresent (wc::kInst259, true);
+        pump (30);
+        panelOf (wc::kInst281)->addAndMakeVisible (lfo);
+        timbre = byId (wc::kInst259, "a_timbre");
+        proc.assign (wc::kInst281, src, "a_timbre", 0.25f);
+        proc.assign (wc::kInst281, src, timbre != nullptr ? "a_po_freq" : "", -0.3f);
+        run (5);
+        pump (60);
+        // Classic and Neon Void, 100 % and 50 %
+        if (timbre != nullptr)
+        {
+            for (float z : { 0.5f, 1.0f })
+                for (int sk : { 0, 1 })
+                {
+                    wc::ui::skin::current = sk;
+                    rv->setZoom (z);
+                    pump (20);
+                    bring (*timbre);
+                    for (auto* c : rv->content.getChildren()) c->repaint();
+                    pump (40);
+                    const auto name = juce::String ("assign_") + (sk ? "neon" : "classic") + "_zoom" + juce::String (juce::roundToInt (z * 100));
+                    save (crop ({ timbre }, 30), name + ".png");
+                    bring (lfo);
+                    save (crop ({ &lfo }, 30), name + "_button.png");
+                }
+            wc::ui::skin::current = 0;
+            rv->setZoom (1.0f);
+            pump (20);
+        }
+        std::printf ("modulation by drag: button, lever and the other refusals, Esc, drop and preview, again, Ctrl+drag (none, depth, Alt, cut), ring, live dot, hover, menus, typing, 64, module out  %s\n",
+                     bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
+        if (! bad.isEmpty()) return 1;
+    }
+
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {
         WcProcessor proc;
