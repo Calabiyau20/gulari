@@ -672,6 +672,13 @@ int main (int argc, char** argv)
                 rv->startLearn ("rg_bpm");
                 rv->menuChoice ("rg_bpm", 201, true, nullptr);
                 check ((br.end - br.start) / br.interval > 181.0f && ! rv->learning() && norm ("rg_bpm") == bpm, "Cancel MIDI Learn set Master BPM to " + juce::String (norm ("rg_bpm")));
+                // 300 - 399 are the Modulation block: never a value, though 300 - 20 is a step of Master BPM; and the
+                // list shows 64 values, so no ID past 83 is one
+                for (int r : { 300, 332, 364, 399, 84, 199 })
+                {
+                    rv->menuChoice ("rg_bpm", r, false, nullptr);
+                    check (norm ("rg_bpm") == bpm, "menu ID " + juce::String (r) + " set Master BPM to " + juce::String (norm ("rg_bpm")));
+                }
                 rv->menuChoice ("a_po_freq", 200, false, nullptr);
                 check (rv->learningId() == "a_po_freq", "MIDI Learn from the menu");
                 rv->menuChoice ("a_po_freq", 0, true, nullptr);   // its menu closed without a choice

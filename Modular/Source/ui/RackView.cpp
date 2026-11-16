@@ -2274,11 +2274,12 @@ void RackView::menuChoice (const juce::String& id, int r, bool waiting, juce::Co
     if (r == 201) return;   // cancelled above (and not a value of a long list: 201 - 20 is a step of Master BPM)
     if (r == 200) { startLearn (id); return; }
     if (r == 202) { proc.forgetCc (id); repaintMarks (id); if (readout != nullptr) readout->refresh(); return; }
+    if (r >= 300 && r <= 399) return;   // the Modulation block, never a value (Master BPM has 281: 300 - 20 is one of them)
     auto set = [prm] (float v) { prm->beginChangeGesture(); prm->setValueNotifyingHost (v); prm->endChangeGesture(); };
     if (r == 1) { if (ctl != nullptr) typeValue (*ctl, id); }
     else if (r == 2) set (prm->getDefaultValue());
     else if (r >= 10 && r <= 14) set (prm->convertTo0to1 (prm->convertFrom0to1 ((float) (r - 10) * 0.25f)));
-    else if (r >= 20 && r < 20 + n && n > 1) set ((float) (r - 20) / (float) (n - 1));
+    else if (r >= 20 && r < 20 + juce::jmin (n, 64) && n > 1) set ((float) (r - 20) / (float) (n - 1));   // the list shows 64 at most
 }
 
 // Ctrl+click (Cmd on a Mac) or "Type a value…": the readout turns into a field over the control
