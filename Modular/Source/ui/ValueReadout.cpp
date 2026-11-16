@@ -104,12 +104,14 @@ void ValueReadout::flash (juce::Component& c, const juce::String& note, bool war
     until = now() + (juce::uint32) ms;
 }
 
-void ValueReadout::hold (juce::Component& c, const ReadoutText& t)
+void ValueReadout::hold (juce::Component& c, const ReadoutText& t, int ms)
 {
     if (mode == Mode::Edit) cancelEdit();
     target = &c;
     shown = t;
     show (Mode::Hold, true);
+    timed = ms > 0;
+    until = now() + (juce::uint32) juce::jmax (0, ms);
 }
 
 void ValueReadout::release()
@@ -162,6 +164,10 @@ void ValueReadout::timerCallback()
                 startTimerHz (60);
             }
             return;
+        case Mode::Hold:
+            if (! timed || t < until) break;
+            timed = false;
+            [[fallthrough]];
         case Mode::Flash:
             if (t < until) break;
             if (target != nullptr && target->isMouseOver (true)) { mode = Mode::Hover; shown.note.clear(); layout (false); break; }
@@ -179,7 +185,6 @@ void ValueReadout::timerCallback()
         case Mode::Hover:
         case Mode::Drag:
         case Mode::Edit:
-        case Mode::Hold:
             break;
     }
     if (isVisible()) lastVisible = t;
@@ -315,7 +320,7 @@ void ValueReadout::commitEdit (bool fromKey)
     if (! fromKey) { closeEdit(); return; }          // left with a bad value: dropped, no fuss
     invalid = true;
     refused = field.getText();
-    shown.note = juce::String (juce::CharPointer_UTF8 ("Not a value for this control \xe2\x80\x93 try ")) + editing.example;
+    shown.note = "Not " + editing.what + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x93 try ")) + editing.example;
     layout (true);
     repaint();
     field.grabKeyboardFocus();

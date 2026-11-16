@@ -22,6 +22,7 @@ struct ReadoutSource
 struct ValueEdit
 {
     juce::String name, text, example;   // header, the text it opens with (selected), and what to suggest on a bad value
+    juce::String what = "a value for this control";   // a bad value: "Not <what> - try <example>"
     // false: the text is not a value for this control. When the value had to be limited, `limited` says to what.
     std::function<bool (const juce::String& text, juce::String& limited)> apply;
 };
@@ -47,8 +48,9 @@ public:
     void dragEnd (juce::Component&, bool mouseStillOver);
     void refresh();                                      // texts and place; the rack calls it at 30 Hz
     void flash (juce::Component&, const juce::String& note, bool warn, int ms);
-    // a fixed text over a control until released (MIDI Learn waiting for a CC): no timeout, hovers elsewhere ignored
-    void hold (juce::Component&, const ReadoutText&);
+    // a fixed text over a control until released (MIDI Learn waiting for a CC): no timeout, hovers elsewhere ignored.
+    // With ms: for that long, then it goes as a flash does (a whole text, where a flash only brings its note)
+    void hold (juce::Component&, const ReadoutText&, int ms = 0);
     void release();                                      // only if it is still holding
     bool isHolding() const { return mode == Mode::Hold; }
 
@@ -74,7 +76,7 @@ private:
     juce::Component::SafePointer<juce::Component> target;
     ReadoutText shown;
     ValueEdit editing;
-    bool invalid = false;
+    bool invalid = false, timed = false;
     juce::String refused;
     juce::uint32 pendingSince = 0, lastVisible = 0, until = 0;
     juce::Point<float> stillAt;
