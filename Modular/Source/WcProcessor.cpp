@@ -19,6 +19,7 @@
 #include "modules/M218.h"
 #include "modules/M250.h"
 #include "modules/M252.h"
+#include "modules/M111.h"
 #if ! WC_HEADLESS
  #include "WcEditor.h"
 #endif
@@ -76,9 +77,16 @@ void WcProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
+    bool tempo = false;   // the LFOs show when the host gives none (H6)
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
-            if (auto bpm = pos->getBpm()) rack.m250()->hostBpm.store (*bpm, std::memory_order_relaxed);
+            if (auto bpm = pos->getBpm())
+            {
+                rack.m250()->hostBpm.store (*bpm, std::memory_order_relaxed);
+                for (int i = 0; i < kMax111; ++i) rack.m111 (i)->hostBpm.store (*bpm, std::memory_order_relaxed);
+                tempo = true;
+            }
+    for (int i = 0; i < kMax111; ++i) rack.m111 (i)->hostTempo.store (tempo, std::memory_order_relaxed);
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
     auto* L = buffer.getWritePointer (0);
     auto* R = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
@@ -380,7 +388,7 @@ void WcProcessor::disconnectOutput (int inst, int outJack)
 void WcProcessor::setPresent (int inst, bool on, int preferRow)
 {
     if (! isRemovable (inst)) return;
-    if (on && ! canAddOscillator (inst)) return;      // demo mode: two oscillators
+    if (on && ! canAdd (inst)) return;               // demo mode: two oscillators, four LFOs
     if (on && ! present[(size_t) inst])
     {
         auto r = (size_t) juce::jlimit (0, (int) rows.size() - 1, preferRow < 0 ? (int) rows.size() - 1 : preferRow);
@@ -1001,12 +1009,11 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             if (s >= 0) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
         }
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
-    if (demo())   // demo mode keeps the first two oscillators of a patch and leaves the rest out
+    if (demo())   // demo mode keeps the first two oscillators and four LFOs of a patch, in slot order, and leaves the rest out
     {
-        int osc = 0;
-        for (int i = 0; i < kNumInst; ++i)
-            if (present[(size_t) i] && (typeOfInst (i) == MT_259 || typeOfInst (i) == MT_258))
-                if (++osc > wc::License::kDemoMaxOscillators) present[(size_t) i] = false;
+        auto keep = present;
+        for (int i = 0; i < kNumInst; ++i) present[(size_t) i] = false;
+        for (int i = 0; i < kNumInst; ++i) if (keep[(size_t) i] && canAdd (i)) present[(size_t) i] = true;
     }
     rows.clear();   // no LAYOUT: the layout of before (fixLayout); a hand-edited one is checked there too
     for (auto row : t.getChildWithName ("LAYOUT"))
@@ -1122,22 +1129,17 @@ void WcProcessor::marfLoad (int slot)
 }
 
 // ------------------------------------------------------------------------------------------------
-// licensing: without a key file the rack holds two oscillators and keeps its presets to itself
+// licensing: without a key file the rack holds two oscillators and four LFOs and keeps its presets to itself
 // ------------------------------------------------------------------------------------------------
-int WcProcessor::oscillatorsInRack() const
-{
-    int n = 0;
-    for (int i = 0; i < kNumInst; ++i)
-        if (present[(size_t) i] && (typeOfInst (i) == MT_259 || typeOfInst (i) == MT_258)) ++n;
-    return n;
-}
-
-bool WcProcessor::canAddOscillator (int inst) const
+bool WcProcessor::canAdd (int inst) const
 {
     if (! demo()) return true;
-    const auto t = typeOfInst (inst);
-    if (t != MT_259 && t != MT_258) return true;
-    return oscillatorsInRack() < wc::License::kDemoMaxOscillators;
+    auto kind = [] (ModuleType t) { return t == MT_259 || t == MT_258 ? 1 : (t == MT_111 ? 2 : 0); };
+    const int k = kind (typeOfInst (inst));
+    if (k == 0) return true;
+    int n = 0;
+    for (int i = 0; i < kNumInst; ++i) if (present[(size_t) i] && kind (typeOfInst (i)) == k) ++n;
+    return n < (k == 1 ? wc::License::kDemoMaxOscillators : wc::License::kDemoMaxLfos);
 }
 
 void WcProcessor::recheckLicense (const juce::File& extra)

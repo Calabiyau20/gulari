@@ -253,7 +253,7 @@ void WcEditor::addModuleMenu()
         for (int i = 0; i < count; ++i)
             if (! proc.isPresent (first + i))
             {
-                const bool ok = proc.canAddOscillator (first + i);
+                const bool ok = proc.canAdd (first + i);
                 m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")" + (ok ? "" : "  - demo: 2 oscillators"), ok);
                 any = true;
             }

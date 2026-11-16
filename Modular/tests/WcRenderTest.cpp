@@ -30,6 +30,7 @@
 #include "modules/M284.h"
 #include "modules/M291.h"
 #include "modules/M666.h"
+#include "modules/M111.h"
 #include "WcLicense.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
@@ -1986,6 +1987,280 @@ int main (int argc, char** argv)
         }
     }
 
+    // ---- LF-111 Classic LFO: the waves, SYNC, CLOCK IN, RETRIG, NOTE RETRIGGER, demo, parameters at the end ----
+    {
+        std::printf ("LF-111 CLASSIC LFO\n");
+        const int A = kInst111, B = kInst111 + 1;
+        auto fresh = [] (WcProcessor& p, std::initializer_list<int> slots)
+        {
+            p.license.status = License::Status::Licensed;
+            p.prepareToPlay (SR, 32);
+            p.resetAll();
+            for (int i : slots) p.setPresent (i, true);
+        };
+        // n samples as processBlock runs them (a control tick every 32), every output of LFO A; `at` before each sample
+        struct Outs { std::vector<float> o[4]; };
+        auto runA = [A] (WcProcessor& p, int n, std::function<void (int)> at = {})
+        {
+            Outs r;
+            for (int i = 0; i < n; ++i)
+            {
+                if (i % 32 == 0) p.rack.beginBlock (32);
+                if (at) at (i);
+                p.rack.tick();
+                for (int j = 0; j < 4; ++j) r.o[j].push_back (p.rack.jackValue (A, j));
+            }
+            return r;
+        };
+        auto rises = [] (const std::vector<float>& x, int from = 1)
+        {
+            std::vector<int> e;
+            for (size_t i = (size_t) juce::jmax (1, from); i < x.size(); ++i) if (x[i] > 3.0f && x[i - 1] <= 3.0f) e.push_back ((int) i);
+            return e;
+        };
+        auto spread = [] (const std::vector<int>& e, int& lo, int& hi)   // shortest and longest interval
+        {
+            lo = 1 << 30; hi = 0;
+            for (size_t i = 1; i < e.size(); ++i) { lo = std::min (lo, e[i] - e[i - 1]); hi = std::max (hi, e[i] - e[i - 1]); }
+            return e.size() >= 3;
+        };
+        auto near = [] (float a, float b, float tol = 1.0e-3f) { return std::abs (a - b) <= tol; };
+        const float k2Hz = (float) (std::log10 (200.0) / 4.0);   // the FREE position of 2 Hz
+        bool good = true;
+
+        // 1. a sine at PHASE 90, AMOUNT 100 %: the first sample is the top. Bipolar +10 / INV -10, unipolar +10 / INV 0;
+        //    at 270 the bottom: bipolar -10 / INV +10, unipolar 0 / INV +10
+        {
+            auto first = [&] (float phase, bool uni)
+            {
+                WcProcessor p; fresh (p, { A });
+                setP (p, "lf1_phase", phase); setP (p, "lf1_polarity", uni ? 1.0f : 0.0f);
+                return runA (p, 1);
+            };
+            const auto r = first (90.0f, false), u = first (90.0f, true), rb = first (270.0f, false), ub = first (270.0f, true);
+            const bool t = near (r.o[0][0], 10.0f) && near (r.o[1][0], 10.0f) && near (r.o[2][0], -10.0f) && near (u.o[0][0], 10.0f) && near (u.o[2][0], 0.0f)
+                           && near (rb.o[0][0], -10.0f) && near (rb.o[2][0], 10.0f) && near (ub.o[0][0], 0.0f) && near (ub.o[2][0], 10.0f);
+            std::printf ("  sine at 90: bipolar %+.3f (out 2 %+.3f) inv %+.3f, unipolar %+.3f inv %+.3f; at 270: %+.3f / %+.3f, %+.3f / %+.3f %s\n", r.o[0][0], r.o[1][0], r.o[2][0],
+                         u.o[0][0], u.o[2][0], rb.o[0][0], rb.o[2][0], ub.o[0][0], ub.o[2][0], t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 2. SYNC at 120 BPM: 1/4 = 0.5 s, dotted 0.75 s, triplet 1/3 s between SYNC OUT pulses (one sample either way).
+        //    Through processBlock: with no tempo from the host, 120 and the mark; a host at 90 BPM: 2/3 s and no mark
+        {
+            auto periods = [&] (int mode, int& lo, int& hi)
+            {
+                WcProcessor p; fresh (p, { A });
+                setP (p, "lf1_mode", (float) mode); setP (p, "lf1_rate", 0.6f);
+                return spread (rises (runA (p, (int) SR * 3).o[3]), lo, hi);
+            };
+            int lo[3], hi[3];
+            bool t = true;
+            const int want[3] = { 24000, 36000, 16000 };
+            for (int m = 0; m < 3; ++m) t &= periods (2 + m, lo[m], hi[m]) && lo[m] >= want[m] - 1 && hi[m] <= want[m] + 1;
+            struct Head : juce::AudioPlayHead
+            {
+                double bpm = 0.0;
+                juce::Optional<PositionInfo> getPosition() const override { PositionInfo i; if (bpm > 0.0) i.setBpm (bpm); return i; }
+            } head;
+            auto viaHost = [&] (double bpm, bool& mark, int& l, int& h)
+            {
+                WcProcessor p; fresh (p, { A });
+                setP (p, "lf1_mode", 2.0f); setP (p, "lf1_rate", 0.6f);
+                head.bpm = bpm;
+                p.setPlayHead (bpm >= 0.0 ? &head : nullptr);
+                std::vector<float> s;
+                for (int i = 0; i < (int) SR * 3; ++i) { juce::AudioBuffer<float> b (2, 1); juce::MidiBuffer m; p.processBlock (b, m); s.push_back (p.rack.jackValue (A, M111::Out_Sync)); }
+                mark = p.rack.m111 (0)->hostTempo.load();
+                return spread (rises (s), l, h);
+            };
+            bool m0 = true, m1 = true, m2 = false;
+            int l0, h0, l1, h1, l2, h2;
+            const bool t2 = viaHost (-1.0, m0, l0, h0) && viaHost (0.0, m1, l1, h1) && viaHost (90.0, m2, l2, h2);
+            const bool host = t2 && ! m0 && ! m1 && m2 && l0 >= 23999 && h0 <= 24001 && l1 >= 23999 && h1 <= 24001 && l2 >= 31999 && h2 <= 32001;
+            std::printf ("  SYNC at 120: 1/4 %d-%d, 1/4 D %d-%d, 1/4 T %d-%d samples %s; no play head %d-%d tempo mark %s, no BPM %d-%d mark %s, 90 BPM %d-%d mark %s %s\n",
+                         lo[0], hi[0], lo[1], hi[1], lo[2], hi[2], t ? "ok" : "BAD", l0, h0, m0 ? "on" : "off", l1, h1, m1 ? "on" : "off", l2, h2, m2 ? "on" : "off", host ? "ok" : "BAD");
+            good &= t && host;
+        }
+
+        // 3. CLOCK IN: LFO B's 2 Hz square (an edge every 0.5 s) into A at x2: SYNC OUT every 0.25 s. Before the second
+        //    pulse A runs in its mode (FREE 2.51 Hz); the clock stops: the same 0.25 s, "no pulses"; unplugged: its mode
+        {
+            WcProcessor p; fresh (p, { A, B });
+            setP (p, "lf2_wave", 2.0f); setP (p, "lf2_rate", k2Hz);
+            setP (p, "lf1_rate", 0.6f);
+            const bool patched = p.connect (B, M111::Out_Lfo, A, M111::In_Clock);
+            int st[3] = { -1, -1, -1 };
+            auto* m = p.rack.m111 (0);
+            std::vector<float> clock;
+            const auto r = runA (p, (int) SR * 4, [&] (int i)
+            {
+                clock.push_back (p.rack.jackValue (B, M111::Out_Lfo));   // what A reads this sample (B runs after it)
+                if (i == 12000) st[0] = m->clockState.load();
+                if (i == (int) SR * 2) st[1] = m->clockState.load();
+                if (i == (int) (SR * 2.6)) setP (p, "lf2_amount", 0.0f);   // B goes to 0 V: no more edges
+                if (i == (int) SR * 4 - 1) st[2] = m->clockState.load();
+            });
+            const auto e = rises (r.o[3]);
+            const float freeHz = lfoHz (0.6f);
+            const int free = juce::roundToInt (SR / freeHz);
+            std::vector<int> locked;
+            for (int x : e) if (x > (int) SR) locked.push_back (x);
+            int aligned = 0, pulses = 0;   // locked: a new cycle on the very sample of each clock edge
+            for (int c : rises (clock, (int) SR)) { ++pulses; aligned += std::find (e.begin(), e.end(), c) != e.end() ? 1 : 0; }
+            int lo, hi;
+            const bool t = patched && ! e.empty() && std::abs (e[0] - free) <= 2 && spread (locked, lo, hi) && lo >= 11998 && hi <= 12002 && locked.back() > (int) (SR * 3.7)
+                           && pulses >= 3 && aligned == pulses && st[0] == M111::ClockWaiting && st[1] == M111::ClockLocked && st[2] == M111::ClockLost;
+            p.disconnectInput (A, M111::In_Clock);
+            const auto u = runA (p, (int) SR * 2);
+            int ul, uh;
+            const bool back = spread (rises (u.o[3], 100), ul, uh) && std::abs (ul - free) <= 2 && std::abs (uh - free) <= 2 && m->clockState.load() == M111::ClockNone;
+            std::printf ("  CLOCK IN x2: first cycle %d (its mode: %d), locked %d-%d samples (12000), on the edge %d of %d, states %d %d %d (waiting, locked, no pulses) %s; unplugged %d-%d, state %d %s\n",
+                         e.empty() ? -1 : e[0], free, lo, hi, aligned, pulses, st[0], st[1], st[2], t ? "ok" : "BAD", ul, uh, m->clockState.load(), back ? "ok" : "BAD");
+            good &= t && back;
+        }
+
+        // 4. RETRIG IN (the MIDI gate) and NOTE RETRIGGER (no cable): the sample of the edge is the wave at PHASE.
+        //    NOTE RETRIGGER off: a note does nothing; on, a legato note restarts it too
+        {
+            auto note = [] (WcProcessor& p, int at, int i, int n) { if (i == at) p.rack.handleMidi (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100)); };
+            WcProcessor p; fresh (p, { A });
+            setP (p, "lf1_phase", 90.0f); setP (p, "lf1_rate", 0.3f);
+            p.connect (kInstMidi, MidiInterface::Out_Gate, A, M111::In_Retrig);
+            const auto r = runA (p, 12000, [&] (int i) { note (p, 10000, i, 60); });
+            const bool rt = near (r.o[0][10000], 10.0f) && ! near (r.o[0][9999], 10.0f, 0.05f) && r.o[3][10000] > 3.0f;
+            WcProcessor q; fresh (q, { A });
+            setP (q, "lf1_phase", 90.0f); setP (q, "lf1_rate", 0.3f);
+            const auto off = runA (q, 12000, [&] (int i) { note (q, 10000, i, 60); });
+            setP (q, "lf1_retrig", 1.0f);
+            const auto on = runA (q, 24000, [&] (int i) { note (q, 10000, i, 60); note (q, 20000, i, 64); });   // 60 still held: legato
+            const bool nr = ! near (off.o[0][10000], 10.0f, 0.05f) && near (on.o[0][10000], 10.0f) && near (on.o[0][20000], 10.0f) && ! near (on.o[0][19999], 10.0f, 0.05f);
+            std::printf ("  RETRIG IN: %+.3f at the edge (%+.3f before) %s; NOTE RETRIGGER off %+.3f, on %+.3f, legato %+.3f %s\n",
+                         r.o[0][10000], r.o[0][9999], rt ? "ok" : "BAD", off.o[0][10000], on.o[0][10000], on.o[0][20000], nr ? "ok" : "BAD");
+            good &= rt && nr;
+        }
+
+        // 5. the c.v. inputs, from LFO B held at 2.5 V (a unipolar square at 0.01 Hz, AMOUNT 25 %): RATE +1 decade
+        //    (1 -> 10 Hz), AMOUNT +25 % (50 -> 75 %), PHASE +90 degrees
+        {
+            auto withCv = [&] (int jack, std::function<void (WcProcessor&)> set)
+            {
+                WcProcessor p; fresh (p, { A, B });
+                setP (p, "lf2_wave", 2.0f); setP (p, "lf2_rate", 0.0f); setP (p, "lf2_polarity", 1.0f); setP (p, "lf2_amount", 0.25f);
+                set (p);
+                p.connect (B, M111::Out_Lfo, A, jack);
+                return runA (p, (int) SR);
+            };
+            int lo, hi;
+            const auto rate = withCv (M111::In_RateCv, [] (WcProcessor&) {});
+            const bool r1 = spread (rises (rate.o[3]), lo, hi) && lo >= 4799 && hi <= 4801;
+            const auto amt = withCv (M111::In_AmountCv, [] (WcProcessor& p) { setP (p, "lf1_amount", 0.5f); });
+            float pk = 0.0f;
+            for (float v : amt.o[0]) pk = std::max (pk, v);
+            const auto ph = withCv (M111::In_PhaseCv, [] (WcProcessor&) {});
+            const bool r2 = near (pk, 7.5f, 0.01f) && near (ph.o[0][1], 10.0f, 0.01f);
+            std::printf ("  c.v.: RATE +2.5 V %d-%d samples (4800) , AMOUNT +2.5 V peak %.3f V (7.5), PHASE +2.5 V %+.3f V (10) %s\n", lo, hi, pk, ph.o[0][1], r1 && r2 ? "ok" : "BAD");
+            good &= r1 && r2;
+        }
+
+        // 6. the random waves at 10 Hz: stepped holds each cycle and moves only as one starts, smooth never jumps, the
+        //    walk moves 5 V a cycle at most; all within +-10 V; two LFOs draw their own
+        {
+            auto waveRun = [&] (int wave, Outs& b)
+            {
+                WcProcessor p; fresh (p, { A, B });
+                for (auto* x : { "lf1_", "lf2_" }) { setP (p, juce::String (x) + "wave", (float) wave); setP (p, juce::String (x) + "rate", 0.75f); }
+                Outs a = runA (p, (int) SR * 2, [&] (int i) { if (i > 0) for (int j = 0; j < 4; ++j) b.o[j].push_back (p.rack.jackValue (B, j)); });   // B's sample i - 1
+                return a;
+            };
+            Outs sb, mb, wb;
+            const auto st = waveRun (5, sb), sm = waveRun (6, mb), wk = waveRun (7, wb);
+            const auto cyc = rises (st.o[3]);
+            bool held = cyc.size() > 10, inside = true, differ = false;
+            for (size_t i = 1; i < st.o[0].size(); ++i)
+            {
+                const bool starts = std::find (cyc.begin(), cyc.end(), (int) i) != cyc.end();
+                if (! starts && st.o[0][i] != st.o[0][i - 1]) held = false;
+                for (auto* o : { &st.o[0], &sm.o[0], &wk.o[0] }) if (std::abs ((*o)[i]) > 10.0f) inside = false;
+                if (i < sb.o[0].size() && st.o[0][i - 1] != sb.o[0][i - 1]) differ = true;   // the same sample of both
+            }
+            float jump = 0.0f, walk = 0.0f;
+            for (size_t i = 1; i < sm.o[0].size(); ++i) jump = std::max (jump, std::abs (sm.o[0][i] - sm.o[0][i - 1]));
+            const auto wc = rises (wk.o[3]);
+            for (size_t i = 1; i < wc.size(); ++i) walk = std::max (walk, std::abs (wk.o[0][(size_t) wc[i]] - wk.o[0][(size_t) wc[i - 1]]));
+            const bool t = held && inside && differ && jump < 0.05f && walk <= 5.0f + 1.0e-3f && walk > 0.1f;
+            std::printf ("  random: stepped holds its cycle %s, smooth largest step %.4f V, walk largest move a cycle %.2f V (5), in +-10 V %s, two LFOs differ %s %s\n",
+                         held ? "yes" : "NO", jump, walk, inside ? "yes" : "NO", differ ? "yes" : "NO", t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 7. modulating itself (RATE <- LFO OUT, -100 %) stays finite and in range
+        {
+            WcProcessor p; fresh (p, { A });
+            const bool a = p.assign (A, M111::Out_Lfo, "lf1_rate", -1.0f) && p.assign (A, M111::Out_Lfo, "lf1_phase", 1.0f);
+            const auto r = runA (p, (int) SR * 2);
+            bool fine = a;
+            for (float v : r.o[0]) if (! std::isfinite (v) || std::abs (v) > 10.0f) fine = false;
+            std::printf ("  modulating itself: %s\n", fine ? "ok" : "BAD");
+            good &= fine;
+        }
+
+        // 8. demo: the fifth LFO is refused; a patch with six (a cable and an assignment from the sixth) loads the
+        //    first four and neither; the oscillators keep their own two
+        {
+            auto count = [] (const WcProcessor& p, int first, int n) { int c = 0; for (int i = 0; i < n; ++i) c += p.isPresent (first + i) ? 1 : 0; return c; };
+            WcProcessor d; d.license = License(); d.prepareToPlay (SR, 32); d.resetAll();
+            for (int i = 0; i < 5; ++i) d.setPresent (A + i, true);
+            const bool fifth = count (d, A, kMax111) == 4 && ! d.isPresent (A + 4) && ! d.canAdd (A + 4) && d.canAdd (kInst259);
+            WcProcessor l; fresh (l, {});
+            for (int i = 0; i < 6; ++i) l.setPresent (A + i, true);
+            for (int i = 0; i < 3; ++i) l.setPresent (kInst259 + i, true);
+            l.connect (A + 5, M111::Out_Lfo, A, M111::In_RateCv);
+            l.assign (A + 5, M111::Out_Lfo, "lf1_amount", 0.5f);
+            d.patchFromTree (l.patchToTree());
+            const bool six = count (d, A, kMax111) == 4 && d.isPresent (A + 3) && ! d.isPresent (A + 4) && d.getCables().empty() && d.getAssignments().empty()
+                             && count (d, kInst259, kMax259) == 2;
+            std::printf ("  demo: %d LFOs of 5 asked %s; a patch with 6 -> %d (A-D), cables %d, assignments %d, 259s %d of 3 %s\n", count (d, A, kMax111) == 4 ? 4 : -1,
+                         fifth ? "ok" : "BAD", count (d, A, kMax111), (int) d.getCables().size(), (int) d.getAssignments().size(), count (d, kInst259, kMax259), six ? "ok" : "BAD");
+            good &= fifth && six;
+        }
+
+        // 9. the 56 parameters come after every other one: no index of before moves (Assignment.param, hosts by position)
+        {
+            WcProcessor p;
+            const auto& all = p.getParameters();
+            auto at = [&] (const char* id) { return p.apvts.getParameter (id)->getParameterIndex(); };
+            const bool t = at ("lf1_rate") == at ("out_master") + 1 && all.size() == at ("lf1_rate") + 56
+                           && dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID() == "lf8_wave"
+                           && p.apvts.getParameter ("lf3_rate")->getName (64) == "LFO C Rate" && ! p.isModulatable ("lf1_mode") && p.isModulatable ("lf1_phase");
+            std::printf ("  parameters: lf1_rate at %d (out_master %d), %d in all, names \"%s\" %s\n", at ("lf1_rate"), at ("out_master"), all.size(),
+                         p.apvts.getParameter ("lf3_rate")->getName (64).toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 10. RATE's text follows the mode, in the host too: "1/8 D" back to 1/8 dotted, "400 ms" is 2.5 Hz
+        {
+            WcProcessor p;
+            auto* r = p.apvts.getParameter ("lf1_rate");
+            const float k25 = (float) (std::log10 (250.0) / 4.0);
+            juce::StringArray got;
+            setP (p, "lf1_mode", 0.0f); got.add (r->getText (k25, 64)); got.add (r->getText (0.5f, 64));
+            setP (p, "lf1_mode", 1.0f); got.add (r->getText (k25, 64)); got.add (r->getText (0.0f, 64)); got.add (r->getText (1.0f, 64));
+            setP (p, "lf1_mode", 3.0f); got.add (r->getText (0.7f, 64));
+            const float back = r->getValueForText ("1/8 D");
+            setP (p, "lf1_mode", 4.0f); got.add (r->getText (1.0f, 64));
+            setP (p, "lf1_mode", 0.0f);
+            const float hostMs = r->getValueForText ("400 ms");
+            const bool t = got.joinIntoString ("|") == "2.50 Hz|1.00 Hz|400 ms|100.00 s|10 ms|1/8 D|1/64 T" && near (back, 0.7f, 1.0e-6f) && near (hostMs, k25, 1.0e-5f)
+                           && wc::valueTextExample (*r) == "2 Hz or 500 ms" && wc::valueTextExample (*r, "x1/4") == "x2 or x1/4" && wc::valueTextExample (*r, "1/8 D") == "1/8 or 1/4"
+                           && p.apvts.getParameter ("lf1_phase")->getText (0.25f, 64) == juce::String (juce::CharPointer_UTF8 ("90\xc2\xb0"));
+            std::printf ("  RATE texts %s, host \"1/8 D\" -> %.3f, \"400 ms\" -> %.4f (%.4f) %s\n", got.joinIntoString (" | ").toRawUTF8(), back, hostMs, k25, t ? "ok" : "BAD");
+            good &= t;
+        }
+        std::printf ("  LF-111 %s\n", good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
     // ---- typed values: every float parameter reads its own text back ----
     // "440 Hz" typed in the host or in the value editor must land on 440 Hz. For each float parameter and 101
     // positions, getValueForText (getText (v)) has to come back to v within what the text shows.
@@ -2033,6 +2308,7 @@ int main (int argc, char** argv)
         if (ugly != 0) ok = false;
 
         // fixed cases: what a person types
+        const float k2HzCase = (float) (std::log10 (200.0) / 4.0);
         struct Case { const char* id; const char* text; const char* shown; float want; float tol; int limited; };   // want: plain; NAN = not a value
         const Case cases[] = {
             { "a_po_freq", "1,2k",     "",         coarseNorm (1200.0f, false), 1.0e-4f, 0 },   // comma decimal, k = x1000, on Hz
@@ -2065,6 +2341,33 @@ int main (int argc, char** argv)
             { "fa_mode1",  "cyc",      "",         2.0f,  0.0f,    0 },                     // choice: start of the label
             { "fa_mode1",  "2",        "",         1.0f,  0.0f,    0 },                     // ... or its position
             { "fa_mode1",  "banana",   "",         NAN,   0.0f,    0 },
+            // LF-111 RATE in the mode the text shows (H2), PHASE in degrees (H9)
+            { "lf1_rate",  "400 ms",   "1.00 Hz",  (float) (std::log10 (250.0) / 4.0), 1.0e-5f, 0 },   // another unit of time: 2.5 Hz
+            { "lf1_rate",  "2.5",      "1.00 Hz",  (float) (std::log10 (250.0) / 4.0), 1.0e-5f, 0 },
+            { "lf1_rate",  "2.5",      "400 ms",   (float) (std::log10 (40.0) / 4.0),  1.0e-5f, 0 },   // bare: seconds
+            { "lf1_rate",  "2 Hz",     "400 ms",   k2HzCase,                           1.0e-5f, 0 },
+            { "lf1_rate",  "500 Hz",   "1.00 Hz",  1.0f,  0.0f,    1 },
+            { "lf1_rate",  "100.00 s", "1.00 Hz",  0.0f,  1.0e-6f, 0 },                     // the text of an end is the end
+            { "lf1_rate",  "1/8 D",    "1/2 D",    0.7f,  1.0e-6f, 0 },
+            { "lf1_rate",  "1/8 dotted", "1/2",    0.7f,  1.0e-6f, 0 },
+            { "lf1_rate",  "1/8t",     "1/2 T",    0.7f,  1.0e-6f, 0 },
+            { "lf1_rate",  "1/8.",     "1/2",      0.7f,  1.0e-6f, 0 },
+            { "lf1_rate",  "8/1",      "1/2",      0.1f,  1.0e-6f, 0 },
+            { "lf1_rate",  "1/128",    "1/2",      1.0f,  0.0f,    1 },
+            { "lf1_rate",  "32/1",     "1/2",      0.0f,  0.0f,    -1 },
+            { "lf1_rate",  "1/3",      "1/2",      NAN,   0.0f,    0 },
+            { "lf1_rate",  "2 Hz",     "1/2",      NAN,   0.0f,    0 },                     // no Hz in SYNC
+            { "lf1_rate",  "x2",       "x1",       0.6f,  1.0e-6f, 0 },
+            { "lf1_rate",  "x1/4",     "x1",       0.2f,  1.0e-6f, 0 },
+            { "lf1_rate",  "2",        "x1",       0.6f,  1.0e-6f, 0 },
+            { "lf1_rate",  "x5",       "x1",       NAN,   0.0f,    0 },
+            { "lf1_rate",  "x32",      "x1",       1.0f,  0.0f,    1 },
+            { "lf1_rate",  "75 %",     "1/2",      0.75f, 1.0e-6f, 0 },
+            { "lf1_phase", "90\xc2\xb0", "",       90.0f, 1.0e-4f, 0 },
+            { "lf1_phase", "90 deg",   "",         90.0f, 1.0e-4f, 0 },
+            { "lf1_phase", "45",       "",         45.0f, 1.0e-4f, 0 },
+            { "lf1_phase", "400",      "",         360.0f, 0.0f,   1 },
+            { "lf1_phase", "90 Hz",    "",         NAN,   0.0f,    0 },
         };
         int caseBad = 0;
         for (auto& c : cases)

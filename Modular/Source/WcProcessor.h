@@ -93,8 +93,8 @@ public:
     // ---- licensing ----
     wc::License license;
     bool demo() const noexcept { return ! license.licensed(); }
-    int oscillatorsInRack() const;        // 259 + 258 slots currently in the rack
-    bool canAddOscillator (int inst) const;
+    // demo mode: may this slot come in? Two oscillators (259 and 258 together) and four LFOs; the rest always
+    bool canAdd (int inst) const;
     void recheckLicense (const juce::File& extra = {});
     // factory library navigation (prev / next in the header)
     int factoryIndex = -1;

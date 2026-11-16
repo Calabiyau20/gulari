@@ -1579,7 +1579,7 @@ void ModulePanel::paint (juce::Graphics& g)
                     g.drawHorizontalLine ((int) y, pr.getX() + 3.0f, pr.getRight() - 3.0f);
         }
     }
-    juce::Random rnd (inst * 977 + 3);
+    juce::Random rnd ((inst >= kInst218 ? inst - kMax111 : inst) * 977 + 3);   // the slot numbers of before the LFOs: no brush moves
     const float brush = skin::neon() ? 0.35f : 1.0f;
     for (int y = 0; y < getHeight(); y += 2)
     {

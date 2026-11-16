@@ -1778,6 +1778,30 @@ static ModuleSpec makeOutput()
     return s;
 }
 
+// ---------------------------------------------------------------------------------------------
+// LF-111 Classic LFO - a Calabi Yau original, drawn at panel size (384 x 430, no scaleSpec).
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make111()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_111; s.name = "CLASSIC LFO"; s.model = "LF-111"; s.engr = "";
+    s.width = 384; s.height = 430;
+    s.jacks = {
+        J ("rate cv", K::Banana, false, 36, 266),   // in 0
+        J ("clock in", K::Banana, false, 100, 266, true),   // in 1
+        J ("retrig in", K::Banana, false, 160, 266, true),   // in 2
+        J ("phase cv", K::Banana, false, 246, 266),   // in 3
+        J ("amount cv", K::Banana, false, 116, 350),   // in 4
+        J ("lfo out", K::Banana, true, 228, 350),   // out 0 (main: the ASSIGN source)
+        J ("lfo out", K::Banana, true, 270, 350),   // out 1
+        J ("inv out", K::Banana, true, 312, 350),   // out 2
+        J ("sync out", K::Banana, true, 354, 350, true),   // out 3
+    };
+    s.texts = { T ("CLASSIC LFO  LF-111", 192, 14, 10.5f, 4), T ("@foot", 192, 415, 9.0f, 1) };
+    return s;
+}
+
 // Each layout marks where its footer sits with a "@foot" placeholder text: finish() takes that height
 // and removes the placeholder, and RackView engraves CALABI YAU - isologo - model there instead.
 static ModuleSpec finish (ModuleSpec s)
@@ -1802,7 +1826,7 @@ const ModuleSpec& specFor (ModuleType t)
     static const ModuleSpec specs[MT_Count] = { finish (makeMidi()), finish (make259()), finish (makeOutput()), finish (make281()), finish (make292()), finish (make266()), finish (make245()),
                                                 finish (make242()), finish (make257()), finish (make258()), finish (make264()), finish (make230()), finish (make285()), finish (make207()),
                                                 finish (make277()), finish (make296()), finish (make248()), finish (make218()), finish (make250()), finish (make252()),
-                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()) };
+                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()), finish (make111()) };
     return specs[t];
 }
 } // namespace wc

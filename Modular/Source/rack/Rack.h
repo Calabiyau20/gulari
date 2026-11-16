@@ -1,7 +1,7 @@
 #pragma once
 // The rack: module instances, the cable graph and the per-sample engine.
 //
-// Instances are fixed slots processed in a fixed order: MIDI, 218, 242, 245, 248, 250, 252, 266, 230, 264, 257, 281 A-B, 284,
+// Instances are fixed slots processed in a fixed order: MIDI, LF-111 A-H, 218, 242, 245, 248, 250, 252, 266, 230, 264, 257, 281 A-B, 284,
 // 258 A-B, 259 A-D, 285, 267, 291, 296, 277, 292 A-B, 275, 207, SC-666 1-4, Output.
 // A cable from an earlier slot to a later one has no delay; a cable going backwards (feedback,
 // e.g. 259 B -> 259 A FM while A -> B) reads the previous sample, which is the 1-sample delay of
@@ -37,10 +37,12 @@ class M275;
 class M284;
 class M291;
 class M666;
+class M111;
 
 // slots, in processing order: control sources first, then oscillators, then gates, then the output
 constexpr int kInstMidi = 0;
-constexpr int kInst218 = 1;
+constexpr int kInst111 = 1;                  // the Classic LFOs: control sources, right after the MIDI
+constexpr int kInst218 = kInst111 + kMax111;
 constexpr int kInst242 = kInst218 + kMax218;
 constexpr int kInst245 = kInst242 + kMax242;
 constexpr int kInst248 = kInst245 + kMax245;
@@ -68,6 +70,7 @@ constexpr int kNumInst = kInstOutput + 1;
 inline ModuleType typeOfInst (int inst)
 {
     if (inst == kInstMidi) return MT_Midi;
+    if (inst < kInst218) return MT_111;
     if (inst < kInst242) return MT_218;
     if (inst < kInst245) return MT_242;
     if (inst < kInst248) return MT_245;
@@ -97,7 +100,7 @@ inline int firstInstOf (ModuleType t)
 {
     switch (t)
     {
-        case MT_218: return kInst218; case MT_242: return kInst242; case MT_245: return kInst245; case MT_248: return kInst248; case MT_250: return kInst250; case MT_252: return kInst252; case MT_266: return kInst266; case MT_230: return kInst230;
+        case MT_111: return kInst111; case MT_218: return kInst218; case MT_242: return kInst242; case MT_245: return kInst245; case MT_248: return kInst248; case MT_250: return kInst250; case MT_252: return kInst252; case MT_266: return kInst266; case MT_230: return kInst230;
         case MT_264: return kInst264; case MT_257: return kInst257; case MT_281: return kInst281; case MT_284: return kInst284; case MT_258: return kInst258;
         case MT_259: return kInst259; case MT_285: return kInst285; case MT_267: return kInst267; case MT_291: return kInst291; case MT_296: return kInst296; case MT_277: return kInst277;
         case MT_292: return kInst292; case MT_275: return kInst275; case MT_207: return kInst207; case MT_666: return kInst666; case MT_Output: return kInstOutput; default: return kInstMidi;
@@ -112,10 +115,10 @@ inline juce::String instPrefix (int inst)
         case MT_257: return "vp_"; case MT_281: return prefix281 (subIndex (inst)); case MT_258: return prefix258 (subIndex (inst));
         case MT_285: return "fs_"; case MT_296: return "sp_"; case MT_277: return "dl_"; case MT_207: return "mx_";
         case MT_267: return "us_"; case MT_275: return "rv_"; case MT_284: return "ev_"; case MT_291: return "tm_"; case MT_666: return prefix666 (subIndex (inst));
-        case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); default: return {};
+        case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); case MT_111: return prefixLfo (subIndex (inst)); default: return {};
     }
 }
-// stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "midi", "out")
+// stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "lf1" = LFO A, "midi", "out")
 inline juce::String instKey (int inst)
 {
     if (inst == kInstMidi) return "midi";
@@ -128,7 +131,7 @@ inline int instFromKey (const juce::String& k)
     return -1;
 }
 inline bool isRemovable (int inst) { return inst != kInstMidi && inst != kInstOutput; }
-juce::String instName (int inst);        // "MIDI", "281 A", "259 A", "292 A", "OUTPUT"
+juce::String instName (int inst);        // "MIDI", "281 A", "259 A", "292 A", "LFO A", "OUTPUT"
 
 struct Cable
 {
@@ -193,6 +196,7 @@ public:
     M284* m284() const;
     M291* m291() const;
     M666* m666 (int i) const;
+    M111* m111 (int i) const;
     MidiInterface& midi() const;
     OutputModule& output() const;
     // live value of an output jack (for jack LEDs)

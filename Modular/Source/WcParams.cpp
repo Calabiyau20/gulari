@@ -14,7 +14,7 @@ using FA = juce::AudioParameterFloatAttributes;
 // Each float parameter says which unit its text is in and the continuous number behind that text, so a typed
 // "440 Hz" lands on 440 Hz and not on the edge of a rounded display. The text functions stay as they were; the
 // round trip in WcRenderTest is what keeps the two in step.
-enum class Unit { None, Hz, Sec, Pct, Volt, dB, St, Oct, Times, Div, Bpm, Label };
+enum class Unit { None, Hz, Sec, Pct, Volt, dB, St, Oct, Times, Div, Bpm, Deg, Label };
 
 struct Readback
 {
@@ -49,6 +49,7 @@ juce::String normalised (const juce::String& s)
 {
     auto t = s.toLowerCase().replace (juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")), "-")
                             .replace (juce::String (juce::CharPointer_UTF8 ("\xc2\xb5")), "u")
+                            .replace (juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), "deg")
                             .removeCharacters (juce::String (" \t") + juce::String (juce::CharPointer_UTF8 ("\xc2\xa0")));
     if (t.containsChar ('(')) t = t.upToFirstOccurrenceOf ("(", false, false);
     return t;
@@ -91,7 +92,7 @@ bool unitOf (const juce::String& u, Unit& kind, double& factor)
                                { "s", Unit::Sec, 1.0 }, { "ms", Unit::Sec, 1.0e-3 }, { "us", Unit::Sec, 1.0e-6 },
                                { "%", Unit::Pct, 1.0 }, { "v", Unit::Volt, 1.0 }, { "db", Unit::dB, 1.0 },
                                { "st", Unit::St, 1.0 }, { "oct", Unit::Oct, 1.0 }, { "x", Unit::Times, 1.0 },
-                               { "/div", Unit::Div, 1.0 }, { "bpm", Unit::Bpm, 1.0 } };
+                               { "/div", Unit::Div, 1.0 }, { "bpm", Unit::Bpm, 1.0 }, { "deg", Unit::Deg, 1.0 } };
     for (auto& e : table)
         if (u == e.tok) { kind = e.kind; factor = e.f; return true; }
     return false;
@@ -250,6 +251,101 @@ static std::unique_ptr<APC> choice (const juce::ParameterID& id, const juce::Str
     }));
 }
 
+// ---- LF-111 RATE: its text and its reading follow the mode ----
+static const char* const kLfoDiv[11] = { "16/1", "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" };
+static const char* const kLfoRatio[11] = { "x1/16", "x1/8", "x1/4", "x1/3", "x1/2", "x1", "x2", "x3", "x4", "x8", "x16" };
+
+juce::String lfoRateText (float k, int mode)
+{
+    if (mode == 0) return juce::String (lfoHz (k), 2) + " Hz";
+    if (mode == 1)
+    {
+        const float s = 1.0f / lfoHz (k);
+        return s < 1.0f ? fixed (s * 1000.0f, s < 0.01f ? 1 : 0) + " ms" : juce::String (s, 2) + " s";
+    }
+    if (mode == 5) return kLfoRatio[lfoStep (k)];
+    return juce::String (kLfoDiv[lfoStep (k)]) + (mode == 3 ? " D" : (mode == 4 ? " T" : ""));
+}
+
+static bool isLfoRate (const juce::RangedAudioParameter& p) { return p.getParameterID().startsWith ("lf") && p.getParameterID().endsWith ("_rate"); }
+
+// the mode a shown text is in: 0 Hz, 1 seconds, 2 a division (dotted and triplet read the same), 5 a clock ratio
+static int lfoModeOf (const juce::String& shown)
+{
+    const auto t = normalised (shown);
+    if (t.startsWithChar ('x')) return 5;
+    if (t.containsChar ('/')) return 2;
+    return t.endsWith ("hz") ? 0 : 1;
+}
+
+// "a/b" (or a bare number when fractions are not required) -> a / b
+static std::optional<double> fraction (const juce::String& t)
+{
+    if (t.containsChar ('/'))
+    {
+        const auto a = t.upToFirstOccurrenceOf ("/", false, false), b = t.fromFirstOccurrenceOf ("/", false, false);
+        if (! a.containsOnly ("0123456789") || ! b.containsOnly ("0123456789") || a.isEmpty() || b.isEmpty() || b.getIntValue() == 0) return {};
+        return a.getDoubleValue() / b.getDoubleValue();
+    }
+    if (t.isEmpty() || ! t.containsOnly ("0123456789.") || ! t.containsAnyOf ("0123456789")) return {};
+    return t.getDoubleValue();
+}
+
+static std::optional<TypedValue> parseLfoRate (const juce::String& text, int mode)
+{
+    auto t = normalised (text);
+    if (t.isEmpty()) return {};
+    TypedValue out;
+    auto pos = [&out] (double k) { out.limited = k < -1.0e-9 ? -1 : (k > 1.0 + 1.0e-9 ? 1 : 0); out.plain = (float) juce::jlimit (0.0, 1.0, k); return out; };
+    if (t.endsWithChar ('%'))   // a position of the knob, as on every knob not shown in %
+    {
+        auto tk = tokenize (text);
+        if (! tk || tk->unit != "%") return {};
+        return pos (tk->number / 100.0);
+    }
+    if (mode <= 1)
+    {
+        auto tk = tokenize (text);
+        if (! tk) return {};
+        Unit kind; double f;
+        const juce::String unit = tk->unit.isEmpty() ? juce::String (tk->kilo || mode == 0 ? "hz" : "s") : tk->unit;
+        if (! unitOf (unit, kind, f) || (kind != Unit::Hz && kind != Unit::Sec)) return {};
+        const double v = tk->number * f * (tk->kilo ? 1000.0 : 1.0);
+        if (v <= 0.0) return pos (kind == Unit::Hz ? -1.0 : 2.0);
+        const double hz = kind == Unit::Hz ? v : 1.0 / v;
+        // the rounded text of an end ("100.00 s") is that end, not a limited value
+        out.limited = hz < 0.01 * (1.0 - 2.0e-3) ? -1 : (hz > 100.0 * (1.0 + 2.0e-3) ? 1 : 0);
+        out.plain = (float) juce::jlimit (0.0, 1.0, std::log10 (juce::jlimit (0.01, 100.0, hz) / 0.01) / 4.0);
+        return out;
+    }
+    double want;     // the step's value: whole notes for a division, cycles per pulse for a ratio
+    if (mode == 5)
+    {
+        if (t.startsWithChar ('x')) t = t.substring (1);
+        auto r = fraction (t);
+        if (! r || *r <= 0.0) return {};
+        want = *r;
+    }
+    else
+    {
+        // "1/8d", "1/8 dotted", "1/8t", "1/8.": the buttons decide dotted and triplet
+        for (auto* suffix : { "dotted", "triplet", "d", "t", "." }) if (t.endsWith (suffix)) { t = t.dropLastCharacters ((int) std::strlen (suffix)); break; }
+        if (! t.containsChar ('/')) return {};
+        auto r = fraction (t);
+        if (! r || *r <= 0.0) return {};
+        want = *r;
+    }
+    for (int k = 0; k <= 10; ++k)
+    {
+        const double v = mode == 5 ? lfoRatio (k) : lfoBeats (k) / 4.0;
+        if (std::abs (v - want) <= v * 1.0e-6) return pos (k / 10.0);
+    }
+    const double lo = mode == 5 ? lfoRatio (0) : lfoBeats (10) / 4.0, hi = mode == 5 ? lfoRatio (10) : lfoBeats (0) / 4.0;
+    if (want < lo) return pos (mode == 5 ? -1.0 : 2.0);   // a division longer than 16/1 is the slowest step, k = 0
+    if (want > hi) return pos (mode == 5 ? 2.0 : -1.0);
+    return {};
+}
+
 std::optional<TypedValue> parseValueText (const juce::RangedAudioParameter& p, const juce::String& text, const juce::String& shown)
 {
     if (auto* c = dynamic_cast<const APC*> (&p))
@@ -264,6 +360,7 @@ std::optional<TypedValue> parseValueText (const juce::RangedAudioParameter& p, c
         if (t == "off" || t == "0" || t == "no" || t == "false") return TypedValue { 0.0f, 0 };
         return {};
     }
+    if (isLfoRate (p)) return parseLfoRate (text, lfoModeOf (shown.isNotEmpty() ? shown : p.getCurrentValueAsText()));
     const auto& reg = registry();
     auto it = reg.find (p.getParameterID());
     if (it == reg.end()) return {};
@@ -281,9 +378,15 @@ bool isModulatable (const juce::RangedAudioParameter& p)
     return true;
 }
 
-juce::String valueTextExample (const juce::RangedAudioParameter& p)
+juce::String valueTextExample (const juce::RangedAudioParameter& p, const juce::String& shown)
 {
     auto labelsHint = [] (const juce::StringArray& l) { return l.size() > 1 ? l[0] + " or " + l[1] : l[0]; };
+    if (isLfoRate (p))
+    {
+        static const char* ex[] = { "2 Hz or 500 ms", "500 ms or 2 s", "1/8 or 1/4", "x2 or x1/4" };
+        const int m = lfoModeOf (shown.isNotEmpty() ? shown : p.getCurrentValueAsText());
+        return ex[m <= 1 ? m : (m == 5 ? 3 : 2)];
+    }
     if (auto* c = dynamic_cast<const APC*> (&p)) return labelsHint (c->choices);
     if (dynamic_cast<const APB*> (&p) != nullptr) return "on or off";
     const auto& reg = registry();
@@ -302,6 +405,7 @@ juce::String valueTextExample (const juce::RangedAudioParameter& p)
         case Unit::Times: return "x2 or 0.5";
         case Unit::Div:   return "0.5 /div";
         case Unit::Bpm:   return "120 BPM";
+        case Unit::Deg:   return juce::String (juce::CharPointer_UTF8 ("90\xc2\xb0"));
         case Unit::Label:
         {
             juce::StringArray l;
@@ -850,6 +954,29 @@ static void add666 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     l.add (std::move (g));
 }
 
+// LF-111 Classic LFO, after the Output group: the parameters of before keep their index
+static void addLfo (juce::AudioProcessorValueTreeState::ParameterLayout& l, int i)
+{
+    const juce::String p (prefixLfo (i)), n ("LFO " + juce::String::charToString ((juce::juce_wchar) ('A' + i)) + " ");
+    auto id = [&] (const char* s) { return juce::ParameterID (p + s, 1); };
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> (p + "grp", n.trim(), "|");
+    auto mode = choice (id ("mode"), n + "Rate Mode", juce::StringArray { "Free Hz", "Free Sec", "Sync", "Sync Dotted", "Sync Triplet" }, 0);
+    // RATE says what it is in its mode, so its texts hold the mode parameter. Not through flt(): the registry's
+    // layout is thrown away, and its rate would keep a pointer to a mode that is gone. parseLfoRate reads it back.
+    const auto* m = mode.get();
+    g->addChild (std::make_unique<APF> (id ("rate"), n + "Rate", NR (0.0f, 1.0f), 0.5f, FA()
+        .withStringFromValueFunction ([m] (float v, int) { return lfoRateText (v, m->getIndex()); })
+        .withValueFromStringFunction ([m] (const juce::String& t) { auto v = parseLfoRate (t, m->getIndex()); return v ? v->plain : 0.5f; })));
+    g->addChild (std::move (mode));
+    g->addChild (flt (id ("amount"), n + "Amount", NR (0.0f, 1.0f), 1.0f));
+    g->addChild (flt (id ("phase"), n + "Phase", NR (0.0f, 360.0f), 0.0f,
+        Fmt { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v)) + juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")); }), Readback::of (Unit::Deg) }));
+    g->addChild (choice (id ("polarity"), n + "Polarity", juce::StringArray { "Bipolar (-10..+10 V)", "Unipolar (0..+10 V)" }, 0));
+    g->addChild (std::make_unique<APB> (id ("retrig"), n + "Note Retrigger", false));
+    g->addChild (choice (id ("wave"), n + "Wave", juce::StringArray { "Sine", "Triangle", "Square", "Saw Up", "Ramp Down", "Stepped Random", "Smooth Random", "Random Walk" }, 0));
+    l.add (std::move (g));
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout l;
@@ -891,6 +1018,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         g->addChild (flt (juce::ParameterID ("out_master", 1), "Master", NR (-48.0f, 6.0f), -3.0f, unitAttr (" dB", 1)));
         l.add (std::move (g));
     }
+    for (int i = 0; i < kMax111; ++i) addLfo (l, i);   // last (H10)
     return l;
 }
 } // namespace wc
