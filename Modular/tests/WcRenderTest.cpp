@@ -523,6 +523,42 @@ int main (int argc, char** argv)
         if (a > -40.0 || std::fabs (b + 6.0) > 1.5) ok = false;
     }
     {
+        // 10 V of pitch at 1 V/oct on a 7 kHz knob (7 MHz), or full linear FM (x 41): the cores must stop below Nyquist,
+        // not wrap into audible noise. Timbre at 0: with Timbre up the folder itself still aliases a fundamental that high,
+        // and so does the polyBLEP saw of the MO (both near -32 dB): the clamp alone does not reach -60 there.
+        std::printf ("259 PAST NYQUIST\n");
+        WcProcessor p; p.prepareToPlay (SR, 256);
+        auto& m = *p.rack.m259 (0);
+        float in[24] {}, out[24] {};
+        setP (p, "a_volt1", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_po_fm", 1.0f);
+        auto audibleDb = [&] (int inJack, float v, int outJack)   // energy from 20 Hz to 20 kHz
+        {
+            std::fill (std::begin (in), std::end (in), 0.0f); in[inJack] = v; m.reset(); m.beginBlock (256);
+            const int order = 15, N = 1 << order;
+            for (int i = 0; i < 4800; ++i) m.tick (in, out);
+            std::vector<float> d ((size_t) N * 2, 0.0f);
+            for (int i = 0; i < N; ++i) { m.tick (in, out); d[(size_t) i] = out[outJack] * (0.5f - 0.5f * std::cos (6.2831853f * (float) i / (float) N)); }
+            juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (d.data());
+            double e = 0.0;
+            for (int k = (int) (20.0 * N / SR); k <= (int) (20000.0 * N / SR); ++k) e += (double) d[(size_t) k] * d[(size_t) k];
+            return 10.0 * std::log10 (e + 1e-30);
+        };
+        struct Case { const char* name; int in, out; } cases[] = {
+            { "pitch -> square", M259::In_PoPitch, M259::Out_Square }, { "pitch -> final", M259::In_PoPitch, M259::Out_Final1 },
+            { "FM -> square", M259::In_PoFm, M259::Out_Square }, { "FM -> final", M259::In_PoFm, M259::Out_Final1 } };
+        double ref[4];
+        for (int c = 0; c < 4; ++c) ref[c] = audibleDb (cases[c].in, 0.0f, cases[c].out);   // a normal voice: default knobs, 0 V
+        setP (p, "a_po_freq", 1.0f);
+        std::printf ("  audible RMS re a normal voice, knob at 7 kHz + 10 V (want < -60 dB):");
+        for (int c = 0; c < 4; ++c)
+        {
+            const double db = audibleDb (cases[c].in, 10.0f, cases[c].out) - ref[c];
+            std::printf ("%s %s %.1f", c ? "," : "", cases[c].name, db);
+            if (db > -60.0) ok = false;
+        }
+        std::printf ("\n");
+    }
+    {
         std::printf ("264 QUAD SAMPLE & HOLD\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m264();

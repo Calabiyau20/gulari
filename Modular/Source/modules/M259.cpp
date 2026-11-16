@@ -160,7 +160,8 @@ void M259::tick (const float* in, float* out) noexcept
         const float poFmIn = lerp (prevIn[In_PoFm], in[In_PoFm], t);
 
         // ---- stage 03: modulation oscillator (linear FM on the core current, no through-zero) ----
-        const float moInc = juce::jmax (0.0f, moInc0 * (1.0f + 4.0f * moFm * moFmIn));
+        // shortcut: near 0.45 the polyBLEP saw and a high-Timbre fold still alias to about -32 dB, upgrade if a patch is heard doing it
+        const float moInc = clampf (moInc0 * (1.0f + 4.0f * moFm * moFmIn), 0.0f, 0.45f);   // below Nyquist of the 4x rate, as the 258
         moPhase += moInc;
         moPhase -= std::floor (moPhase);
         const float mp = (float) moPhase;
@@ -179,7 +180,7 @@ void M259::tick (const float* in, float* out) noexcept
         // ---- stage 04: pitch modulation + external FM (linear, on the core current) ----
         float poInc = poHz / fsOs;
         const float fmTotal = (pitchOn ? 4.0f * idxV * mo : 0.0f) + 4.0f * poFm * poFmIn;
-        poInc = juce::jmax (0.0f, poInc * (1.0f + fmTotal));
+        poInc = clampf (poInc * (1.0f + fmTotal), 0.0f, 0.45f);   // 10 V of pitch or deep FM would otherwise wrap into audible noise
         poPhase += poInc;
         poPhase -= std::floor (poPhase);
         const float pp = (float) poPhase;
