@@ -1200,9 +1200,16 @@ int main (int argc, char** argv)
         check (rows() == 0 && ! rv->assigning() && ! ro->isHolding(), "Esc did not cancel the drag");
         check (rv->candidate (*timbre) == 0, "a candidate with no drag");
 
+        auto arcAt = [&] (wc::ui::WcKnob& k, float n)   // a point on the arc, in the knob's coordinates
+        {
+            const auto a = k.readoutAnchor();
+            const float r = a.getWidth() * 0.5f + 5.0f, th = juce::MathConstants<float>::pi * (1.2f + 1.6f * n);
+            return a.getCentre() + juce::Point<float> (r * std::sin (th), -r * std::cos (th));
+        };
         // 3. onto 259 Timbre: the preview, then +25 % and the button turns orange
         dragTo (*timbre, false);
         check (rv->assignDrop == D::Valid && rv->candidate (*timbre) == 2 && rv->candidate (*freq) == 1 && ro->current().value == "Release to modulate", "over Timbre: " + ro->current().value);
+        check (near (pixel (*timbre, arcAt (*timbre, norm ("a_timbre") + 0.125f)), wc::ui::col::mod), "no preview arc over Timbre");
         save (crop ({ timbre, &lfo }), "assign_drag_valid.png");
         release (*timbre);
         const bool one = rows() == 1 && proc.getAssignments()[0].depth == 0.25f && proc.getAssignments()[0].srcJack == src;
@@ -1252,15 +1259,10 @@ int main (int argc, char** argv)
         // the ring: big, normal and small knobs and a fader; the arc is orange half way along it, the live dot moves
         proc.setDepth (wc::kInst281, src, "a_timbre", 0.5f);
         setP ("a_timbre", 0.3f);
+        proc.apvts.getParameter ("mx_lvl_a")->setValueNotifyingHost (0.3f);   // low: the bar is not cut at the top
         for (auto* k : { big, small, (wc::ui::WcKnob*) fader }) check (proc.assign (wc::kInst281, src, k->paramId, 0.4f), "assign " + k->paramId);
         run (10);
         pump (wc::ui::ValueReadout::kLingerMs + 300);   // the readout of the last drag gone
-        auto arcAt = [&] (wc::ui::WcKnob& k, float n)   // a point on the arc, in the knob's coordinates
-        {
-            const auto a = k.readoutAnchor();
-            const float r = a.getWidth() * 0.5f + 5.0f, th = juce::MathConstants<float>::pi * (1.2f + 1.6f * n);
-            return a.getCentre() + juce::Point<float> (r * std::sin (th), -r * std::cos (th));
-        };
         bring (*timbre);
         check (near (pixel (*timbre, arcAt (*timbre, 0.3f + 0.25f)), wc::ui::col::mod), "no arc on Timbre: " + pixel (*timbre, arcAt (*timbre, 0.55f)).toDisplayString (false));
         check (! near (pixel (*timbre, arcAt (*timbre, 0.15f)), wc::ui::col::mod), "arc below the base on Timbre");
@@ -1277,7 +1279,7 @@ int main (int argc, char** argv)
         bring (*timbre);
         timbre->mouseEnter (at (*timbre, timbre->localPointToGlobal (timbre->getLocalBounds().toFloat().getCentre()), {}));
         pump (500);
-        check (ro->isUp() && ro->current().note == juce::String (juce::CharPointer_UTF8 ("LFO +50 %")) && ! ro->getBounds().toFloat().intersects (ed->getLocalArea (timbre, timbre->readoutAnchor()).expanded (5.0f + 2.0f)),
+        check (ro->isUp() && ro->current().note == juce::String (juce::CharPointer_UTF8 ("LFO +50 %")) && ! ro->getBounds().toFloat().intersects (ed->getLocalArea (timbre, timbre->readoutAnchor()).expanded (6.0f + 7.5f)),
                "hover on Timbre: " + ro->current().note);
         save (crop ({ timbre }), "assign_hover.png");
         timbre->mouseExit (at (*timbre, { -5.0f, -5.0f }, {}));
