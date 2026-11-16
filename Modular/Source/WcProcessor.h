@@ -43,6 +43,20 @@ public:
     void setPresent (int inst, bool on, int preferRow = -1);
     int nextColour (bool banana);
 
+    // ---- modulation by drag (message thread): an output jack moves a knob (wc::Assignment) ----
+    // At most 64, saved with the patch and the project; loading a patch replaces them. Removing a module removes the
+    // ones it is source or destination of. The APVTS only ever holds the knob: the host, MIDI Learn, the knob on
+    // screen and the saved state see no modulation. Every change tells the host there is something new to save.
+    bool isModulatable (const juce::String& paramId) const;   // the one rule (wc::isModulatable), for the editor too
+    // false (nothing changes): a jack or knob that does not exist or cannot be modulated, a module out of the rack,
+    // the pair already there, 64 in use, depth not a number. Depth -1 .. +1 (limited to it)
+    bool assign (int srcInst, int srcJack, const juce::String& paramId, float depth);
+    bool setDepth (int srcInst, int srcJack, const juce::String& paramId, float depth);   // false: no such pair
+    bool unassign (int srcInst, int srcJack, const juce::String& paramId);               // false: no such pair
+    void unassignSource (int srcInst, int srcJack);                                       // every knob this jack moves
+    void unassignParam (const juce::String& paramId);                                     // every jack moving this knob
+    const std::vector<wc::Assignment>& getAssignments() const { return assignments; }    // in the order they were made
+
     // ---- the rows on screen (message thread only; never reaches the rack or the audio) ----
     // Top to bottom, slots left to right; at least two, and a row left empty stays until removeRow. Saved as LAYOUT;
     // a patch without one gets the layout of before the rows could move (legacyRows).
@@ -115,6 +129,10 @@ public:
 
 private:
     std::vector<wc::Cable> cables;
+    std::vector<wc::Assignment> assignments;
+    bool addAssignment (int srcInst, int srcJack, const juce::String& paramId, float depth);   // assign, without telling anyone
+    int findAssignment (int srcInst, int srcJack, const juce::String& paramId) const;          // -1: none
+    void assignmentsChanged();
     std::array<bool, wc::kNumInst> present {};
     std::vector<std::vector<int>> rows;                       // see layout(); empty: to be made from `present`
     std::vector<std::vector<int>> legacyRows() const;

@@ -46,11 +46,12 @@ Rack::Rack (juce::AudioProcessorValueTreeState& state)
 {
     const auto& all = state.processor.getParameters();
     eff.reset (new std::atomic<float>[(size_t) all.size()]);
-    for (auto* prm : all)
+    for (auto* ap : all)
     {
-        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm);
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (ap);
+        prm.push_back (rp);
         raw.push_back (rp != nullptr ? state.getRawParameterValue (rp->getParameterID()) : nullptr);
-        if (rp != nullptr && isModulatable (*rp)) mirrored.push_back (prm->getParameterIndex());
+        if (rp != nullptr && isModulatable (*rp)) mirrored.push_back (ap->getParameterIndex());
     }
     updateParams();
     const Params params { state, eff.get() };
@@ -124,7 +125,7 @@ void Rack::prepare (double sampleRate)
     for (auto& o : outVal) o.fill (0.0f);
 }
 
-void Rack::setPatch (const std::vector<Cable>& cables, const std::array<bool, kNumInst>& present)
+void Rack::setPatch (const std::vector<Cable>& cables, const std::array<bool, kNumInst>& present, const std::vector<Assignment>& assignments)
 {
     Patch p;
     for (int i = 0; i < kNumInst; ++i) { p.srcInst[(size_t) i].fill (-1); p.srcJack[(size_t) i].fill (-1); }
@@ -138,6 +139,14 @@ void Rack::setPatch (const std::vector<Cable>& cables, const std::array<bool, kN
         p.srcInst[(size_t) c.dstInst][(size_t) c.dstJack] = c.srcInst;
         p.srcJack[(size_t) c.dstInst][(size_t) c.dstJack] = c.srcJack;
     }
+    for (auto& a : assignments)
+    {
+        if (p.numMods == kMaxAssignments) break;
+        if (a.srcInst < 0 || a.srcInst >= kNumInst || ! p.present[(size_t) a.srcInst] || a.srcJack < 0 || a.srcJack >= kMaxJacks) continue;
+        if (a.param < 0 || a.param >= (int) prm.size() || prm[(size_t) a.param] == nullptr || ! isModulatable (*prm[(size_t) a.param])) continue;
+        p.mods[(size_t) p.numMods++] = a;
+    }
+    std::stable_sort (p.mods.begin(), p.mods.begin() + p.numMods, [] (const Assignment& x, const Assignment& y) { return x.param < y.param; });
     {
         const juce::SpinLock::ScopedLockType sl (patchLock);
         pending = p;
@@ -173,6 +182,19 @@ void Rack::applyPending() noexcept
 void Rack::updateParams() noexcept
 {
     for (int i : mirrored) eff[(size_t) i].store (raw[(size_t) i]->load (std::memory_order_relaxed), std::memory_order_relaxed);
+    for (int k = 0; k < live.numMods;)   // the rows of one knob sit together: their sum, then one clip
+    {
+        const int i = live.mods[(size_t) k].param;
+        float d = 0.0f;
+        for (; k < live.numMods && live.mods[(size_t) k].param == i; ++k)
+        {
+            const auto& a = live.mods[(size_t) k];
+            d += a.depth * outVal[(size_t) a.srcInst][(size_t) a.srcJack] * 0.1f;
+        }
+        if (d == 0.0f) continue;          // the knob as it is, not through a round trip
+        auto* p = prm[(size_t) i];        // convertFrom0to1 clips to 0..1 and lands a stepped knob on its step
+        eff[(size_t) i].store (p->convertFrom0to1 (p->convertTo0to1 (raw[(size_t) i]->load (std::memory_order_relaxed)) + d), std::memory_order_relaxed);
+    }
 }
 
 void Rack::beginBlock (int numSamples)

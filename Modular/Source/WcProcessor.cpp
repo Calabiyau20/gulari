@@ -262,6 +262,84 @@ void WcProcessor::midiMapChanged()
 }
 
 // ------------------------------------------------------------------------------------------------
+// modulation by drag
+// ------------------------------------------------------------------------------------------------
+bool WcProcessor::isModulatable (const juce::String& id) const
+{
+    auto* p = apvts.getParameter (id);
+    return p != nullptr && wc::isModulatable (*p);
+}
+
+int WcProcessor::findAssignment (int srcInst, int srcJack, const juce::String& id) const
+{
+    auto* p = apvts.getParameter (id);
+    if (p == nullptr) return -1;
+    for (size_t k = 0; k < assignments.size(); ++k)
+        if (assignments[k] == Assignment { srcInst, srcJack, p->getParameterIndex() }) return (int) k;
+    return -1;
+}
+
+bool WcProcessor::addAssignment (int srcInst, int srcJack, const juce::String& id, float depth)
+{
+    if (srcInst < 0 || srcInst >= kNumInst || ! present[(size_t) srcInst]) return false;
+    if (srcJack < 0 || srcJack >= specFor (typeOfInst (srcInst)).numOut()) return false;
+    if (! isModulatable (id) || std::isnan (depth) || (int) assignments.size() >= Rack::kMaxAssignments) return false;
+    const int param = apvts.getParameter (id)->getParameterIndex();
+    const int dst = mapInst[(size_t) param];
+    if ((dst >= 0 && ! present[(size_t) dst]) || findAssignment (srcInst, srcJack, id) >= 0) return false;
+    assignments.push_back ({ srcInst, srcJack, param, juce::jlimit (-1.0f, 1.0f, depth) });
+    return true;
+}
+
+bool WcProcessor::assign (int srcInst, int srcJack, const juce::String& id, float depth)
+{
+    if (! addAssignment (srcInst, srcJack, id, depth)) return false;
+    assignmentsChanged();
+    return true;
+}
+
+bool WcProcessor::setDepth (int srcInst, int srcJack, const juce::String& id, float depth)
+{
+    const int k = findAssignment (srcInst, srcJack, id);
+    if (k < 0 || std::isnan (depth)) return false;
+    assignments[(size_t) k].depth = juce::jlimit (-1.0f, 1.0f, depth);
+    assignmentsChanged();
+    return true;
+}
+
+bool WcProcessor::unassign (int srcInst, int srcJack, const juce::String& id)
+{
+    const int k = findAssignment (srcInst, srcJack, id);
+    if (k < 0) return false;
+    assignments.erase (assignments.begin() + k);
+    assignmentsChanged();
+    return true;
+}
+
+void WcProcessor::unassignSource (int srcInst, int srcJack)
+{
+    const auto n = assignments.size();
+    assignments.erase (std::remove_if (assignments.begin(), assignments.end(), [&] (const Assignment& a) { return a.srcInst == srcInst && a.srcJack == srcJack; }), assignments.end());
+    if (assignments.size() != n) assignmentsChanged();
+}
+
+void WcProcessor::unassignParam (const juce::String& id)
+{
+    auto* p = apvts.getParameter (id);
+    if (p == nullptr) return;
+    const auto n = assignments.size();
+    assignments.erase (std::remove_if (assignments.begin(), assignments.end(), [&] (const Assignment& a) { return a.param == p->getParameterIndex(); }), assignments.end());
+    if (assignments.size() != n) assignmentsChanged();
+}
+
+void WcProcessor::assignmentsChanged()
+{
+    commit();
+    // saved with the project: tell the host there is something new to save
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+}
+
+// ------------------------------------------------------------------------------------------------
 // patching
 // ------------------------------------------------------------------------------------------------
 int WcProcessor::nextColour (bool banana)
@@ -312,14 +390,17 @@ void WcProcessor::setPresent (int inst, bool on, int preferRow)
     }
     present[(size_t) inst] = on;
     if (! on)
+    {
         cables.erase (std::remove_if (cables.begin(), cables.end(), [&] (const Cable& c) { return c.srcInst == inst || c.dstInst == inst; }), cables.end());
+        assignments.erase (std::remove_if (assignments.begin(), assignments.end(), [&] (const Assignment& a) { return a.srcInst == inst || mapInst[(size_t) a.param] == inst; }), assignments.end());
+    }
     commit();
 }
 
 void WcProcessor::commit()
 {
     fixLayout();
-    rack.setPatch (cables, present);
+    rack.setPatch (cables, present, assignments);
     sendChangeMessage();
 }
 
@@ -425,6 +506,7 @@ void WcProcessor::loadBuiltinPatch (int index)
     resetParams();
     rack.m252()->clearAll();
     cables.clear();
+    assignments.clear();
     present.fill (false);
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
     rows.clear();
@@ -868,6 +950,13 @@ juce::ValueTree WcProcessor::patchToTree() const
         lay.appendChild (juce::ValueTree ("ROW", { { "m", keys.joinIntoString (" ") } }), nullptr);
     }
     t.addChild (lay, -1, nullptr);
+    if (! assignments.empty())   // <MOD s="fa" sj="0" p="mx_lvl_b" d="0.5"/>, only when there is one. Older versions skip it
+    {
+        juce::ValueTree ms ("MODULATION");
+        for (auto& a : assignments)
+            ms.appendChild (juce::ValueTree ("MOD", { { "s", instKey (a.srcInst) }, { "sj", a.srcJack }, { "p", mapParam[(size_t) a.param]->getParameterID() }, { "d", a.depth } }), nullptr);
+        t.addChild (ms, -1, nullptr);
+    }
     return t;
 }
 
@@ -939,6 +1028,11 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             cables.push_back ({ si, sj, di, dj, (int) ct["col"] });
     }
     colourCounter = (int) cables.size();
+    // the patch's assignments replace ours (none in it: none). Unknown, not modulatable or out of the rack: left out;
+    // a repeated pair: the first; past 64: left out
+    assignments.clear();
+    for (auto m : t.getChildWithName ("MODULATION"))
+        if (m.hasType ("MOD")) addAssignment (instFromKey (m["s"].toString()), (int) m["sj"], m["p"].toString(), (float) m["d"]);
     commit();
 }
 
@@ -965,6 +1059,7 @@ void WcProcessor::resetAll()
     resetParams();
     rack.m252()->clearAll();
     cables.clear();
+    assignments.clear();
     present.fill (false);
     present[(size_t) wc::kInstMidi] = present[(size_t) wc::kInstOutput] = true;
     rows.clear();

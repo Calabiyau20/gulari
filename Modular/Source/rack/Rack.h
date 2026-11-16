@@ -138,10 +138,22 @@ struct Cable
     bool operator== (const Cable& o) const { return srcInst == o.srcInst && srcJack == o.srcJack && dstInst == o.dstInst && dstJack == o.dstJack; }
 };
 
+// Modulation by drag: an output jack moves a knob. On every control tick the rack adds depth x (the jack's volts / 10)
+// to the knob's normalised value, clips to 0..1 after the sum (stepped knobs land on a step) and gives that to the
+// module; the APVTS keeps the knob. The jack is read as the last tick left it: one tick late, whatever the slot.
+struct Assignment
+{
+    int srcInst = -1, srcJack = -1;    // output jack index of the source module
+    int param = -1;                    // parameter index (a modulatable knob)
+    float depth = 0.0f;                // -1 .. +1 of the knob's travel for 10 V
+    bool operator== (const Assignment& o) const { return srcInst == o.srcInst && srcJack == o.srcJack && param == o.param; }
+};
+
 class Rack
 {
 public:
     static constexpr int kMaxJacks = 48;
+    static constexpr int kMaxAssignments = 64;
 
     explicit Rack (juce::AudioProcessorValueTreeState& apvts);
     ~Rack();
@@ -154,8 +166,8 @@ public:
     float outL() const noexcept;
     float outR() const noexcept;
 
-    // message thread: publish a new patch (cables + which slots are in the rack)
-    void setPatch (const std::vector<Cable>& cables, const std::array<bool, kNumInst>& present);
+    // message thread: publish a new patch (cables, which slots are in the rack, the first 64 assignments)
+    void setPatch (const std::vector<Cable>& cables, const std::array<bool, kNumInst>& present, const std::vector<Assignment>& assignments);
 
     Module* module (int inst) const { return mods[(size_t) inst].get(); }
     M259* m259 (int i) const;
@@ -195,6 +207,8 @@ private:
     {
         std::array<std::array<int, kMaxJacks>, kNumInst> srcInst {}, srcJack {};
         std::array<bool, kNumInst> present {};
+        std::array<Assignment, kMaxAssignments> mods {};   // sorted by parameter
+        int numMods = 0;
     };
     std::array<std::unique_ptr<Module>, kNumInst> mods;
     std::array<std::array<float, kMaxJacks>, kNumInst> outVal {};
@@ -203,6 +217,7 @@ private:
     Patch live, pending;
     std::unique_ptr<std::atomic<float>[]> eff;          // see Params; only the modulatable knobs are used
     std::vector<std::atomic<float>*> raw;                 // the APVTS, by parameter index
+    std::vector<juce::RangedAudioParameter*> prm;
     std::vector<int> mirrored;                            // the modulatable knobs
     juce::SpinLock patchLock;
     std::atomic<bool> patchDirty { false };

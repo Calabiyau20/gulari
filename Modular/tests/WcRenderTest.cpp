@@ -1788,6 +1788,204 @@ int main (int argc, char** argv)
         }
     }
 
+    // ---- modulation by drag: an output jack moves what a module hears of a knob, never the knob ----
+    {
+        std::printf ("MODULATION\n");
+        auto idx = [] (WcProcessor& p, const juce::String& id) { return p.apvts.getParameter (id)->getParameterIndex(); };
+        auto raw = [] (WcProcessor& p, const juce::String& id) { return p.apvts.getRawParameterValue (id)->load(); };
+        auto rack = [] (WcProcessor& p)   // 259 A sine -> 207 B (pan left) -> OUT L, 281 A cycling about 80 ms
+        {
+            p.license.status = License::Status::Licensed;
+            p.prepareToPlay (SR, 32);
+            p.resetAll();
+            for (int i : { kInst259, kInst207, kInst281 }) p.setPresent (i, true);
+            p.connect (kInst259, M259::Out_Sine, kInst207, M207::In_B);
+            p.connect (kInst207, M207::Out_L, kInstOutput, OutputModule::In_Left);
+            setP (p, "mx_prog_b", 1.0f); setP (p, "mx_pan1", 0.0f); setP (p, "mx_lvl_b", 0.2f);
+            setP (p, "out_level", 0.1f); setP (p, "out_master", 0.0f);                 // far from the output's clip
+            setP (p, "fa_mode1", 2.0f); setP (p, "fa_att1", 0.4f); setP (p, "fa_dec1", 0.4f);
+        };
+        // blocks of 32: one control tick each, at its start, reading the jacks as the block before left them
+        auto block = [] (WcProcessor& p, juce::MidiBuffer m = {}) { juce::AudioBuffer<float> b (2, 32); p.processBlock (b, m); return b; };
+        const auto src = M281::outFunc (0);
+
+        // 281 A at 50 % on Level B: the 207 hears 0.2 .. 0.7 and its output follows the 281; the knob, the
+        // parameter and the saved state keep 0.2
+        {
+            WcProcessor p;
+            rack (p);
+            juce::Slider knob;
+            juce::AudioProcessorValueTreeState::SliderAttachment att (p.apvts, "mx_lvl_b", knob);
+            const bool assigned = p.assign (kInst281, src, "mx_lvl_b", 0.5f);
+            float lo = 1.0f, hi = 0.0f, worst = 0.0f, pk = 0.0f;
+            double rmsLo = 1e9, rmsHi = 0.0;                                 // peaks over 10 blocks (6.7 ms)
+            for (int b = 0; b < (int) SR / 32; ++b)
+            {
+                const float v = p.rack.jackValue (kInst281, src);          // the jack as the last tick left it
+                const auto out = block (p);
+                const float heard = p.rack.effective (idx (p, "mx_lvl_b"));
+                worst = std::max (worst, std::abs (heard - (0.2f + 0.5f * v / 10.0f)));
+                lo = std::min (lo, heard); hi = std::max (hi, heard);
+                pk = std::max (pk, out.getMagnitude (0, 0, 32));
+                if (b % 10 == 9) { if (b > 300) { rmsLo = std::min (rmsLo, (double) pk); rmsHi = std::max (rmsHi, (double) pk); } pk = 0.0f; }
+            }
+            juce::MemoryBlock st;
+            p.getStateInformation (st);
+            WcProcessor q;
+            q.license.status = License::Status::Licensed;
+            q.setStateInformation (st.getData(), (int) st.getSize());
+            const bool follows = assigned && worst < 1.0e-5f && lo < 0.21f && hi > 0.69f && rmsHi > 5.0 * rmsLo;
+            const bool knobKept = raw (p, "mx_lvl_b") == 0.2f && std::abs (p.apvts.getParameter ("mx_lvl_b")->getValue() - 0.2f) < 1.0e-6f && std::abs (knob.getValue() - 0.2) < 1.0e-6;
+            const bool savedBase = raw (q, "mx_lvl_b") == 0.2f && q.getAssignments().size() == 1;
+            std::printf ("  281 A (cycle) on 207 Level B at 50 %%: heard %.3f .. %.3f (0.2 .. 0.7, off by %.1g), output %.1f dB swing %s; knob %.3f kept %s; saved %.3f %s\n",
+                         lo, hi, worst, 20.0 * std::log10 (rmsHi / std::max (rmsLo, 1e-9)), follows ? "ok" : "BAD", knob.getValue(), knobKept ? "ok" : "BAD", raw (q, "mx_lvl_b"), savedBase ? "ok" : "BAD");
+            if (! follows || ! knobKept || ! savedBase) ok = false;
+
+            // MIDI Learn on the modulated knob: the CC writes the knob and the host gets the knob, not the modulation
+            struct Host : juce::AudioProcessorListener
+            {
+                int param = -1; float last = -1.0f; int saves = 0;
+                void audioProcessorParameterChanged (juce::AudioProcessor*, int i, float v) override { if (i == param) last = v; }
+                void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override { if (d.nonParameterStateChanged) ++saves; }
+            } host;
+            host.param = idx (p, "mx_lvl_b");
+            p.addListener (&host);
+            p.assignCc (1, "mx_lvl_b");
+            juce::MidiBuffer m;
+            m.addEvent (juce::MidiMessage::controllerEvent (1, 1, 100), 0);
+            block (p, m);
+            float heardMax = 0.0f;
+            for (int b = 0; b < 300; ++b) { block (p); heardMax = std::max (heardMax, p.rack.effective (host.param)); }   // a whole cycle
+            p.flushMidiMoves();
+            const float cc = 100.0f / 127.0f;
+            const bool learnt = std::abs (host.last - cc) < 1.0e-6f && std::abs (raw (p, "mx_lvl_b") - cc) < 1.0e-6f && heardMax > cc + 0.04f;
+            // every change of the table tells the host there is something new to save
+            const int before = host.saves;
+            p.setDepth (kInst281, src, "mx_lvl_b", -0.3f);
+            p.unassign (kInst281, src, "mx_lvl_b");
+            p.assign (kInst281, src, "mx_lvl_b", 0.25f);
+            const bool told = host.saves - before == 3;
+            p.removeListener (&host);
+            std::printf ("  MIDI Learn on it, CC 1 = 100: host gets %.4f (%.4f), the 207 hears up to %.4f %s; table changes told to the host: %d of 3 %s\n",
+                         host.last, cc, heardMax, learnt ? "ok" : "BAD", host.saves - before, told ? "ok" : "BAD");
+            if (! learnt || ! told) ok = false;
+        }
+        // what cannot be modulated: levers (bool), selectors (choice), the knobs that pick what a panel edits, the 666
+        {
+            WcProcessor p;
+            rack (p);
+            for (int i : { kInst252, kInst666 }) p.setPresent (i, true);
+            juce::StringArray wrong;
+            for (auto* id : { "mx_prog_a", "fa_mode1", "rg_cell", "rg_pattern", "s1_va", "s1_time" })
+                if (p.assign (kInst281, src, id, 0.5f) || p.isModulatable (id)) wrong.add (id);
+            for (auto* id : { "rg_bpm", "mx_lvl_c", "out_level" })   // the same modules: a knob that can goes in
+                if (! p.isModulatable (id) || ! p.assign (kInst281, src, id, 0.5f)) wrong.add (juce::String ("not ") + id);
+            const bool bad = ! p.assign (kInst281, 99, "mx_lvl_d", 0.5f) && ! p.assign (kInst259 + 1, 0, "mx_lvl_d", 0.5f)   // no such jack, 259 B out
+                             && ! p.assign (kInst281, src, "mx_lvl_c", 0.5f) && ! p.assign (kInst281, src, "nope", 0.5f) && ! p.assign (kInst281, src, "a_po_freq", NAN)
+                             && ! p.assign (kInst281, src, "b_timbre", 0.5f);                                                     // repeated; unknown; NaN; 259 B out
+            const bool limited = p.assign (kInst281, src, "mx_lvl_d", 7.0f) && p.getAssignments().back().depth == 1.0f;
+            const bool table = (int) p.getAssignments().size() == 4;
+            std::printf ("  refused: lever, selector, 252 cell and pattern, 666 knobs %s; jack, slot, repeat, unknown, NaN %s; depth 7 -> %.1f %s\n",
+                         wrong.isEmpty() ? "ok" : ("BAD " + wrong.joinIntoString (" ")).toRawUTF8(), bad && table ? "ok" : "BAD", p.getAssignments().back().depth, limited ? "ok" : "BAD");
+            if (! wrong.isEmpty() || ! bad || ! limited || ! table) ok = false;
+        }
+        // 64 at most: the 65th is refused, and goes in once one leaves
+        {
+            WcProcessor p;
+            rack (p);
+            for (int i : { kInst266, kInst245, kInst250 }) p.setPresent (i, true);
+            juce::StringArray ids;
+            for (auto* prm : p.getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                    for (auto* pre : { "a_", "mx_", "fa_", "ua_", "sv_", "sq_" })
+                        if (rp->getParameterID().startsWith (pre) && p.isModulatable (rp->getParameterID())) { ids.add (rp->getParameterID()); break; }
+            int in = 0;
+            for (int k = 0; k < 64 && k < ids.size(); ++k) in += p.assign (kInst281, src, ids[k], 0.1f) ? 1 : 0;
+            const bool full = in == 64 && ids.size() > 64 && ! p.assign (kInst281, src, ids[64], 0.1f) && (int) p.getAssignments().size() == 64;
+            p.unassign (kInst281, src, ids[3]);
+            const bool room = p.assign (kInst281, src, ids[64], 0.1f) && (int) p.getAssignments().size() == 64;
+            std::printf ("  64 assignments in (%d), the 65th refused %s, in after one leaves %s\n", in, full ? "ok" : "BAD", room ? "ok" : "BAD");
+            if (! full || ! room) ok = false;
+        }
+        // a module that leaves the rack takes its assignments, as source and as destination; back in, none come back
+        {
+            WcProcessor p;
+            rack (p);
+            p.assign (kInst281, src, "a_timbre", 0.5f);
+            p.assign (kInst259, M259::Out_Sine, "mx_lvl_c", 0.5f);
+            p.assign (kInst281, src, "mx_lvl_b", 0.5f);
+            p.setPresent (kInst281, false);
+            const bool noSource = p.getAssignments().size() == 1 && p.getAssignments()[0].srcInst == kInst259;
+            p.setPresent (kInst281, true);
+            const bool noGhost = p.getAssignments().size() == 1;
+            p.setPresent (kInst207, false);
+            const bool noDest = p.getAssignments().empty();
+            std::printf ("  281 out: its rows go %s, none come back with it %s; 207 out: its rows go %s\n", noSource ? "ok" : "BAD", noGhost ? "ok" : "BAD", noDest ? "ok" : "BAD");
+            if (! noSource || ! noGhost || ! noDest) ok = false;
+        }
+        // saved: the project and a patch file bring the table back and replace the one there was; a patch without
+        // MODULATION (built-in, factory, older versions) leaves it empty; a hand-edited one is cleaned up
+        {
+            auto text = [] (const WcProcessor& p)
+            {
+                juce::String t;
+                for (auto& a : p.getAssignments()) t << instKey (a.srcInst) << ":" << a.srcJack << ">" << p.getParameters()[a.param]->getName (32) << "=" << juce::String (a.depth, 2) << " ";
+                return t.trimEnd();
+            };
+            WcProcessor a;
+            rack (a);
+            a.assign (kInst281, src, "mx_lvl_b", 0.5f);
+            a.assign (kInst281, src, "a_timbre", -0.35f);
+            a.assign (kInst259, M259::Out_Sine, "fa_att1", 1.0f);
+            const auto want = text (a);
+            juce::MemoryBlock st;
+            a.getStateInformation (st);
+            WcProcessor b;
+            rack (b);
+            b.assign (kInst281, src, "mx_lvl_c", 0.5f);
+            b.setStateInformation (st.getData(), (int) st.getSize());
+            const bool project = text (b) == want;
+            const auto file = outDir.getChildFile ("modulation.wcpatch");
+            const bool saved = a.savePatchFile (file) && file.loadFileAsString().contains ("<MOD s=\"fa\" sj=\"0\" p=\"mx_lvl_b\" d=\"0.5\"/>");
+            WcProcessor c;
+            rack (c);
+            c.assign (kInst281, src, "mx_lvl_c", 0.5f);
+            const bool patch = c.loadPatchFile (file) && text (c) == want;
+            file.deleteFile();
+            c.loadBuiltinPatch (0);
+            const bool builtin = c.getAssignments().empty();
+            juce::ValueTree bare = a.patchToTree();
+            bare.removeChild (bare.getChildWithName ("MODULATION"), nullptr);
+            b.patchFromTree (bare);
+            const bool none = b.getAssignments().empty();
+            WcProcessor plain;
+            juce::MemoryBlock ps;
+            plain.getStateInformation (ps);
+            const bool notWritten = ! juce::String::fromUTF8 ((const char*) ps.getData(), (int) ps.getSize()).contains ("MODULATION");
+            // by hand: unknown slot, unknown knob, a lever, a module out of the rack, a jack past the end, a repeat
+            // (the first counts), depths past +-1, and then 70 good ones: the first 64 good ones stay
+            juce::String x = "<WCPATCH name=\"h\" version=\"3\"><MODULES midi=\"1\" a=\"1\" mx=\"1\" fa=\"1\" ua=\"1\" sv=\"1\" sq=\"1\" out=\"1\"/><CABLES/><MODULATION>"
+                             "<MOD s=\"zz\" sj=\"0\" p=\"mx_lvl_b\" d=\"0.5\"/><MOD s=\"fa\" sj=\"0\" p=\"nope\" d=\"0.5\"/><MOD s=\"fa\" sj=\"0\" p=\"mx_prog_a\" d=\"0.5\"/>"
+                             "<MOD s=\"fb\" sj=\"0\" p=\"mx_lvl_b\" d=\"0.5\"/><MOD s=\"fa\" sj=\"0\" p=\"b_timbre\" d=\"0.5\"/><MOD s=\"fa\" sj=\"40\" p=\"mx_lvl_b\" d=\"0.5\"/>"
+                             "<MOD s=\"fa\" sj=\"0\" p=\"mx_lvl_b\" d=\"5\"/><MOD s=\"fa\" sj=\"0\" p=\"mx_lvl_b\" d=\"-0.5\"/><MOD s=\"fa\" sj=\"0\" p=\"mx_lvl_c\" d=\"-3\"/>";
+            juce::StringArray ids;
+            for (auto* prm : a.getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                    for (auto* pre : { "a_", "mx_", "fa_", "ua_", "sv_", "sq_" })
+                        if (rp->getParameterID().startsWith (pre) && a.isModulatable (rp->getParameterID()) && ! rp->getParameterID().startsWith ("mx_lvl_b") && ! rp->getParameterID().startsWith ("mx_lvl_c"))
+                            { ids.add (rp->getParameterID()); break; }
+            for (int k = 0; k < 70; ++k) x << "<MOD s=\"ua\" sj=\"0\" p=\"" << ids[k] << "\" d=\"0.1\"/>";
+            x << "</MODULATION></WCPATCH>";
+            if (auto xml = juce::parseXML (x)) b.patchFromTree (juce::ValueTree::fromXml (*xml));
+            const auto& t = b.getAssignments();
+            const bool cleaned = t.size() == 64 && t[0].param == idx (b, "mx_lvl_b") && t[0].depth == 1.0f && t[1].param == idx (b, "mx_lvl_c") && t[1].depth == -1.0f
+                                 && t[2].param == idx (b, ids[0]) && t[63].param == idx (b, ids[61]) && t[2].srcInst == kInst266;
+            std::printf ("  project: back %s, replaces %s; patch file: written %s, back and replaces %s; built-in empty %s; no MODULATION: empty %s, none written %s; by hand: %d kept (64) %s\n",
+                         project ? "ok" : "BAD", project ? "ok" : "BAD", saved ? "ok" : "BAD", patch ? "ok" : "BAD", builtin ? "ok" : "BAD", none ? "ok" : "BAD", notWritten ? "ok" : "BAD", (int) t.size(), cleaned ? "ok" : "BAD");
+            if (! project || ! saved || ! patch || ! builtin || ! none || ! notWritten || ! cleaned) ok = false;
+        }
+    }
+
     // ---- typed values: every float parameter reads its own text back ----
     // "440 Hz" typed in the host or in the value editor must land on 440 Hz. For each float parameter and 101
     // positions, getValueForText (getText (v)) has to come back to v within what the text shows.
