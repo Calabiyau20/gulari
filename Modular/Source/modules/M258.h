@@ -24,10 +24,9 @@ public:
 
 private:
     std::atomic<float>* freqP[2] {}; std::atomic<float>* procP[2] {}; std::atomic<float>* fmP[2] {}; std::atomic<float>* shapeP[2] {}; std::atomic<float>* fineP[2] {};
-    std::atomic<float>* voltP = nullptr;
     float fs = 48000.0f;
     float logHz[2] {}, proc[2] {}, fm[2] {}, shape[2] {};
-    float pitchDiv = 1.2f;
+    static constexpr float pitchDiv = 1.2f;   // 1.2 V/oct like the rest of the plugin; "volt1" stays in the apvts only so old projects load
     double ph[2] { 0.0, 0.5 };
     dsp::DcBlock dc[2];
 };

@@ -85,7 +85,7 @@ private:
     juce::ParameterAttachment attach;
 };
 
-// white panel button that steps a parameter (259t RANGE, 1V/OCT)
+// white panel button that steps a parameter (259t RANGE)
 class ParamButton : public juce::Component, public juce::SettableTooltipClient, public ReadoutSource
 {
 public:

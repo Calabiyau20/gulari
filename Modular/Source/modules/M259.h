@@ -15,7 +15,7 @@ public:
     enum Out { Out_MoSignal, Out_MoCv, Out_Sine, Out_Square, Out_Final1, Out_Final2,
                Out_MoTri, Out_MoPulse, Out_PoPulse, Out_Count };   // 259t: fixed triangle, the two GATE OUT pulse jacks
     // panel LEDs
-    enum Led { Led_Low, Led_High, Led_Saw, Led_Sqr, Led_Tri, Led_Lock, Led_Amp, Led_Pitch, Led_Timbre, Led_1V,
+    enum Led { Led_Low, Led_High, Led_Saw, Led_Sqr, Led_Tri, Led_Lock, Led_Amp, Led_Pitch, Led_Timbre,
                Led_Sym, Led_Order, Led_MoGate, Led_PoGate, Led_Count };
     float led (int id) const noexcept override { return id >= 0 && id < Led_Count ? leds[(size_t) id].load (std::memory_order_relaxed) : 0.0f; }
 
@@ -33,8 +33,8 @@ public:
 private:
     struct P { std::atomic<float>* v = nullptr; float get() const { return v != nullptr ? v->load() : 0.0f; } };
     std::array<std::atomic<float>, Led_Count> leds {};
-    P lockOn, volt1;
-    float pitchDiv = 1.2f;
+    P lockOn;
+    static constexpr float pitchDiv = 1.2f;   // every pitch inside the plugin is 1.2 V/oct; "volt1" stays in the apvts only so old projects load
     bool lockOnV = false;
     P moFreq, moFine, moRange, moWave, moCvAmt, moFmAmt, index, indexCvAmt, modAmp, modPitch, modTimbre, prog, lockAmt,
       poFreq, poFine, poCvAmt, poFmAmt, timbre, timbreCvAmt, sym, order;

@@ -117,7 +117,6 @@ static ModuleSpec make259()
         C ("idx", "", CtrlStyle::Knob, 235, 236, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
         C ("idx_cv", "", CtrlStyle::SmallKnob, 235, 302, kSkirt),
 
-        C ("volt1", "", CtrlStyle::Button, 290, 114),
         C ("lock", "", CtrlStyle::SmallKnob, 423, 124, kSkirt),
         C ("po_freq", "", CtrlStyle::BigKnob, 345, 214, kSkirt, "27.5|55|110|220|440|880|1760|3520|7040"),
         C ("po_fine", "", CtrlStyle::SmallKnob, 426, 178, kSkirt),
@@ -132,7 +131,7 @@ static ModuleSpec make259()
         C ("prog", "local|rem|both", CtrlStyle::Switch3, 576, 66),
     };
     s.controls[0].scale2 = ".25|.5|1|2|4|8|16|32|64";
-    s.controls[14].scale2 = "A0|A1|A2|A3|A4|A5|A6|A7|A8";
+    s.controls[13].scale2 = "A0|A1|A2|A3|A4|A5|A6|A7|A8";
     // ---- silkscreen ----
     s.lines = {
         L (4, 22, 618, 22), L (4, 392, 618, 392),
@@ -160,7 +159,6 @@ static ModuleSpec make259()
         T ("pitch", 217, 123, 8.5f, 0, 1), T ("mod.", 217, 134, 8.5f, 0, 1),
         T ("timbre", 217, 161, 8.5f, 0, 1), T ("mod.", 217, 172, 8.5f, 0, 1),
         T ("MOD. INDEX", 235, 272, 9.0f, 1),
-        T ("1V/OCT", 290, 98, 8.5f, 1), T ("1v/oct", 315, 132, 7.5f),
         T ("input", 357, 102), T ("gain", 423, 98), T ("PHASE LOCK", 395, 143, 8.5f, 1),
         T ("PITCH (Hz)", 345, 272, 9.5f, 1),
         T ("Symmetry", 500, 54, 9.5f, 1), T ("even", 463, 130, 8.5f), T ("odd", 524, 130, 8.5f),
@@ -176,7 +174,7 @@ static ModuleSpec make259()
         D (122, 100, M259::Led_Saw), D (122, 116, M259::Led_Sqr), D (122, 132, M259::Led_Tri),
         D (188, 80, M259::Led_MoGate), D (441, 80, M259::Led_PoGate),
         D (209, 52, M259::Led_Lock), D (209, 90, M259::Led_Amp), D (209, 128, M259::Led_Pitch), D (209, 166, M259::Led_Timbre),
-        D (315, 116, M259::Led_1V), D (468, 52, M259::Led_Sym), D (468, 140, M259::Led_Order),
+        D (468, 52, M259::Led_Sym), D (468, 140, M259::Led_Order),
     };
     scaleSpec (s, 430.0f / 422.0f);
     return s;

@@ -168,7 +168,7 @@ int main (int argc, char** argv)
         p.prepareToPlay (SR, 256);
         p.loadBuiltinPatch (0);
         run (p, 4800);
-        double worst = 0.0;
+        double worst = 0.0, at72 = 0.0;
         std::printf ("TRACKING (principal sine, 1.2 V/oct)\n");
         for (int note : { 24, 36, 48, 60, 72, 84, 96 })
         {
@@ -177,11 +177,17 @@ int main (int argc, char** argv)
             const double want = 440.0 * std::pow (2.0, (note - 69) / 12.0);
             const double cents = 1200.0 * std::log2 (hz / want);
             worst = std::max (worst, std::fabs (cents));
+            if (note == 72) at72 = hz;
             std::printf ("  note %3d  %9.3f Hz  (want %9.3f)  %+6.2f cents\n", note, hz, want, cents);
             juce::AudioBuffer<float> b (2, 16); juce::MidiBuffer m; m.addEvent (juce::MidiMessage::noteOff (1, note), 0); p.processBlock (b, m);
         }
         std::printf ("  worst %.2f cents\n", worst);
         if (worst > 3.0) ok = false;
+        // the 1V/OCT button left the panel: a project saved with it on must not stay detuned with no way to turn it off
+        setP (p, "a_volt1", 1.0f);
+        const double on = measureHz (run (p, (int) SR, kInst259, M259::Out_Sine, 72), 4800);
+        std::printf ("  a_volt1 on (old project): note 72 %.3f Hz, off %.3f Hz\n", on, at72);
+        if (std::fabs (1200.0 * std::log2 (on / at72)) > 1.0) ok = false;
     }
 
     // ---- 2. timbre sweep ----
@@ -520,6 +526,11 @@ int main (int argc, char** argv)
         const double f0 = hzOf (0.0f), f1 = hzOf (1.2f), f2 = hzOf (2.4f);
         std::printf ("  tracking at 1.2 V/oct: %.1f Hz, %.1f Hz, %.1f Hz (110 / 220 / 440)\n", f0, f1, f2);
         if (std::fabs (f0 - 110.0) > 1.0 || std::fabs (f1 - 220.0) > 1.5 || std::fabs (f2 - 440.0) > 2.5) ok = false;
+        setP (p, "oa_volt1", 1.0f);   // ignored, as on the 259: an old project with it on stays at 1.2 V/oct
+        const double on = hzOf (1.2f);
+        std::printf ("  oa_volt1 on (old project): %.1f Hz at 1.2 V (off %.1f Hz)\n", on, f1);
+        if (on != f1) ok = false;
+        setP (p, "oa_volt1", 0.0f);
         // waveshape: 2nd harmonic energy grows from sine to saw
         auto h2 = [&] (float shape)
         {
@@ -533,7 +544,7 @@ int main (int argc, char** argv)
         if (a > -40.0 || std::fabs (b + 6.0) > 1.5) ok = false;
     }
     {
-        // 10 V of pitch at 1 V/oct on a 7 kHz knob (7 MHz), or full linear FM (x 41): the cores must stop below Nyquist,
+        // 10 V of pitch at 1.2 V/oct on a 7 kHz knob (2.3 MHz), or full linear FM (x 41): the cores must stop below Nyquist,
         // not wrap into audible noise. Timbre at 0: with Timbre up the folder itself still aliases a fundamental that high,
         // and so does the polyBLEP saw of the MO (both near -32 dB): the clamp alone does not reach -60 there.
         std::printf ("259 PAST NYQUIST\n");
@@ -541,7 +552,7 @@ int main (int argc, char** argv)
         auto& m = *p.rack.m259 (0);
         m.outPatched = nullptr;   // ticked by hand, outside the rack: every output runs
         float in[24] {}, out[24] {};
-        setP (p, "a_volt1", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_po_fm", 1.0f);
+        setP (p, "a_timbre", 0.0f); setP (p, "a_po_fm", 1.0f);
         auto audibleDb = [&] (int inJack, float v, int outJack)   // energy from 20 Hz to 20 kHz
         {
             std::fill (std::begin (in), std::end (in), 0.0f); in[inJack] = v; m.reset(); m.beginBlock (256);
@@ -571,17 +582,17 @@ int main (int argc, char** argv)
     }
     {
         // the 4:1 decimator on every 259 output: flat to 18 kHz and 60 dB down from the host Nyquist up (what folds back).
-        // Sine on Final (Order 1, Timbre 0: Order 0 runs through the folder's 1.33 kHz pole), swept at 1 V/oct from 440 Hz
+        // Sine on Final (Order 1, Timbre 0: Order 0 runs through the folder's 1.33 kHz pole), swept at 1.2 V/oct from 440 Hz
         std::printf ("259 DECIMATOR\n");
         WcProcessor p; p.prepareToPlay (SR, 256);
         auto& m = *p.rack.m259 (0);
         m.outPatched = nullptr;   // ticked by hand, outside the rack: every output runs
         float in[24] {}, out[24] {};
-        setP (p, "a_volt1", 1.0f); setP (p, "a_po_freq", 0.5f); setP (p, "a_po_fine", 0.0f);
+        setP (p, "a_po_freq", 0.5f); setP (p, "a_po_fine", 0.0f);
         setP (p, "a_order", 1.0f); setP (p, "a_timbre", 0.0f); setP (p, "a_idx", 0.0f);
         auto levelDb = [&] (double hz)   // the fundamental on Final, one Hann-windowed DFT bin
         {
-            std::fill (std::begin (in), std::end (in), 0.0f); in[M259::In_PoPitch] = (float) std::log2 (hz / 440.0);
+            std::fill (std::begin (in), std::end (in), 0.0f); in[M259::In_PoPitch] = (float) (1.2 * std::log2 (hz / 440.0));
             m.reset(); m.beginBlock (256);
             for (int i = 0; i < 4800; ++i) m.tick (in, out);
             const int N = 9600;

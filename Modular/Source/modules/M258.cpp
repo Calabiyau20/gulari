@@ -14,7 +14,6 @@ M258::M258 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
         fineP[o] = apvts.getRawParameterValue (p + "fine" + n);
         jassert (freqP[o] && procP[o] && fmP[o] && shapeP[o]);
     }
-    voltP = apvts.getRawParameterValue (p + "volt1");
 }
 
 void M258::prepare (double sampleRate)
@@ -31,7 +30,6 @@ void M258::beginBlock (int)
         logHz[o] = std::log2 (knobHz (freqP[o]->load())) + (fineP[o] != nullptr ? fineP[o]->load() / 12.0f : 0.0f);
         proc[o] = procP[o]->load(); fm[o] = fmP[o]->load(); shape[o] = shapeP[o]->load();
     }
-    pitchDiv = voltP != nullptr && voltP->load() > 0.5f ? 1.0f : 1.2f;
 }
 
 void M258::tick (const float* in, float* out) noexcept

@@ -14,7 +14,7 @@ M259::M259 (juce::AudioProcessorValueTreeState& apvts, const juce::String& p)
     modTimbre = get ("mod_timbre"); prog = get ("prog"); lockAmt = get ("lock");
     poFreq = get ("po_freq"); poFine = get ("po_fine"); poCvAmt = get ("po_cv"); poFmAmt = get ("po_fm");
     timbre = get ("timbre"); timbreCvAmt = get ("timbre_cv"); sym = get ("sym"); order = get ("order");
-    lockOn = get ("lock_on"); volt1 = get ("volt1");
+    lockOn = get ("lock_on");
     taps = Decimator4::makeTaps();
 }
 
@@ -81,9 +81,7 @@ void M259::beginBlock (int)
     ampLocal = modAmp.get() > 0.5f; pitchLocal = modPitch.get() > 0.5f; timbreLocal = modTimbre.get() > 0.5f;
     progMode = juce::jlimit (0, 2, (int) std::lround (prog.get()));
     lockOnV = lockOn.get() > 0.5f;
-    pitchDiv = volt1.get() > 0.5f ? 1.0f : 1.2f;     // 1V/OCT button: Eurorack 1 V/oct, else Buchla 1.2 V/oct
     leds[Led_Low].store (lowRange ? 1.0f : 0.0f); leds[Led_High].store (lowRange ? 0.0f : 1.0f);
-    leds[Led_1V].store (pitchDiv < 1.1f ? 1.0f : 0.0f);
     firstBlock = false;
 }
 
