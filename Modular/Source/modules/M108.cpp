@@ -27,7 +27,7 @@ void M108::tick (const float* in, float* out) noexcept
     for (int c = 0; c < kFirstPulse; ++c)
     {
         g[c] = on[c] ? juce::jmin (1.0f, g[c] + step) : juce::jmax (0.0f, g[c] - step);
-        out[c] = in[c] * g[c];
+        out[c] = in[c] * g[c] * g[c] * (3.0f - 2.0f * g[c]);   // S curve on the same 5 ms: exact at 0 and 1, no corner to splatter
     }
     for (int c = kFirstPulse; c < kChannels; ++c)
     {

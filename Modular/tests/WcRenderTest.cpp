@@ -2384,7 +2384,7 @@ int main (int argc, char** argv)
         bool good = true;
 
         // 1. a 1 kHz sine on ch 1 Off at 960: at 0 within 5 ms + a tick, never above the input; the gain (10 V on ch 2,
-        //    Off at the same time) falls one step a sample at most, never rises
+        //    Off at the same time) falls 1.5 steps a sample at most (the S curve's steepest point), never rises
         {
             WcProcessor p; fresh (p);
             const auto r = drive (p, 2400, [&] (int i, float* in) { in[0] = sine (i); in[1] = 10.0f; },
@@ -2397,9 +2397,27 @@ int main (int argc, char** argv)
                 if (i > 0) { jump = std::max (jump, std::abs (r.o[1][(size_t) i] - r.o[1][(size_t) i - 1]) / 10.0f); rise = std::max (rise, r.o[1][(size_t) i] - r.o[1][(size_t) i - 1]); }
                 if (zeroAt < 0 && i >= 960) { bool z = true; for (int k = i; k < 2400; ++k) z &= r.o[0][(size_t) k] == 0.0f && r.o[1][(size_t) k] == 0.0f; if (z) zeroAt = i; }
             }
-            const bool t = std::abs (r.o[0][500] - sine (500)) < 1.0e-6f && zeroAt > 960 && zeroAt <= 960 + 240 + 32 && over <= 1.0e-6f && jump <= step * 1.001f && rise <= 0.0f;
+            const bool t = std::abs (r.o[0][500] - sine (500)) < 1.0e-6f && zeroAt > 960 && zeroAt <= 960 + 240 + 32 && over <= 1.0e-6f && jump <= 1.5f * step * 1.001f && rise <= 0.0f;
             std::printf ("  audio Off: 0 from %d (Off at 960, 5 ms = 240), never above the input %s, largest gain step %.5f (%.5f), rises %s %s\n",
-                         zeroAt, over <= 1.0e-6f ? "yes" : "NO", jump, step, rise <= 0.0f ? "never" : "YES", t ? "ok" : "BAD");
+                         zeroAt, over <= 1.0e-6f ? "yes" : "NO", jump, 1.5f * step, rise <= 0.0f ? "never" : "YES", t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 1b. the same cut of the 1 kHz sine: the energy above 4 kHz stays under -75 dBc of the sine's strongest bin
+        //     (2048 samples, Hann, centred on the fade; a straight-line fade leaves -71)
+        {
+            WcProcessor p; fresh (p);
+            const auto r = drive (p, 2400, [&] (int i, float* in) { in[0] = sine (i); },
+                                  [&] (int i) { if (i == 960) setP (p, "sw1_ch1", 0.0f); });
+            const int order = 11, N = 1 << order, from = 960 + 120 - N / 2;
+            std::vector<float> d ((size_t) N * 2, 0.0f);
+            for (int i = 0; i < N; ++i) d[(size_t) i] = r.o[0][(size_t) (from + i)] * (0.5f - 0.5f * std::cos (2.0f * 3.14159265f * (float) i / (float) N));
+            juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (d.data());
+            double carrier = 0.0, hf = 0.0;
+            for (int k = 1; k < N / 2; ++k) { const double e = (double) d[(size_t) k] * d[(size_t) k]; carrier = std::max (carrier, e); hf += k * SR / N > 4000.0 ? e : 0.0; }
+            const double dbc = 10.0 * std::log10 (hf / carrier + 1.0e-30);
+            const bool t = dbc < -75.0;
+            std::printf ("  audio Off, 1 kHz sine: above 4 kHz %.1f dBc (-75) %s\n", dbc, t ? "ok" : "BAD");
             good &= t;
         }
 
@@ -2418,7 +2436,7 @@ int main (int argc, char** argv)
         }
 
         // 3. Off and On again 2 ms later: it turns back from where it is (no jump); the lever moved on every tick (an
-        //    automation): never more than a step a sample
+        //    automation): never more than 1.5 steps a sample
         {
             WcProcessor p; fresh (p);
             const auto r = drive (p, 4800, [] (int, float* in) { in[0] = 10.0f; },
@@ -2431,8 +2449,8 @@ int main (int argc, char** argv)
             float jump = 0.0f, low = 10.0f;
             for (int i = 1; i < 4800; ++i) jump = std::max (jump, std::abs (r.o[0][(size_t) i] - r.o[0][(size_t) i - 1]) / 10.0f);
             for (int i = 960; i < 2400; ++i) low = std::min (low, r.o[0][(size_t) i]);
-            const bool t = jump <= step * 1.001f && low > 5.5f && low < 6.5f && r.o[0][2399] == 10.0f;
-            std::printf ("  Off then On at 2 ms: lowest %.2f V (6.0), largest step a sample %.5f (%.5f) with the lever moved on every tick too %s\n", low, jump, step, t ? "ok" : "BAD");
+            const bool t = jump <= 1.5f * step * 1.001f && low > 6.2f && low < 6.8f && r.o[0][2399] == 10.0f;
+            std::printf ("  Off then On at 2 ms: lowest %.2f V (6.48, the S curve at 0.6), largest step a sample %.5f (%.5f) with the lever moved on every tick too %s\n", low, jump, 1.5f * step, t ? "ok" : "BAD");
             good &= t;
         }
 
