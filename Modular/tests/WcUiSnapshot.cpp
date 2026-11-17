@@ -2197,5 +2197,18 @@ int main (int argc, char** argv)
         const bool good = proc.connect (wc::kInstMidi, 3, wc::kInst259, wc::M259::In_PoPitch);  // replaces pitch
         std::printf ("banana->mini refused: %s, replace keeps count: %s\n", bad ? "NO" : "yes", (good && (int) proc.getCables().size() == before) ? "yes" : "NO");
     }
+
+    // shutdown: the fonts and the logo must be released by JUCE's shutdown (a static that outlives it is freed under
+    // the Windows loader lock and hangs the host), and come back for a plugin instance opened afterwards
+    {
+        juce::Typeface::Ptr tf = wc::ui::WcLook::label (10.0f).getTypefacePtr();
+        juce::Image logo = wc::ui::WcLook::logo();
+        juce::DeletedAtShutdown::deleteAll();
+        const int tfRefs = tf->getReferenceCount(), logoRefs = logo.getReferenceCount();
+        auto again = wc::ui::WcLook::label (10.0f).getTypefacePtr();
+        const bool ok = tfRefs == 1 && logoRefs == 1 && again != nullptr && again != tf && wc::ui::WcLook::logo().isValid();
+        std::printf ("shutdown releases fonts and logo (refs %d %d), rebuilt after  %s\n", tfRefs, logoRefs, ok ? "ok" : "BAD");
+        if (! ok) return 1;
+    }
     return 0;
 }

@@ -44,21 +44,23 @@ static juce::Typeface::Ptr face (const void* data, size_t size)
     return juce::Typeface::createSystemTypefaceFor (data, size);
 }
 
-juce::Font WcLook::label (float h)
+// The fonts and the isologo live here, not in function statics: on Windows they hold DirectWrite/Direct2D objects,
+// and a static outlives shutdownJuce_GUI and is freed in DLL_PROCESS_DETACH under the loader lock (host hang on
+// plugin removal). DeletedAtShutdown frees them with the rest of JUCE; a later instance builds them again.
+struct WcAssets : juce::DeletedAtShutdown
 {
-    static auto tf = face (WcData::MontserratSemiBold_ttf, WcData::MontserratSemiBold_ttfSize);
-    return juce::Font (juce::FontOptions (tf).withHeight (h));
-}
-juce::Font WcLook::title (float h)
-{
-    static auto tf = face (WcData::MontserratBold_ttf, WcData::MontserratBold_ttfSize);
-    return juce::Font (juce::FontOptions (tf).withHeight (h));
-}
-juce::Font WcLook::brand (float h)
-{
-    static auto tf = face (WcData::SyncopateBold_ttf, WcData::SyncopateBold_ttfSize);
-    return juce::Font (juce::FontOptions (tf).withHeight (h));
-}
+    juce::Typeface::Ptr label = face (WcData::MontserratSemiBold_ttf, WcData::MontserratSemiBold_ttfSize);
+    juce::Typeface::Ptr title = face (WcData::MontserratBold_ttf, WcData::MontserratBold_ttfSize);
+    juce::Typeface::Ptr brand = face (WcData::SyncopateBold_ttf, WcData::SyncopateBold_ttfSize);
+    juce::Image logo = juce::ImageCache::getFromMemory (WcData::isologo_png, WcData::isologo_pngSize);
+    ~WcAssets() override { clearSingletonInstance(); }
+    JUCE_DECLARE_SINGLETON_INLINE (WcAssets, false)
+};
+
+juce::Font WcLook::label (float h) { return juce::Font (juce::FontOptions (WcAssets::getInstance()->label).withHeight (h)); }
+juce::Font WcLook::title (float h) { return juce::Font (juce::FontOptions (WcAssets::getInstance()->title).withHeight (h)); }
+juce::Font WcLook::brand (float h) { return juce::Font (juce::FontOptions (WcAssets::getInstance()->brand).withHeight (h)); }
+juce::Image WcLook::logo() { return WcAssets::getInstance()->logo; }
 
 WcLook::WcLook()
 {

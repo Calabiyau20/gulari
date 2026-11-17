@@ -1671,7 +1671,7 @@ void ModulePanel::paint252 (juce::Graphics& g)
 // "CALABI YAU  (isologo)  <model>", cut into the metal rather than printed.
 static void drawEngravedFooter (juce::Graphics& g, const ModuleSpec& spec, float panelW)
 {
-    static juce::Image logo = juce::ImageCache::getFromMemory (WcData::isologo_png, WcData::isologo_pngSize);
+    const auto logo = WcLook::logo();
     const float y = spec.footY > 0.0f ? spec.footY : spec.height - 9.0f;
     const float h = juce::jlimit (9.0f, 15.0f, panelW * 0.016f + 8.0f);
     const auto f = WcLook::title (h * 0.82f);
