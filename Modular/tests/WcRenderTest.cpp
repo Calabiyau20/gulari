@@ -2316,6 +2316,36 @@ int main (int argc, char** argv)
             std::printf ("  SYNC OUT under a clock at 440 Hz x1, x16 and 2 kHz x1, x16: rising edges in 0.4 s%s %s\n", got.toRawUTF8(), t ? "ok" : "BAD");
             good &= t;
         }
+
+        // 13. ASSIGN moves AMOUNT and PHASE without the tick's steps (audit): LFO A's 100 Hz sine on B's AMOUNT (50 % +-30 %)
+        //     or PHASE (+-18 degrees), B a 1 Hz sine. B's energy above 1 kHz, of all of it: -26.3 / -34.6 dB with the
+        //     knobs read once a tick, under -56.3 / -64.6 dB now (30 dB less)
+        {
+            float peak = 0.0f;   // AMOUNT still follows: 10 V x (50 + 30 %) = 8 V, 5 V if ASSIGN were lost
+            auto above1k = [&] (const char* id, float depth)
+            {
+                WcProcessor p; fresh (p, { A, B });
+                setP (p, "lf1_rate", (float) (std::log10 (100.0 / 0.01) / 4.0)); setP (p, "lf2_rate", (float) (std::log10 (1.0 / 0.01) / 4.0)); setP (p, "lf2_amount", 0.5f);
+                const bool on = p.assign (A, M111::Out_Lfo, id, depth);
+                const int order = 16, N = 1 << order;
+                std::vector<float> d ((size_t) N * 2, 0.0f);
+                for (int i = 0; i < (int) SR + N; ++i)
+                {
+                    if (i % 32 == 0) p.rack.beginBlock (32);
+                    p.rack.tick();
+                    if (i >= (int) SR && depth > 0.1f) peak = std::max (peak, p.rack.jackValue (B, M111::Out_Lfo));
+                    if (i >= (int) SR) d[(size_t) (i - (int) SR)] = p.rack.jackValue (B, M111::Out_Lfo) * (0.5f - 0.5f * std::cos (2.0f * 3.14159265f * (float) (i - (int) SR) / (float) N));
+                }
+                juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (d.data());
+                double all = 0.0, hf = 0.0;
+                for (int k = 1; k < N / 2; ++k) { const double e = (double) d[(size_t) k] * d[(size_t) k]; all += e; hf += k * SR / N > 1000.0 ? e : 0.0; }
+                return on ? 10.0 * std::log10 (hf / all + 1.0e-30) : 0.0;
+            };
+            const double amt = above1k ("lf2_amount", 0.3f), ph = above1k ("lf2_phase", 0.05f);
+            const bool t = amt < -56.3 && ph < -64.6 && peak > 7.5f;
+            std::printf ("  ASSIGN without steps: above 1 kHz AMOUNT %.1f dB (-56.3), PHASE %.1f dB (-64.6); AMOUNT peak %.3f V (8) %s\n", amt, ph, peak, t ? "ok" : "BAD");
+            good &= t;
+        }
         std::printf ("  LF-111 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }

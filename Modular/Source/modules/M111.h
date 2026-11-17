@@ -39,6 +39,9 @@ private:
     std::atomic<float> speedLed { 0.0f };
     float fs = 48000.0f;
     float rateK = 0.5f, amountK = 1.0f, phaseK = 0.0f;
+    float amount0 = 1.0f, amount1 = 1.0f, phase0 = 0.0f, phase1 = 0.0f;   // the two ticks before, for the spline
+    int tickLen = 1, tickAt = 0;
+    bool first = true;
     int modeV = 0, waveV = 0;
     bool unipolar = false, retrigOn = false;
     double bpm = 120.0;

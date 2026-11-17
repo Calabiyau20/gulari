@@ -21,6 +21,7 @@ void M111::reset()
     acc = 0.0;
     phiWas = 0.0f;
     wrapped = retrigWas = clockWas = noteHit = clockSeen = false;
+    first = true;
     clockPeriod = sinceClock = pulses = syncLeft = 0;
     sinceSync = 1 << 30;
     pick(); pick();   // the random waves start on a value of their own, not on 0
@@ -28,9 +29,16 @@ void M111::reset()
     speedLed.store (0.0f, std::memory_order_relaxed);
 }
 
-void M111::beginBlock (int)
+void M111::beginBlock (int numSamples)
 {
-    rateK = rateP->load(); amountK = amountP->load(); phaseK = phaseP->load();
+    // AMOUNT and PHASE follow a quadratic B-spline through the last three ticks (1.5 ticks late): ASSIGN writes them
+    // once a tick, and a straight line from tick to tick still left its steps 25 dB too loud.
+    // shortcut: a jump of PHASE across 0/360 (automation) glides the long way round in 2 ticks, wrap the step if heard
+    const float a = amountP->load(), ph = phaseP->load();
+    amount0 = first ? a : amount1; amount1 = first ? a : amountK; amountK = a;
+    phase0 = first ? ph : phase1; phase1 = first ? ph : phaseK; phaseK = ph;
+    rateK = rateP->load();
+    tickLen = juce::jmax (1, numSamples); tickAt = 0; first = false;
     modeV = juce::jlimit (0, 4, (int) std::lround (modeP->load()));
     waveV = juce::jlimit (0, 7, (int) std::lround (waveP->load()));
     unipolar = polarityP->load() > 0.5f;
@@ -99,10 +107,12 @@ void M111::tick (const float* in, float* out) noexcept
     const double restartIn = hz > 200.0 ? (double) clockPeriod : 1.0e9;   // only a clock goes past the cap: it restarts the cycle sooner
     hz = juce::jlimit (0.001, 200.0, hz);
 
+    const float u = (float) juce::jmin (++tickAt, tickLen) / (float) tickLen, u0 = 0.5f * (1.0f - u) * (1.0f - u), u2 = 0.5f * u * u;
+    auto spline = [u0, u2] (float p0, float p1, float p2) { return p1 + u0 * (p0 - p1) + u2 * (p2 - p1); };   // a knob at rest: p1 exactly
     bool cycle = wrapped;
     wrapped = false;
     if (restart) { acc = 0.0; cycle = true; }   // this very sample is the wave at PHASE
-    float phi = (float) acc + phaseK / 360.0f + in[In_PhaseCv] * 0.1f;        // 36 degrees per volt, all the way round
+    float phi = (float) acc + spline (phase0, phase1, phaseK) / 360.0f + in[In_PhaseCv] * 0.1f;        // 36 degrees per volt, all the way round
     phi -= std::floor (phi);
     // forward through 0; backwards (PHASE c.v.) draws nothing.
     // shortcut: a clock that slows by more than (360 - PHASE) degrees of a cycle still draws twice, fix if it is heard
@@ -122,7 +132,7 @@ void M111::tick (const float* in, float* out) noexcept
         case 6:  w = sPrev + (sNext - sPrev) * glide; break;
         default: w = wPrev + (wNext - wPrev) * glide; break;
     }
-    const float a = dsp::clampf (amountK + in[In_AmountCv] * 0.1f, 0.0f, 1.0f);   // 10 % per volt
+    const float a = dsp::clampf (spline (amount0, amount1, amountK) + in[In_AmountCv] * 0.1f, 0.0f, 1.0f);   // 10 % per volt
     const float v = unipolar ? 5.0f * a * (w + 1.0f) : 10.0f * a * w;
     out[Out_Lfo] = out[Out_Lfo2] = v;
     out[Out_Inv] = unipolar ? 10.0f * a - v : -v;
