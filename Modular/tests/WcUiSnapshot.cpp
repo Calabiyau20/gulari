@@ -1674,6 +1674,114 @@ int main (int argc, char** argv)
         if (! bad.isEmpty()) return 1;
     }
 
+    // ---- SW-108 8 Switches: eight levers, each its own column; their readouts; the jacks by kind; captures; demo menu ----
+    {
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        const auto left = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+        auto at = [] (juce::Component& c, juce::Point<float> screen, juce::ModifierKeys mods)
+        {
+            const auto pos = c.getLocalPoint (nullptr, screen);
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, 1, false);
+        };
+        const int A = wc::kInst108;
+        WcProcessor proc;
+        proc.license.status = wc::License::Status::Licensed;
+        proc.prepareToPlay (48000.0, 512);
+        proc.resetAll();   // no cable of the default patch across the captures
+        for (int i : { A, A + 1, wc::kInst259 }) proc.setPresent (i, true);
+        auto setP = [&proc] (const juce::String& id, float plain) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (plain)); };
+        auto raw = [&proc] (const juce::String& id) { return proc.apvts.getRawParameterValue (id)->load(); };
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        pump (40);
+        wc::ui::RackView* rv = nullptr;
+        wc::ui::ValueReadout* ro = nullptr;
+        juce::Viewport* vp = nullptr;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+            if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+            if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+            for (auto* ch : c.getChildren()) walk (*ch);
+        };
+        walk (*ed);
+        wc::ui::ModulePanel* pa = nullptr;
+        if (rv != nullptr) for (auto* c : rv->content.getChildren()) if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (c)) if (p->inst == A) pa = p;
+        if (rv == nullptr || ro == nullptr || vp == nullptr || pa == nullptr) { std::printf ("SW-108: no panel  BAD\n"); return 1; }
+        juce::StringArray bad;
+        auto check = [&] (bool ok, const juce::String& what) { if (! ok) bad.add (what); };
+        const auto& spec = wc::specFor (wc::MT_108);
+        // eight levers, sw1_ch1..8 from left to right; on each lever's own axis (and in its tail, short of the next one)
+        // the click lands on it: the next lever, declared after it, lies on top of its tail
+        std::vector<wc::ui::ParamSwitch*> levers;
+        for (auto* ch : pa->getChildren()) if (auto* s = dynamic_cast<wc::ui::ParamSwitch*> (ch)) levers.push_back (s);
+        std::sort (levers.begin(), levers.end(), [] (auto* a, auto* b) { return a->getX() < b->getX(); });
+        juce::String ids, hits;
+        for (auto* s : levers) ids << s->paramId() << " ";
+        check (levers.size() == 8 && ids.trim() == "sw1_ch1 sw1_ch2 sw1_ch3 sw1_ch4 sw1_ch5 sw1_ch6 sw1_ch7 sw1_ch8", "levers: " + ids);
+        for (int i = 0; i < (int) levers.size() && i < (int) spec.controls.size(); ++i)
+            for (float dx : { 0.0f, 20.0f })
+            {
+                auto* got = pa->getComponentAt (juce::Point<float> (spec.controls[(size_t) i].x + dx, spec.controls[(size_t) i].y).roundToInt());
+                if (got != levers[(size_t) i]) hits << "ch " << (i + 1) << " +" << (int) dx << " ";
+            }
+        check (hits.isEmpty(), "a click on a lever's column lands elsewhere: " + hits);
+        // the readout: "Switches A Ch 1" / "On"; a click on the lower half is Off, on the upper half On
+        auto text = [] (wc::ui::ReadoutSource& s) { wc::ui::ReadoutText t; s.readoutText (t); return t; };
+        auto clickAt = [&] (juce::Component& c, float fy) { const auto pt = c.localPointToGlobal (juce::Point<float> (12.0f, (float) c.getHeight() * fy)); c.mouseDown (at (c, pt, left)); c.mouseUp (at (c, pt, left)); pump (5); };
+        if (levers.size() == 8)
+        {
+            const auto t0 = text (*levers[0]);
+            clickAt (*levers[0], 0.85f);
+            const auto t1 = text (*levers[0]);
+            const float off = raw ("sw1_ch1");
+            clickAt (*levers[0], 0.15f);
+            check (t0.name == "Switches A Ch 1" && t0.value == "On" && off == 0.0f && t1.value == "Off" && raw ("sw1_ch1") == 1.0f,
+                   "lever 1: \"" + t0.name + "\" " + t0.value + ", lower half -> " + t1.value + ", upper half -> " + juce::String (raw ("sw1_ch1")));
+        }
+        // the jacks by kind: mini for 1-3, banana for 4-8, red (pulse) for 7-8; an audio cable into a c.v. channel is refused
+        bool kinds = spec.numIn() == 8 && spec.numOut() == 8;
+        for (int i = 0; i < (int) spec.jacks.size(); ++i)
+        {
+            const int ch = i % 8;
+            kinds &= spec.jacks[(size_t) i].output == (i >= 8) && (spec.jacks[(size_t) i].kind == wc::JackKind::Mini) == (ch < 3) && spec.jacks[(size_t) i].pulse == (ch >= 6);
+        }
+        check (kinds && ! proc.connect (wc::kInst259, wc::M259::Out_Sine, A, 3) && proc.connect (wc::kInst259, wc::M259::Out_Sine, A, 0), "jacks by kind");
+        // captures: the panel in both skins at 100 % and 50 %, ch 2 and 5 Off as in the boceto
+        proc.disconnectOutput (wc::kInst259, wc::M259::Out_Sine);
+        setP ("sw1_ch2", 0.0f); setP ("sw1_ch5", 0.0f);
+        pump (60);
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto save = [&] (const juce::Image& img, const juce::String& name)
+        {
+            auto file = shots.getChildFile (name);
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        for (float z : { 1.0f, 0.5f })
+            for (int sk : { 0, 1 })
+            {
+                wc::ui::skin::current = sk;
+                rv->setZoom (z);
+                pump (20);
+                vp->setViewPosition (juce::roundToInt ((float) pa->getX() * z) - 10, juce::roundToInt ((float) pa->getY() * z) - 10);
+                for (auto* c : rv->content.getChildren()) c->repaint();
+                pump (60);
+                const auto area = ed->getLocalArea (pa, pa->getLocalBounds()).expanded (8).getIntersection (ed->getLocalBounds());
+                save (ed->createComponentSnapshot (area, true, 1.0f), juce::String ("sw_panel_") + (sk ? "neon" : "classic") + "_" + juce::String (juce::roundToInt (z * 100)) + ".png");
+            }
+        wc::ui::skin::current = 0;
+        rv->setZoom (1.0f);
+        pump (20);
+        std::printf ("SW-108: 8 levers left to right, each its own column, readouts and clicks, jacks by kind, captures  %s\n",
+                     bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
+        if (! bad.isEmpty()) return 1;
+    }
+
     // connect checks: kind mismatch must be refused, a new cable into a used input replaces the old one
     {
         WcProcessor proc;

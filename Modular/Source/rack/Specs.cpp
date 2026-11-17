@@ -1894,6 +1894,9 @@ static ModuleSpec make111()
 
 // ---------------------------------------------------------------------------------------------
 // SW-108 8 Switches - a Calabi Yau original, drawn at panel size (448 x 430, no scaleSpec).
+// 8 channels on a 56-unit pitch: lever (y 108), input (y 196), output (y 336), in -> out arrow as the 266 integrator.
+// Groups by rules and bold titles, as the LF-111: SIGNAL 1-3 (mini) | CONTROL VOLTAGE 4-6 | PULSE 7-8 (banana, colour by role).
+// Bands: title 14, rules 26 / 150 / 400, footer 415 - the LF-111 skeleton, so title band and footer line up in a row.
 // ---------------------------------------------------------------------------------------------
 static ModuleSpec make108()
 {
@@ -1919,7 +1922,62 @@ static ModuleSpec make108()
         J ("out", K::Banana, true, 364, 336, true),   // out 6
         J ("out", K::Banana, true, 420, 336, true),   // out 7
     };
-    s.texts = { T ("8 SWITCHES  SW-108", 224, 14, 10.5f, 4), T ("@foot", 224, 415, 9.0f, 1) };
+    s.controls = {   // bool parameters: up = on (ParamSwitch topIsOne); blue tip as the 207 PROG levers
+        C ("ch1", "", CtrlStyle::Toggle, 28, 108, kSkirt),
+        C ("ch2", "", CtrlStyle::Toggle, 84, 108, kSkirt),
+        C ("ch3", "", CtrlStyle::Toggle, 140, 108, kSkirt),
+        C ("ch4", "", CtrlStyle::Toggle, 196, 108, kSkirt),
+        C ("ch5", "", CtrlStyle::Toggle, 252, 108, kSkirt),
+        C ("ch6", "", CtrlStyle::Toggle, 308, 108, kSkirt),
+        C ("ch7", "", CtrlStyle::Toggle, 364, 108, kSkirt),
+        C ("ch8", "", CtrlStyle::Toggle, 420, 108, kSkirt),
+    };
+    s.lines = {
+        L (4, 26, 444, 26),
+        L (4, 400, 444, 400),
+        L (4, 150, 444, 150),
+        L (168, 26, 168, 400),
+        L (336, 26, 336, 400),
+        L (28, 222, 28, 316, 1.2f, false, true),
+        L (84, 222, 84, 316, 1.2f, false, true),
+        L (140, 222, 140, 316, 1.2f, false, true),
+        L (196, 222, 196, 316, 1.2f, false, true),
+        L (252, 222, 252, 316, 1.2f, false, true),
+        L (308, 222, 308, 316, 1.2f, false, true),
+        L (364, 222, 364, 316, 1.2f, false, true),
+        L (420, 222, 420, 316, 1.2f, false, true),
+    };
+    s.texts = {
+        T ("8 SWITCHES  SW-108", 224, 14, 10.5f, 4),
+        T ("SIGNAL", 84, 38, 9.5f, 1),
+        T ("CONTROL VOLTAGE", 252, 38, 9.5f, 1),
+        T ("PULSE", 392, 38, 9.5f, 1),
+        T ("1", 28, 62, 10.0f, 3),
+        T ("on", 28, 84, 9.0f, 0),
+        T ("off", 28, 133, 9.0f, 0),
+        T ("2", 84, 62, 10.0f, 3),
+        T ("on", 84, 84, 9.0f, 0),
+        T ("off", 84, 133, 9.0f, 0),
+        T ("3", 140, 62, 10.0f, 3),
+        T ("on", 140, 84, 9.0f, 0),
+        T ("off", 140, 133, 9.0f, 0),
+        T ("4", 196, 62, 10.0f, 3),
+        T ("on", 196, 84, 9.0f, 0),
+        T ("off", 196, 133, 9.0f, 0),
+        T ("5", 252, 62, 10.0f, 3),
+        T ("on", 252, 84, 9.0f, 0),
+        T ("off", 252, 133, 9.0f, 0),
+        T ("6", 308, 62, 10.0f, 3),
+        T ("on", 308, 84, 9.0f, 0),
+        T ("off", 308, 133, 9.0f, 0),
+        T ("7", 364, 62, 10.0f, 3),
+        T ("on", 364, 84, 9.0f, 0),
+        T ("off", 364, 133, 9.0f, 0),
+        T ("8", 420, 62, 10.0f, 3),
+        T ("on", 420, 84, 9.0f, 0),
+        T ("off", 420, 133, 9.0f, 0),
+        T ("@foot", 224, 415, 9.0f, 1),
+    };
     return s;
 }
 
