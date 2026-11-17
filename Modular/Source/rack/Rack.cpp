@@ -25,6 +25,7 @@
 #include "../modules/M291.h"
 #include "../modules/M666.h"
 #include "../modules/M111.h"
+#include "../modules/M108.h"
 
 namespace wc
 {
@@ -33,7 +34,7 @@ juce::String instName (int inst)
     if (inst == kInstMidi) return "MIDI";
     if (inst == kInstOutput) return "OUTPUT";
     const auto letter = juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
-    switch (typeOfInst (inst)) { case MT_218: return "218"; case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_250: return "250"; case MT_252: return "252"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_267: return "267"; case MT_275: return "275"; case MT_284: return "284"; case MT_291: return "291"; case MT_666: return "SC-666 " + juce::String (subIndex (inst) + 1); case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; case MT_111: return "LFO " + letter; default: return "259 " + letter; }
+    switch (typeOfInst (inst)) { case MT_218: return "218"; case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_250: return "250"; case MT_252: return "252"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_267: return "267"; case MT_275: return "275"; case MT_284: return "284"; case MT_291: return "291"; case MT_666: return "SC-666 " + juce::String (subIndex (inst) + 1); case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; case MT_111: return "LFO " + letter; case MT_108: return "Switches " + letter; default: return "259 " + letter; }
 }
 
 std::atomic<float>* Params::getRawParameterValue (const juce::String& id) const
@@ -78,6 +79,7 @@ Rack::Rack (juce::AudioProcessorValueTreeState& state)
     mods[(size_t) kInst207] = std::make_unique<M207> (params, "mx_");
     mods[(size_t) kInst267] = std::make_unique<M267> (params, "us_");
     mods[(size_t) kInst275] = std::make_unique<M275> (params, "rv_");
+    for (int i = 0; i < kMax108; ++i) mods[(size_t) (kInst108 + i)] = std::make_unique<M108> (params, prefix108 (i));
     mods[(size_t) kInst284] = std::make_unique<M284> (params, "ev_");
     mods[(size_t) kInst291] = std::make_unique<M291> (params, "tm_");
     for (int i = 0; i < kMax666; ++i) mods[(size_t) (kInst666 + i)] = std::make_unique<M666> (params, prefix666 (i));

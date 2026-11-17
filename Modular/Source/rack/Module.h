@@ -9,7 +9,7 @@ namespace wc
 // Banana jacks carry control (DC, 0..10 V, pulses), mini jacks carry audio, exactly like a Series 200 system.
 enum class JackKind { Banana, Mini };
 
-enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_267, MT_275, MT_284, MT_291, MT_666, MT_111, MT_Count };
+enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_267, MT_275, MT_284, MT_291, MT_666, MT_111, MT_108, MT_Count };
 
 struct JackSpec
 {

@@ -1892,6 +1892,37 @@ static ModuleSpec make111()
     return s;
 }
 
+// ---------------------------------------------------------------------------------------------
+// SW-108 8 Switches - a Calabi Yau original, drawn at panel size (448 x 430, no scaleSpec).
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make108()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_108; s.name = "8 SWITCHES"; s.model = "SW-108"; s.engr = "";
+    s.width = 448; s.height = 430;
+    s.jacks = {   // inputs 0-7, then outputs 0-7: channel k = in k / out k
+        J ("in", K::Mini, false, 28, 196),   // in 0
+        J ("in", K::Mini, false, 84, 196),   // in 1
+        J ("in", K::Mini, false, 140, 196),   // in 2
+        J ("in", K::Banana, false, 196, 196),   // in 3
+        J ("in", K::Banana, false, 252, 196),   // in 4
+        J ("in", K::Banana, false, 308, 196),   // in 5
+        J ("in", K::Banana, false, 364, 196, true),   // in 6
+        J ("in", K::Banana, false, 420, 196, true),   // in 7
+        J ("out", K::Mini, true, 28, 336),   // out 0
+        J ("out", K::Mini, true, 84, 336),   // out 1
+        J ("out", K::Mini, true, 140, 336),   // out 2
+        J ("out", K::Banana, true, 196, 336),   // out 3
+        J ("out", K::Banana, true, 252, 336),   // out 4
+        J ("out", K::Banana, true, 308, 336),   // out 5
+        J ("out", K::Banana, true, 364, 336, true),   // out 6
+        J ("out", K::Banana, true, 420, 336, true),   // out 7
+    };
+    s.texts = { T ("8 SWITCHES  SW-108", 224, 14, 10.5f, 4), T ("@foot", 224, 415, 9.0f, 1) };
+    return s;
+}
+
 // Each layout marks where its footer sits with a "@foot" placeholder text: finish() takes that height
 // and removes the placeholder, and RackView engraves CALABI YAU - isologo - model there instead.
 static ModuleSpec finish (ModuleSpec s)
@@ -1916,7 +1947,7 @@ const ModuleSpec& specFor (ModuleType t)
     static const ModuleSpec specs[MT_Count] = { finish (makeMidi()), finish (make259()), finish (makeOutput()), finish (make281()), finish (make292()), finish (make266()), finish (make245()),
                                                 finish (make242()), finish (make257()), finish (make258()), finish (make264()), finish (make230()), finish (make285()), finish (make207()),
                                                 finish (make277()), finish (make296()), finish (make248()), finish (make218()), finish (make250()), finish (make252()),
-                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()), finish (make111()) };
+                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()), finish (make111()), finish (make108()) };
     return specs[t];
 }
 } // namespace wc

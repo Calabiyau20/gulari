@@ -31,6 +31,7 @@
 #include "modules/M291.h"
 #include "modules/M666.h"
 #include "modules/M111.h"
+#include "modules/M108.h"
 #include "WcLicense.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
@@ -2225,13 +2226,12 @@ int main (int argc, char** argv)
             good &= fifth && six;
         }
 
-        // 9. the 56 parameters come after every other one: no index of before moves (Assignment.param, hosts by position)
+        // 9. the 56 parameters come after every other one of before (the SW-108 come after them): no index of before moves (Assignment.param, hosts by position)
         {
             WcProcessor p;
             const auto& all = p.getParameters();
             auto at = [&] (const char* id) { return p.apvts.getParameter (id)->getParameterIndex(); };
-            const bool t = at ("lf1_rate") == at ("out_master") + 1 && all.size() == at ("lf1_rate") + 56
-                           && dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID() == "lf8_wave"
+            const bool t = at ("lf1_rate") == at ("out_master") + 1 && at ("lf8_wave") == at ("lf1_rate") + 55 && all.size() > at ("lf8_wave")
                            && p.apvts.getParameter ("lf3_rate")->getName (64) == "LFO C Rate" && ! p.isModulatable ("lf1_mode") && p.isModulatable ("lf1_phase");
             std::printf ("  parameters: lf1_rate at %d (out_master %d), %d in all, names \"%s\" %s\n", at ("lf1_rate"), at ("out_master"), all.size(),
                          p.apvts.getParameter ("lf3_rate")->getName (64).toRawUTF8(), t ? "ok" : "BAD");
@@ -2258,6 +2258,246 @@ int main (int argc, char** argv)
             good &= t;
         }
         std::printf ("  LF-111 %s\n", good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
+    // ---- SW-108 8 Switches: the fades, the pulse channels, the first sample, demo, parameters at the end, delay ----
+    {
+        std::printf ("SW-108 8 SWITCHES\n");
+        const int A = kInst108;
+        const float step = 1.0f / 240.0f;   // one fade step at 48 kHz: 5 ms
+        auto fresh = [A] (WcProcessor& p)
+        {
+            p.license.status = License::Status::Licensed;
+            p.prepareToPlay (SR, 32);
+            p.resetAll();
+            p.setPresent (A, true);
+        };
+        // the module driven by hand, a control tick every 32 samples as processBlock runs it; `at` before each sample
+        struct Run { std::vector<float> o[8]; };
+        auto drive = [A] (WcProcessor& p, int n, std::function<void (int, float*)> input, std::function<void (int)> at = {})
+        {
+            auto* m = p.rack.module (A);
+            Run r;
+            float in[16] {}, out[16] {};
+            for (int i = 0; i < n; ++i)
+            {
+                if (at) at (i);
+                if (i % 32 == 0) m->beginBlock (32);
+                input (i, in);
+                m->tick (in, out);
+                for (int c = 0; c < 8; ++c) r.o[c].push_back (out[c]);
+            }
+            return r;
+        };
+        auto sine = [] (int i) { return 5.0f * std::sin (6.2831853f * 1000.0f * (float) i / (float) SR); };
+        bool good = true;
+
+        // 1. a 1 kHz sine on ch 1 Off at 960: at 0 within 5 ms + a tick, never above the input; the gain (10 V on ch 2,
+        //    Off at the same time) falls one step a sample at most, never rises
+        {
+            WcProcessor p; fresh (p);
+            const auto r = drive (p, 2400, [&] (int i, float* in) { in[0] = sine (i); in[1] = 10.0f; },
+                                  [&] (int i) { if (i == 960) { setP (p, "sw1_ch1", 0.0f); setP (p, "sw1_ch2", 0.0f); } });
+            int zeroAt = -1;
+            float over = 0.0f, jump = 0.0f, rise = 0.0f;
+            for (int i = 0; i < 2400; ++i)
+            {
+                over = std::max (over, std::abs (r.o[0][(size_t) i]) - std::abs (sine (i)));
+                if (i > 0) { jump = std::max (jump, std::abs (r.o[1][(size_t) i] - r.o[1][(size_t) i - 1]) / 10.0f); rise = std::max (rise, r.o[1][(size_t) i] - r.o[1][(size_t) i - 1]); }
+                if (zeroAt < 0 && i >= 960) { bool z = true; for (int k = i; k < 2400; ++k) z &= r.o[0][(size_t) k] == 0.0f && r.o[1][(size_t) k] == 0.0f; if (z) zeroAt = i; }
+            }
+            const bool t = std::abs (r.o[0][500] - sine (500)) < 1.0e-6f && zeroAt > 960 && zeroAt <= 960 + 240 + 32 && over <= 1.0e-6f && jump <= step * 1.001f && rise <= 0.0f;
+            std::printf ("  audio Off: 0 from %d (Off at 960, 5 ms = 240), never above the input %s, largest gain step %.5f (%.5f), rises %s %s\n",
+                         zeroAt, over <= 1.0e-6f ? "yes" : "NO", jump, step, rise <= 0.0f ? "never" : "YES", t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 2. 10 V on ch 4 (c.v.), Off at 960: down to 0 V, never back up; On at 2400: up to 10 V, never back down
+        {
+            WcProcessor p; fresh (p);
+            const auto r = drive (p, 4800, [] (int, float* in) { in[3] = 10.0f; },
+                                  [&] (int i) { if (i == 960) setP (p, "sw1_ch4", 0.0f); if (i == 2400) setP (p, "sw1_ch4", 1.0f); });
+            bool down = true, up = true;
+            for (int i = 961; i < 2400; ++i) down &= r.o[3][(size_t) i] <= r.o[3][(size_t) i - 1];
+            for (int i = 2401; i < 4800; ++i) up &= r.o[3][(size_t) i] >= r.o[3][(size_t) i - 1];
+            const bool t = down && up && r.o[3][959] == 10.0f && r.o[3][960] < 10.0f && r.o[3][960 + 272] == 0.0f && r.o[3][2399] == 0.0f && r.o[3][2400 + 272] == 10.0f;
+            std::printf ("  c.v. Off / On: %.2f V -> %.2f V -> %.2f V, falls only %s, rises only %s %s\n", r.o[3][959], r.o[3][2399], r.o[3][4799],
+                         down ? "yes" : "NO", up ? "yes" : "NO", t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 3. Off and On again 2 ms later: it turns back from where it is (no jump); the lever moved on every tick (an
+        //    automation): never more than a step a sample
+        {
+            WcProcessor p; fresh (p);
+            const auto r = drive (p, 4800, [] (int, float* in) { in[0] = 10.0f; },
+                                  [&] (int i)
+                                  {
+                                      if (i == 960) setP (p, "sw1_ch1", 0.0f);
+                                      if (i == 1056) setP (p, "sw1_ch1", 1.0f);
+                                      if (i >= 2400 && i < 3040 && i % 32 == 0) setP (p, "sw1_ch1", (i / 32) % 2 == 0 ? 0.0f : 1.0f);
+                                  });
+            float jump = 0.0f, low = 10.0f;
+            for (int i = 1; i < 4800; ++i) jump = std::max (jump, std::abs (r.o[0][(size_t) i] - r.o[0][(size_t) i - 1]) / 10.0f);
+            for (int i = 960; i < 2400; ++i) low = std::min (low, r.o[0][(size_t) i]);
+            const bool t = jump <= step * 1.001f && low > 5.5f && low < 6.5f && r.o[0][2399] == 10.0f;
+            std::printf ("  Off then On at 2 ms: lowest %.2f V (6.0), largest step a sample %.5f (%.5f) with the lever moved on every tick too %s\n", low, jump, step, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 4 and 5. pulses: a gate high on ch 7, Off at 320: 0 V there; On at 640 with the gate still high: nothing until
+        //    it falls (1000) and rises again (1200), which passes whole. Ch 8 reopened with its gate low (640): the next
+        //    edge (800) passes
+        {
+            WcProcessor p; fresh (p);
+            const auto r = drive (p, 1600, [] (int i, float* in) { in[6] = (i < 1000 || i >= 1200) ? 10.0f : 0.0f; in[7] = (i < 400 || i >= 800) ? 10.0f : 0.0f; },
+                                  [&] (int i)
+                                  {
+                                      if (i == 320) { setP (p, "sw1_ch7", 0.0f); setP (p, "sw1_ch8", 0.0f); }
+                                      if (i == 640) { setP (p, "sw1_ch7", 1.0f); setP (p, "sw1_ch8", 1.0f); }
+                                  });
+            bool held = true;
+            for (int i = 320; i < 1200; ++i) held &= r.o[6][(size_t) i] == 0.0f;
+            const bool t4 = r.o[6][319] == 10.0f && held && r.o[6][1200] == 10.0f && r.o[6][1599] == 10.0f;
+            const bool t5 = r.o[7][319] == 10.0f && r.o[7][320] == 0.0f && r.o[7][799] == 0.0f && r.o[7][800] == 10.0f;
+            std::printf ("  pulse: Off cuts dry %s, On with the gate high waits for the next edge %s; reopened low, the next edge passes %s\n",
+                         r.o[6][320] == 0.0f ? "yes" : "NO", t4 ? "ok" : "BAD", t5 ? "ok" : "BAD");
+            good &= t4 && t5;
+        }
+
+        // 6. a project with ch 1 Off and a sine through it: 0 from the first sample, buffers of 32 and 2048 (On: sound)
+        {
+            auto first = [&] (bool on, int block)
+            {
+                WcProcessor a; fresh (a);
+                a.setPresent (kInst259, true);
+                a.connect (kInst259, M259::Out_Sine, A, M108::in (0));
+                a.connect (A, M108::out (0), kInstOutput, OutputModule::In_Left);
+                setP (a, "sw1_ch1", on ? 1.0f : 0.0f);
+                juce::MemoryBlock st; a.getStateInformation (st);
+                WcProcessor b; b.license.status = License::Status::Licensed;
+                b.prepareToPlay (SR, block);
+                b.setStateInformation (st.getData(), (int) st.getSize());
+                float peak = 0.0f;
+                for (int s = 0; s < 4800; s += block)
+                {
+                    juce::AudioBuffer<float> buf (2, block); buf.clear(); juce::MidiBuffer m;
+                    b.processBlock (buf, m);
+                    for (int i = 0; i < block && s + i < 4800; ++i) peak = std::max (peak, std::abs (buf.getSample (0, i)));
+                }
+                return peak;
+            };
+            const float off32 = first (false, 32), off2k = first (false, 2048), on32 = first (true, 32);
+            const bool t = off32 == 0.0f && off2k == 0.0f && on32 > 0.01f;
+            std::printf ("  project with ch 1 Off: peak in 100 ms %.6f (32) %.6f (2048); On %.3f %s\n", off32, off2k, on32, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 7. no cable: 0 V on every output, On and Off
+        {
+            WcProcessor p; fresh (p);
+            float peak = 0.0f;
+            for (int i = 0; i < 1024; ++i)
+            {
+                if (i == 512) for (int c = 1; c <= 8; ++c) setP (p, "sw1_ch" + juce::String (c), 0.0f);
+                if (i % 32 == 0) p.rack.beginBlock (32);
+                p.rack.tick();
+                for (int c = 0; c < 8; ++c) peak = std::max (peak, std::abs (p.rack.jackValue (A, c)));
+            }
+            std::printf ("  no cable: peak %.6f %s\n", peak, peak == 0.0f ? "ok" : "BAD");
+            good &= peak == 0.0f;
+        }
+
+        // 8. demo: the third SW is refused with four LFOs and two oscillators in; a patch with three (and six LFOs, three
+        //    259s) loads A and B, without the cable of the third; the other limits stay
+        {
+            auto count = [] (const WcProcessor& p, int first, int n) { int c = 0; for (int i = 0; i < n; ++i) c += p.isPresent (first + i) ? 1 : 0; return c; };
+            WcProcessor d; d.license = License(); d.prepareToPlay (SR, 32); d.resetAll();
+            for (int i = 0; i < 4; ++i) d.setPresent (kInst111 + i, true);
+            for (int i = 0; i < 2; ++i) d.setPresent (kInst259 + i, true);
+            for (int i = 0; i < 3; ++i) d.setPresent (A + i, true);
+            const bool third = count (d, A, kMax108) == 2 && ! d.isPresent (A + 2) && ! d.canAdd (A + 2) && ! d.canAdd (kInst111 + 4) && ! d.canAdd (kInst259 + 2) && d.canAdd (kInst207);
+            WcProcessor l; fresh (l);
+            for (int i = 0; i < 3; ++i) l.setPresent (A + i, true);
+            for (int i = 0; i < 6; ++i) l.setPresent (kInst111 + i, true);
+            for (int i = 0; i < 3; ++i) l.setPresent (kInst259 + i, true);
+            l.connect (A + 2, M108::out (0), kInstOutput, OutputModule::In_Left);
+            l.connect (A + 1, M108::out (1), kInstOutput, OutputModule::In_Right);
+            WcProcessor e; e.license = License(); e.prepareToPlay (SR, 32); e.resetAll();
+            e.patchFromTree (l.patchToTree());
+            const bool three = count (e, A, kMax108) == 2 && e.isPresent (A + 1) && ! e.isPresent (A + 2) && e.getCables().size() == 1 && e.getCables()[0].srcInst == A + 1
+                               && count (e, kInst111, kMax111) == 4 && count (e, kInst259, kMax259) == 2;
+            std::printf ("  demo: %d Switches of 3 asked %s; a patch with 3 -> %d (A-B), cables %d (1), LFOs %d, 259s %d %s\n", count (d, A, kMax108),
+                         third ? "ok" : "BAD", count (e, A, kMax108), (int) e.getCables().size(), count (e, kInst111, kMax111), count (e, kInst259, kMax259), three ? "ok" : "BAD");
+            good &= third && three;
+        }
+
+        // 9. the 32 levers come after every other parameter: no index of before moves. Bool, On by default, not modulatable
+        {
+            WcProcessor p;
+            const auto& all = p.getParameters();
+            auto at = [&] (const char* id) { return p.apvts.getParameter (id)->getParameterIndex(); };
+            auto* first = p.apvts.getParameter ("sw1_ch1");
+            const bool t = at ("sw1_ch1") == at ("lf8_wave") + 1 && at ("lf1_rate") == at ("out_master") + 1 && all.size() == at ("sw1_ch1") + 32
+                           && dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID() == "sw4_ch8"
+                           && dynamic_cast<juce::AudioParameterBool*> (first) != nullptr && first->getDefaultValue() == 1.0f && ! p.isModulatable ("sw1_ch1");
+            std::printf ("  parameters: sw1_ch1 at %d (lf8_wave %d), %d in all, last %s %s\n", at ("sw1_ch1"), at ("lf8_wave"), all.size(),
+                         dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID().toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 10. order: a 259 through ch 1 into the 207 (after it) is heard on the same sample; an LFO through ch 4 into the
+        //     257 (before it) one sample late
+        {
+            WcProcessor p; fresh (p);
+            for (int i : { kInst259, kInst207, kInst257, kInst111 }) p.setPresent (i, true);
+            setP (p, "lf1_rate", 0.7f);
+            setP (p, "mx_mon_a", 1.0f);
+            p.connect (kInst259, M259::Out_Sine, A, M108::in (0));
+            p.connect (A, M108::out (0), kInst207, M207::In_A);
+            const bool cabled = p.connect (kInst259, M259::Out_Sine, A, M108::in (0)) && p.connect (A, M108::out (0), kInst207, M207::In_A)
+                                && p.connect (kInst111, M111::Out_Lfo, A, M108::in (3)) && p.connect (A, M108::out (3), kInst257, M257::inOf (0, 0));
+            std::vector<float> src, lfo, mix, vp;
+            for (int i = 0; i < 960; ++i)
+            {
+                if (i % 32 == 0) p.rack.beginBlock (32);
+                p.rack.tick();
+                src.push_back (p.rack.jackValue (kInst259, M259::Out_Sine));
+                lfo.push_back (p.rack.jackValue (kInst111, M111::Out_Lfo));
+                mix.push_back (p.rack.jackValue (kInst207, M207::Out_Mon1));
+                vp.push_back (p.rack.jackValue (kInst257, M257::Out_1));
+            }
+            auto lagOf = [&] (const std::vector<float>& y, const std::vector<float>& src)   // the d for which y[n] = src[n - d], or -1
+            {
+                for (int d = 0; d <= 3; ++d)
+                {
+                    float e = 0.0f, mag = 0.0f;
+                    for (int n = 480; n < 960; ++n) { e = std::max (e, std::abs (y[(size_t) n] - src[(size_t) (n - d)])); mag = std::max (mag, std::abs (y[(size_t) n])); }
+                    if (e < 1.0e-5f && mag > 0.1f) return d;
+                }
+                return -1;
+            };
+            const int toMix = lagOf (mix, src), toVp = lagOf (vp, lfo);
+            const bool t = cabled && toMix == 0 && toVp == 1;
+            std::printf ("  order: 259 -> SW -> 207 %d samples (0), LFO -> SW -> 257 %d (1) %s\n", toMix, toVp, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 11. texts: names in the host, the slot's name and key, the lever's text
+        {
+            WcProcessor p;
+            auto* a = p.apvts.getParameter ("sw1_ch1");
+            auto* d = p.apvts.getParameter ("sw4_ch8");
+            const bool t = a->getName (64) == "Switches A Ch 1" && d->getName (64) == "Switches D Ch 8" && a->getText (1.0f, 64) == "On" && a->getText (0.0f, 64) == "Off"
+                           && instName (A) == "Switches A" && instName (A + 3) == "Switches D" && instKey (A) == "sw1" && instFromKey ("sw4") == A + 3
+                           && instName (kInst207) == "207" && instName (kInst666) == "SC-666 1" && typeOfInst (A + 3) == MT_108 && typeOfInst (A - 1) == MT_275
+                           && kInst275 < A && A + kMax108 == kInst207;
+            std::printf ("  texts: \"%s\" / \"%s\", %s / %s, slots %s / %s %s\n", a->getName (64).toRawUTF8(), d->getName (64).toRawUTF8(), a->getText (1.0f, 64).toRawUTF8(),
+                         a->getText (0.0f, 64).toRawUTF8(), instName (A).toRawUTF8(), instName (A + 3).toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
+        std::printf ("  SW-108 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }
 

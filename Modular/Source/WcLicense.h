@@ -2,7 +2,7 @@
 // Offline licensing. A key file is a short text block holding the buyer's details and an RSA signature
 // over their SHA-256 hash, made with Calabi Yau's private key. The plugin only carries the public key,
 // so a key file can be read and checked without any network and cannot be forged by editing it.
-// Without a valid key file the plugin runs in demo mode: two oscillators and four LFOs at most, and no preset load or save.
+// Without a valid key file the plugin runs in demo mode: two oscillators, four LFOs and two Switches at most, and no preset load or save.
 #include <juce_cryptography/juce_cryptography.h>
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -33,5 +33,6 @@ struct License
     static constexpr const char* kProduct = "Calabi Yau West Coast Modular";
     static constexpr int kDemoMaxOscillators = 2;
     static constexpr int kDemoMaxLfos = 4;
+    static constexpr int kDemoMaxSwitches = 2;
 };
 } // namespace wc

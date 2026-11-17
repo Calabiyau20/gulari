@@ -2,7 +2,8 @@
 // The rack: module instances, the cable graph and the per-sample engine.
 //
 // Instances are fixed slots processed in a fixed order: MIDI, LF-111 A-H, 218, 242, 245, 248, 250, 252, 266, 230, 264, 257, 281 A-B, 284,
-// 258 A-B, 259 A-D, 285, 267, 291, 296, 277, 292 A-B, 275, 207, SC-666 1-4, Output.
+// 258 A-B, 259 A-D, 285, 267, 291, 296, 277, 292 A-B, 275, SW-108 A-D, 207, SC-666 1-4, Output.
+// The SW-108 sits before the 207: a voice cut before the mixer has no delay (a cable to the 292 or the 277 has one).
 // A cable from an earlier slot to a later one has no delay; a cable going backwards (feedback,
 // e.g. 259 B -> 259 A FM while A -> B) reads the previous sample, which is the 1-sample delay of
 // any digital model of a patch with loops.
@@ -38,6 +39,7 @@ class M284;
 class M291;
 class M666;
 class M111;
+class M108;
 
 // slots, in processing order: control sources first, then oscillators, then gates, then the output
 constexpr int kInstMidi = 0;
@@ -63,7 +65,8 @@ constexpr int kInst296 = kInst291 + kMax291;
 constexpr int kInst277 = kInst296 + kMax296;
 constexpr int kInst292 = kInst277 + kMax277;
 constexpr int kInst275 = kInst292 + kMax292;
-constexpr int kInst207 = kInst275 + kMax275;
+constexpr int kInst108 = kInst275 + kMax275;   // the 8 Switches, right before the mixer
+constexpr int kInst207 = kInst108 + kMax108;
 constexpr int kInst666 = kInst207 + kMax207;
 constexpr int kInstOutput = kInst666 + kMax666;
 constexpr int kNumInst = kInstOutput + 1;
@@ -91,7 +94,8 @@ inline ModuleType typeOfInst (int inst)
     if (inst < kInst277) return MT_296;
     if (inst < kInst292) return MT_277;
     if (inst < kInst275) return MT_292;
-    if (inst < kInst207) return MT_275;
+    if (inst < kInst108) return MT_275;
+    if (inst < kInst207) return MT_108;
     if (inst < kInst666) return MT_207;
     if (inst < kInstOutput) return MT_666;
     return MT_Output;
@@ -103,7 +107,7 @@ inline int firstInstOf (ModuleType t)
         case MT_111: return kInst111; case MT_218: return kInst218; case MT_242: return kInst242; case MT_245: return kInst245; case MT_248: return kInst248; case MT_250: return kInst250; case MT_252: return kInst252; case MT_266: return kInst266; case MT_230: return kInst230;
         case MT_264: return kInst264; case MT_257: return kInst257; case MT_281: return kInst281; case MT_284: return kInst284; case MT_258: return kInst258;
         case MT_259: return kInst259; case MT_285: return kInst285; case MT_267: return kInst267; case MT_291: return kInst291; case MT_296: return kInst296; case MT_277: return kInst277;
-        case MT_292: return kInst292; case MT_275: return kInst275; case MT_207: return kInst207; case MT_666: return kInst666; case MT_Output: return kInstOutput; default: return kInstMidi;
+        case MT_292: return kInst292; case MT_275: return kInst275; case MT_108: return kInst108; case MT_207: return kInst207; case MT_666: return kInst666; case MT_Output: return kInstOutput; default: return kInstMidi;
     }
 }
 inline int subIndex (int inst) { return inst - firstInstOf (typeOfInst (inst)); }
@@ -115,10 +119,10 @@ inline juce::String instPrefix (int inst)
         case MT_257: return "vp_"; case MT_281: return prefix281 (subIndex (inst)); case MT_258: return prefix258 (subIndex (inst));
         case MT_285: return "fs_"; case MT_296: return "sp_"; case MT_277: return "dl_"; case MT_207: return "mx_";
         case MT_267: return "us_"; case MT_275: return "rv_"; case MT_284: return "ev_"; case MT_291: return "tm_"; case MT_666: return prefix666 (subIndex (inst));
-        case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); case MT_111: return prefixLfo (subIndex (inst)); default: return {};
+        case MT_259: return prefix259 (subIndex (inst)); case MT_292: return prefix292 (subIndex (inst)); case MT_111: return prefixLfo (subIndex (inst)); case MT_108: return prefix108 (subIndex (inst)); default: return {};
     }
 }
-// stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "lf1" = LFO A, "midi", "out")
+// stable name of a slot in patch files ("a" = 259 A, "fa" = 281 A, "la" = 292 A, "ua" = 266, "lf1" = LFO A, "sw1" = Switches A, "midi", "out")
 inline juce::String instKey (int inst)
 {
     if (inst == kInstMidi) return "midi";
@@ -131,7 +135,7 @@ inline int instFromKey (const juce::String& k)
     return -1;
 }
 inline bool isRemovable (int inst) { return inst != kInstMidi && inst != kInstOutput; }
-juce::String instName (int inst);        // "MIDI", "281 A", "259 A", "292 A", "LFO A", "OUTPUT"
+juce::String instName (int inst);        // "MIDI", "281 A", "259 A", "292 A", "LFO A", "Switches A", "OUTPUT"
 
 struct Cable
 {

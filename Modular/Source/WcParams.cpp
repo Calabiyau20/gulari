@@ -977,6 +977,15 @@ static void addLfo (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     l.add (std::move (g));
 }
 
+// SW-108 8 Switches, after the LFOs: one lever per channel, On = the signal passes
+static void add108 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int i)
+{
+    const juce::String p (prefix108 (i)), n ("Switches " + juce::String::charToString ((juce::juce_wchar) ('A' + i)) + " ");
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> (p + "grp", n.trim(), "|");
+    for (int c = 1; c <= 8; ++c) g->addChild (std::make_unique<APB> (juce::ParameterID (p + "ch" + juce::String (c), 1), n + "Ch " + juce::String (c), true));
+    l.add (std::move (g));
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout l;
@@ -1019,6 +1028,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         l.add (std::move (g));
     }
     for (int i = 0; i < kMax111; ++i) addLfo (l, i);   // last (H10)
+    for (int i = 0; i < kMax108; ++i) add108 (l, i);   // after the LFOs: no index of before moves
     return l;
 }
 } // namespace wc
