@@ -38,7 +38,9 @@ xvfb-run -a ./build/WcUiSnapshot_artefacts/Release/WcUiSnapshot <dir>   # panele
 ```
 
 - **`PG_BUILD_TESTS` está en OFF por defecto.** Sin ese flag no existen los targets de prueba.
-- Los dos tests devuelven 1 si algo falla e imprimen `ALL OK` / `FAILED`.
+- Los dos tests devuelven 1 si algo falla. `WcRenderTest` imprime `ALL OK` / `FAILED`;
+  `WcUiSnapshot` **no imprime nada de eso**: el resultado es solo el código de salida (y las líneas
+  `BAD` del log).
 - El CI (`.github/workflows/build.yml`) corre los dos en Ubuntu y **macOS y Windows dependen de
   ese job**: si un test falla no se empaqueta nada. Los runners de Mac y Windows no tienen
   servidor gráfico, por eso el test de interfaz corre solo en Linux.
@@ -56,9 +58,14 @@ Otros targets: `WcPresetGen` (la librería de fábrica), `WcPackGen` (packs de p
 
 ## El rack
 
-Ranuras en `Modular/Source/rack/Rack.h`: `kInstMidi`, `kInst218`, `242`, `245`, `248`, `250`,
-`252`, `266`, `230`, `264`, `257`, `281` (×2), `284`, `258` (×2), `259` (×4), `285`, `267`,
-`291`, `296`, `277`, `292` (×2), `275`, `207`, `666` (×4), `kInstOutput`.
+Ranuras en `Modular/Source/rack/Rack.h`: `kInstMidi`, `kInst111` (×8), `218`, `242`, `245`, `248`,
+`250`, `252`, `266`, `230`, `264`, `257`, `281` (×2), `284`, `258` (×2), `259` (×4), `285`, `267`,
+`291`, `296`, `277`, `292` (×2), `275`, `207`, `666` (×4), `kInstOutput`. Las cantidades están en
+`WcParams.h` (`kMax259 = 4`, `kMax111 = 8`…).
+
+**Agregar ranuras corre los números de todas las de atrás.** Cualquier cosa que use el número de
+ranura como dato (la semilla del pincelado de los paneles, por ejemplo) cambia en silencio: hay que
+compensarla o atarla al tipo, no al número.
 
 Prefijo de parámetros e `instKey` por ranura — **no son el número del módulo**:
 
@@ -76,8 +83,13 @@ Prefijo de parámetros e `instKey` por ranura — **no son el número del módul
 | 257 | `vp_` | 292 A/B | `la_` / `lb_` |
 | 285 | `fs_` | 666 ×4 | `s1_`…`s4_` |
 | 207 | `mx_` | salida | `out_` |
+| LFO A-H | `lf1_`…`lf8_` | | |
 
-Helpers: `prefix259(i)`, `prefix281(i)`, `prefix292(i)`, `prefix258(i)`, `prefix666(i)`.
+Helpers: `prefix259(i)`, `prefix281(i)`, `prefix292(i)`, `prefix258(i)`, `prefix666(i)`,
+`prefixLfo(i)`.
+
+**Parámetros nuevos van siempre AL FINAL de `createLayout`.** Hay hosts que indexan por posición y
+la tabla de modulación guarda el índice del parámetro: insertar en el medio corre todos los de atrás.
 
 ### Cables
 
@@ -85,6 +97,8 @@ Helpers: `prefix259(i)`, `prefix281(i)`, `prefix292(i)`, `prefix258(i)`, `prefix
   entra un plug por jack. Mandar cuatro voces a `In_Left`/`In_Right` deja oír dos. Para sumar
   varias fuentes hay que pasar por el **mixer 207**, que tiene seis entradas.
 - `connect()` **rechaza** si no coinciden los tipos. Audio = jack mini; c.v. y pulsos = banana.
+  **c.v. y pulso son el mismo tipo para `connect()`**: un pulso entra en una entrada de c.v. y al revés.
+  La diferencia es solo de color y de cómo lo lee cada módulo.
   Los tipos salen del panel (`Specs.cpp`), no del enum. Devuelve `false`, no tira excepción:
   conviene mirar el valor de retorno.
 - Jacks por función, no por índice: `M292::inSig/inCtl/outSig(lane)`, `M281::inTrig/outFunc(lane)`,
@@ -112,8 +126,10 @@ Las que costaron compilaciones. Ante la duda, `--params`.
 
 ## Comportamientos que no se ven leyendo el código
 
-**Modo demo.** Sin archivo de licencia válido, `setPresent()` **rechaza en silencio** el tercer y
-cuarto oscilador (`License::kDemoMaxOscillators`) y `savePatchFile()` devuelve false. Por eso la
+**Modo demo.** Sin archivo de licencia válido, `setPresent()` **rechaza en silencio** lo que pase los
+límites (`License::kDemoMaxOscillators` = 2 osciladores 259, `kDemoMaxLfos` = 4 LFO; la regla está
+en `WcProcessor::canAdd`) y `savePatchFile()` devuelve false. Al cargar en demo se quedan los primeros
+presentes en orden de ranura; los demás se van con sus cables. Por eso la
 librería de 300 presets de fábrica no usa nunca el 259 C ni el D: el generador corría sin licencia
 y el plugin se los negaba sin avisar. **Cualquier herramienta que arme patches tiene que correr
 licenciada** — ver `WcPackGen`, que firma una clave temporal y llama a `recheckLicense()`.
@@ -180,8 +196,15 @@ El isologo oficial es un PNG. **Nunca se escribe el nombre de la marca con una f
 ## Al probar
 
 - `WcUiSnapshot` deja un PNG por panel. Compararlos contra una referencia sirve para cazar
-  desalineaciones — **pero los paneles 242, 252 y 266 no son determinísticos** entre dos corridas
-  del mismo binario: tienen LEDs que parpadean y voltajes al azar. Esos tres no se comparan.
+  desalineaciones — **pero no todo es determinístico** entre dos corridas del mismo binario: los
+  paneles 242, 252 y 266 (LEDs que parpadean, voltajes al azar), `panel_OUTPUT` (su medidor depende
+  del audio), `patch22`, `patch99` y las capturas con un anillo de MIDI Learn que pulsa. Antes de
+  culpar a un cambio, correr dos veces el binario sin cambios y comparar.
+- Los renders de `WcRenderTest` que usan el 266 (y los 75 presets de fábrica que lo tienen) cambian
+  entre corridas: su azar toma la semilla del reloj. Para comparar sonido bit a bit hay que fijarla.
+- **Un suavizador o una rampa se prueba con el objetivo en movimiento**, no solo con un salto: la
+  automatización y los CC escriben un valor nuevo en cada bloque, y una rampa que "llega bien" desde
+  quieta puede casi no moverse si se re-apunta todo el tiempo. Probar con buffers de 32 y de 2048.
 - Un cambio que dice ser solo visual se verifica igual: render de los paneles y diff contra la
   corrida anterior. Cero píxeles de diferencia es la prueba de que no se movió nada.
 - Un bug encontrado se arregla **y se le escribe la prueba que lo caza**. Para saber que la prueba
