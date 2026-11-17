@@ -2497,6 +2497,24 @@ int main (int argc, char** argv)
                          a->getText (0.0f, 64).toRawUTF8(), instName (A).toRawUTF8(), instName (A + 3).toRawUTF8(), t ? "ok" : "BAD");
             good &= t;
         }
+        // 12. MIDI Learn: a CC on a lever sleeps while the module is out of the rack; in, CC 0 is Off and 127 On
+        {
+            WcProcessor p; p.license.status = License::Status::Licensed; p.prepareToPlay (SR, 32); p.resetAll();
+            p.assignCc (20, "sw1_ch1");
+            const bool asleep = ! p.ccIsLive (20);
+            p.setPresent (A, true);
+            auto cc = [&] (int v)
+            {
+                juce::AudioBuffer<float> buf (2, 32); buf.clear(); juce::MidiBuffer m;
+                m.addEvent (juce::MidiMessage::controllerEvent (1, 20, v), 0);
+                p.processBlock (buf, m);
+                return p.apvts.getRawParameterValue ("sw1_ch1")->load();
+            };
+            const float off = cc (0), on = cc (127);
+            const bool t = asleep && p.ccIsLive (20) && off == 0.0f && on == 1.0f;
+            std::printf ("  MIDI Learn: asleep out of the rack %s, CC 0 -> %.0f, CC 127 -> %.0f %s\n", asleep ? "yes" : "NO", off, on, t ? "ok" : "BAD");
+            good &= t;
+        }
         std::printf ("  SW-108 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }
