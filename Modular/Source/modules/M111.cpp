@@ -96,6 +96,7 @@ void M111::tick (const float* in, float* out) noexcept
     if (clockPeriod > 0) hz = lfoRatio (lfoStep (k)) * (double) fs / (double) clockPeriod;   // no pulses: the last speed
     else if (modeV <= FreeSec) hz = lfoHz (k);
     else hz = bpm / (60.0 * lfoBeats (lfoStep (k)) * (modeV == SyncDotted ? 1.5 : (modeV == SyncTriplet ? 2.0 / 3.0 : 1.0)));
+    const double restartIn = hz > 200.0 ? (double) clockPeriod : 1.0e9;   // only a clock goes past the cap: it restarts the cycle sooner
     hz = juce::jlimit (0.001, 200.0, hz);
 
     bool cycle = wrapped;
@@ -129,7 +130,8 @@ void M111::tick (const float* in, float* out) noexcept
     // SYNC OUT: 5 ms (half a cycle when that is shorter) on every new cycle, never two within 2 ms
     if (cycle && sinceSync >= (int) (0.002f * fs))
     {
-        syncLeft = juce::jmax (1, (int) juce::jmin (0.005 * (double) fs, 0.5 * (double) fs / hz));
+        // shortcut: past the cap at x1/N the pulse is half a clock period, not half the cycle; enough for its edges
+        syncLeft = juce::jmax (1, (int) juce::jmin (0.005 * (double) fs, 0.5 * (double) fs / hz, 0.5 * restartIn));
         sinceSync = 0;
     }
     out[Out_Sync] = syncLeft > 0 ? 10.0f : 0.0f;

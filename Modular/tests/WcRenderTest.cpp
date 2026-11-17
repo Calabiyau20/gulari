@@ -2298,6 +2298,24 @@ int main (int argc, char** argv)
                              sr / 1000.0, ph, pulses, ch[0], ch[4], ch[5], jump[2], jump[3], t ? "ok" : "BAD");
                 good &= t;
             }
+
+        // 12. an audio-rate clock (the 259's principal pulse at 440 Hz and 2 kHz, x1 and x16): SYNC OUT still rises and
+        //     falls, it does not stick at 10 V (audit)
+        {
+            WcProcessor p; fresh (p, { kInst259, A });
+            bool t = p.connect (kInst259, M259::Out_PoPulse, A, M111::In_Clock);
+            juce::String got;
+            for (float hz : { 440.0f, 2000.0f })
+                for (float k : { 0.5f, 1.0f })
+                {
+                    setP (p, "a_po_freq", coarseNorm (hz, false)); setP (p, "lf1_rate", k);
+                    const int e = (int) rises (runA (p, (int) SR / 2).o[3], (int) SR / 10).size();
+                    got << " " << e;
+                    t &= e > 50;
+                }
+            std::printf ("  SYNC OUT under a clock at 440 Hz x1, x16 and 2 kHz x1, x16: rising edges in 0.4 s%s %s\n", got.toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
         std::printf ("  LF-111 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }
