@@ -1647,7 +1647,7 @@ int main (int argc, char** argv)
             check (fourIn && lfos.joinIntoString ("|") == "LF-111 Classic LFO  (LFO E)  - demo: 4 LFOs (off)|LF-111 Classic LFO  (LFO F)  - demo: 4 LFOs (off)|"
                                                      "LF-111 Classic LFO  (LFO G)  - demo: 4 LFOs (off)|LF-111 Classic LFO  (LFO H)  - demo: 4 LFOs (off)"
                    && lfosLicensed.size() == 8 && lfosLicensed[0] == "LF-111 Classic LFO  (LFO A)"
-                   && tip == "Demo mode: two oscillators, four LFOs, two Switches, presets disabled.\nClick to pick your WestCoastModular.key",
+                   && tip == "Demo mode: two oscillators, four LFOs, two Switches, one Matrix, presets disabled.\nClick to pick your WestCoastModular.key",
                    "demo menu: " + lfos.joinIntoString (" | ") + " / licensed " + lfosLicensed[0] + " / tip " + tip);
             // a capture of it open, next to the "+ MODULE" button
             juce::TextButton* add = nullptr;
@@ -1804,7 +1804,7 @@ int main (int argc, char** argv)
             check (demo.isPresent (A + 1) && ! demo.isPresent (A + 2)
                    && sws.joinIntoString ("|") == "SW-108 8 Switches  (Switches C)  - demo: 2 Switches (off)|SW-108 8 Switches  (Switches D)  - demo: 2 Switches (off)"
                    && swsLicensed.joinIntoString ("|") == "SW-108 8 Switches  (Switches A)|SW-108 8 Switches  (Switches B)|SW-108 8 Switches  (Switches C)|SW-108 8 Switches  (Switches D)"
-                   && tip == "Demo mode: two oscillators, four LFOs, two Switches, presets disabled.\nClick to pick your WestCoastModular.key",
+                   && tip == "Demo mode: two oscillators, four LFOs, two Switches, one Matrix, presets disabled.\nClick to pick your WestCoastModular.key",
                    "demo menu: " + sws.joinIntoString (" | ") + " / licensed " + swsLicensed.joinIntoString (" | ") + " / tip " + tip);
             // a capture of it open, whole (the SW-108 rows are far down)
             juce::TextButton* add = nullptr;
@@ -2123,6 +2123,51 @@ int main (int argc, char** argv)
                 proc.unassignSource (A, 4);
             }
             check (a3 != nullptr, "no ASSIGN 3");
+        }
+        // demo: "+ MODULE" with Matrix A in the rack greys B and says why, right after the LF-111; licensed, both
+        {
+            WcProcessor demo;
+            demo.license = wc::License();
+            demo.prepareToPlay (48000.0, 512);
+            demo.resetAll();
+            for (int i = 0; i < wc::kMax013; ++i) demo.setPresent (A + i, true);   // the second on: refused
+            std::unique_ptr<juce::AudioProcessorEditor> de (demo.createEditor());
+            de->setSize (1400, 900);
+            pump (40);
+            auto items = [] (const juce::PopupMenu& mn)
+            {
+                juce::StringArray s;
+                juce::String before;
+                for (juce::PopupMenu::MenuItemIterator it (mn); it.next();)
+                {
+                    if (it.getItem().text.startsWith ("TMJ-13")) s.add ((s.isEmpty() ? "after " + before.upToFirstOccurrenceOf ("  ", false, false) + ": " : juce::String()) + it.getItem().text + (it.getItem().isEnabled ? "" : " (off)"));
+                    before = it.getItem().text;
+                }
+                return s;
+            };
+            auto menu = WcEditor::buildModuleMenu (demo);
+            const auto mxs = items (menu);
+            WcProcessor full;
+            full.license.status = wc::License::Status::Licensed;
+            const auto mxsLicensed = items (WcEditor::buildModuleMenu (full));
+            check (demo.isPresent (A) && ! demo.isPresent (B) && mxs.joinIntoString ("|") == "after LF-111 Classic LFO: TMJ-13 Tactile Matrix  (Matrix B)  - demo: 1 Matrix (off)"
+                   && mxsLicensed.joinIntoString ("|") == "after LF-111 Classic LFO: TMJ-13 Tactile Matrix  (Matrix A)|TMJ-13 Tactile Matrix  (Matrix B)",
+                   "demo menu: " + mxs.joinIntoString (" | ") + " / licensed " + mxsLicensed.joinIntoString (" | "));
+            juce::TextButton* add = nullptr;
+            for (auto* c : de->getChildren()) if (auto* tb = dynamic_cast<juce::TextButton*> (c)) if (tb->getButtonText() == "+ MODULE") add = tb;
+            if (add != nullptr)
+            {
+                quietXErrors();
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (add));
+                juce::Component* win = nullptr;
+                for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                    if (auto* c = juce::Desktop::getInstance().getComponent (i)) if (c->isVisible() && c != de.get() && c != ed.get()) win = c;
+                if (win != nullptr) save (win->createComponentSnapshot (win->getLocalBounds().withHeight (juce::jmin (win->getHeight(), 260)), true, 1.0f), "tmj_demo_menu.png");
+                check (win != nullptr, "the demo menu did not open");
+                juce::PopupMenu::dismissAllActiveMenus();
+                pump (60);
+            }
+            ed->toFront (false);
         }
         prmX->removeListener (&gx); prmY->removeListener (&gy);
         std::printf ("TMJ-13: 10 jacks, 8 numbered ASSIGN, pad (jump, 1:1, Shift, clip, grab, double click, host gestures, rebuild), menu, readouts, audio stopped, MIDI Learn, MODULATED, range, drop, captures  %s\n",

@@ -58,10 +58,10 @@ Otros targets: `WcPresetGen` (la librería de fábrica), `WcPackGen` (packs de p
 
 ## El rack
 
-Ranuras en `Modular/Source/rack/Rack.h`: `kInstMidi`, `kInst111` (×8), `218`, `242`, `245`, `248`,
+Ranuras en `Modular/Source/rack/Rack.h`: `kInstMidi`, `kInst111` (×8), `kInst013` (×2), `218`, `242`, `245`, `248`,
 `250`, `252`, `266`, `230`, `264`, `257`, `281` (×2), `284`, `258` (×2), `259` (×4), `285`, `267`,
 `291`, `296`, `277`, `292` (×2), `275`, `kInst108` (×4), `207`, `666` (×4), `kInstOutput`. Las
-cantidades están en `WcParams.h` (`kMax259 = 4`, `kMax111 = 8`, `kMax108 = 4`…).
+cantidades están en `WcParams.h` (`kMax259 = 4`, `kMax111 = 8`, `kMax108 = 4`, `kMax013 = 2`…).
 
 **Agregar ranuras corre los números de todas las de atrás.** Cualquier cosa que use el número de
 ranura como dato (la semilla del pincelado de los paneles, por ejemplo) cambia en silencio: hay que
@@ -84,9 +84,10 @@ Prefijo de parámetros e `instKey` por ranura — **no son el número del módul
 | 285 | `fs_` | 666 ×4 | `s1_`…`s4_` |
 | 207 | `mx_` | salida | `out_` |
 | LFO A-H | `lf1_`…`lf8_` | Switches A-D | `sw1_`…`sw4_` (`swN_ch1`…`ch8`) |
+| Matrix A-B (TMJ-13) | `xy1_` / `xy2_` (**no** `tm_`, que es del 291) | | |
 
 Helpers: `prefix259(i)`, `prefix281(i)`, `prefix292(i)`, `prefix258(i)`, `prefix666(i)`,
-`prefixLfo(i)`, `prefix108(i)`.
+`prefixLfo(i)`, `prefix108(i)`, `prefix013(i)`.
 
 **Parámetros nuevos van siempre AL FINAL de `createLayout`.** Hay hosts que indexan por posición y
 la tabla de modulación guarda el índice del parámetro: insertar en el medio corre todos los de atrás.
@@ -127,7 +128,7 @@ Las que costaron compilaciones. Ante la duda, `--params`.
 ## Comportamientos que no se ven leyendo el código
 
 **Modo demo.** Sin archivo de licencia válido, `setPresent()` **rechaza en silencio** lo que pase los
-límites (`License::kDemoMaxOscillators` = 2 osciladores 259, `kDemoMaxLfos` = 4 LFO, `kDemoMaxSwitches` = 2 SW-108; la regla está
+límites (`License::kDemoMaxOscillators` = 2 osciladores 259, `kDemoMaxLfos` = 4 LFO, `kDemoMaxSwitches` = 2 SW-108, `kDemoMaxMatrices` = 1 TMJ-13; la regla está
 en `WcProcessor::canAdd`) y `savePatchFile()` devuelve false. Al cargar en demo se quedan los primeros
 presentes en orden de ranura; los demás se van con sus cables. Por eso la
 librería de 300 presets de fábrica no usa nunca el 259 C ni el D: el generador corría sin licencia
@@ -150,6 +151,11 @@ arranca y lo relanza cada vez que termina.
 se edita o la que suena. Los interruptores programan la etapa elegida con la perilla del centro
 esté encendida o no. Hubo una versión donde EDIT apagaba trece botones; no volver ahí.
 El modo `pulse` es el quinto de la fila de cuatro luces: se muestra encendiendo `adv` + `stop`.
+
+**TMJ-13 — los 8 nodos son salidas sin jack.** Salidas 0 = X, 1 = Y, 2..9 = nodos 1..8 (horario desde arriba a
+la izquierda). `JackSpec::hidden`: no se dibujan, `connect()` las rechaza y `patchFromTree` descarta un cable que
+salga de ellas; solo los ASSIGN (`M013::Out_Node1 + n - 1`) las toman, y el módulo las calcula sin cable. El punto que
+muestra el pad sale del audio; si el audio no corrió en 100 ms, de las perillas sin c.v. (`M013::view`).
 
 **259 — las entradas de c.v. aceptan 0-10 V y el extremo apaga la voz.** Mandarle diez voltios
 enteros a `In_TimbreCv` o `In_IndexCv` deja la voz en una punta y casi no sale señal. Atenuar con

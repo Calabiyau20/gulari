@@ -176,7 +176,7 @@ void WcEditor::updateLicenseUi()
 {
     const bool demo = proc.demo();
     licenseButton.setButtonText (demo ? "DEMO" : "LICENSED");
-    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, four LFOs, two Switches, presets disabled.\nClick to pick your " + wc::License::keyFileName()
+    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, four LFOs, two Switches, one Matrix, presets disabled.\nClick to pick your " + wc::License::keyFileName()
                                    : proc.license.summary());
     licenseButton.setColour (juce::TextButton::textColourOffId, demo ? juce::Colour (0xffe8a33a) : wc::ui::col::ledGreen);
     loadButton.setEnabled (! demo);
@@ -263,13 +263,14 @@ juce::PopupMenu WcEditor::buildModuleMenu (const WcProcessor& proc)
             {
                 const bool ok = proc.canAdd (first + i);
                 const auto t = typeOfInst (first + i);
-                const auto why = t == MT_111 ? "  - demo: 4 LFOs" : (t == MT_108 ? "  - demo: 2 Switches" : "  - demo: 2 oscillators");
+                const auto why = t == MT_111 ? "  - demo: 4 LFOs" : (t == MT_108 ? "  - demo: 2 Switches" : (t == MT_013 ? "  - demo: 1 Matrix" : "  - demo: 2 oscillators"));
                 m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")" + (ok ? "" : why), ok);
                 any = true;
             }
         if (! any) m.addItem (999, title + "  - all slots in use", false);
     };
     addType (kInst111, kMax111, "LF-111 Classic LFO");
+    addType (kInst013, kMax013, "TMJ-13 Tactile Matrix");
     addType (kInst218, kMax218, "KB-218 Touch Activated Voltage Source");
     addType (kInst242, kMax242, "PP-242 Programmable Pulser");
     addType (kInst245, kMax245, "SV-245 Sequential Voltage Source");

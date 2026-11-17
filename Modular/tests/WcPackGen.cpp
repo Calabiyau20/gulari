@@ -823,9 +823,9 @@ int main (int argc, char** argv)
         probe.recheckLicense (keyFile);
         if (probe.demo())
         {
-            std::printf ("FAILED: the generator is in demo mode, so the rack caps at %d oscillators, %d LFOs and %d Switches.\n"
+            std::printf ("FAILED: the generator is in demo mode, so the rack caps at %d oscillators, %d LFOs, %d Switches and %d Matrix.\n"
                          "Pass the private signing key file as the third argument.\n",
-                         wc::License::kDemoMaxOscillators, wc::License::kDemoMaxLfos, wc::License::kDemoMaxSwitches);
+                         wc::License::kDemoMaxOscillators, wc::License::kDemoMaxLfos, wc::License::kDemoMaxSwitches, wc::License::kDemoMaxMatrices);
             return 1;
         }
     }
