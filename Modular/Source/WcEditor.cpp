@@ -176,7 +176,7 @@ void WcEditor::updateLicenseUi()
 {
     const bool demo = proc.demo();
     licenseButton.setButtonText (demo ? "DEMO" : "LICENSED");
-    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, four LFOs, presets disabled.\nClick to pick your " + wc::License::keyFileName()
+    licenseButton.setTooltip (demo ? "Demo mode: two oscillators, four LFOs, two Switches, presets disabled.\nClick to pick your " + wc::License::keyFileName()
                                    : proc.license.summary());
     licenseButton.setColour (juce::TextButton::textColourOffId, demo ? juce::Colour (0xffe8a33a) : wc::ui::col::ledGreen);
     loadButton.setEnabled (! demo);
@@ -262,7 +262,8 @@ juce::PopupMenu WcEditor::buildModuleMenu (const WcProcessor& proc)
             if (! proc.isPresent (first + i))
             {
                 const bool ok = proc.canAdd (first + i);
-                const auto why = typeOfInst (first + i) == MT_111 ? "  - demo: 4 LFOs" : "  - demo: 2 oscillators";
+                const auto t = typeOfInst (first + i);
+                const auto why = t == MT_111 ? "  - demo: 4 LFOs" : (t == MT_108 ? "  - demo: 2 Switches" : "  - demo: 2 oscillators");
                 m.addItem (1 + first + i, title + "  (" + instName (first + i) + ")" + (ok ? "" : why), ok);
                 any = true;
             }
@@ -287,6 +288,7 @@ juce::PopupMenu WcEditor::buildModuleMenu (const WcProcessor& proc)
     addType (kInst277, kMax277, "SD-277 Signal Delay Unit");
     addType (kInst292, kMax292, "LG-292 Quad Lowpass Gate");
     addType (kInst207, kMax207, "MX-207 Mixer / Preamplifier");
+    addType (kInst108, kMax108, "SW-108 8 Switches");
     addType (kInst267, kMax267, "US-267 Uncertainty Source / Dual Filter");
     addType (kInst275, kMax275, "RV-275 Dual Equalizer / Reverb");
     addType (kInst284, kMax284, "QE-284 Quad Envelope Generator");
