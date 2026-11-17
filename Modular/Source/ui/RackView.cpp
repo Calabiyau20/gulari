@@ -949,7 +949,9 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     int nIn = 0, nOut = 0;
     for (auto& j : spec.jacks)
     {
-        auto jc = std::make_unique<JackComp> (rack, inst, j, j.output ? nOut++ : nIn++);
+        const int dsp = j.output ? nOut++ : nIn++;
+        if (j.hidden) continue;   // a TMJ-13 node: no jack to draw or to plug (H1)
+        auto jc = std::make_unique<JackComp> (rack, inst, j, dsp);
         jc->setBounds ((int) j.x - 13, (int) j.y - 13, 26, 26);
         addAndMakeVisible (*jc);
         jacks.push_back (std::move (jc));
@@ -1638,7 +1640,7 @@ void ModulePanel::paint (juce::Graphics& g)
                     g.drawHorizontalLine ((int) y, pr.getX() + 3.0f, pr.getRight() - 3.0f);
         }
     }
-    juce::Random rnd ((inst >= kInst207 ? inst - kMax111 - kMax108 : (inst >= kInst218 ? inst - kMax111 : inst)) * 977 + 3);   // the slot numbers of before the LFOs and the Switches: no brush moves
+    juce::Random rnd ((inst >= kInst207 ? inst - kMax111 - kMax013 - kMax108 : (inst >= kInst218 ? inst - kMax111 - kMax013 : inst)) * 977 + 3);   // the slot numbers of before the LFOs, the Matrices and the Switches: no brush moves
     const float brush = skin::neon() ? 0.35f : 1.0f;
     for (int y = 0; y < getHeight(); y += 2)
     {

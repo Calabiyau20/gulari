@@ -32,6 +32,7 @@
 #include "modules/M666.h"
 #include "modules/M111.h"
 #include "modules/M108.h"
+#include "modules/M013.h"
 #include "WcLicense.h"
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
@@ -2522,14 +2523,13 @@ int main (int argc, char** argv)
             good &= third && three;
         }
 
-        // 9. the 32 levers come after every other parameter: no index of before moves. Bool, On by default, not modulatable
+        // 9. the 32 levers come right after the LFOs: no index of before moves. Bool, On by default, not modulatable
         {
             WcProcessor p;
             const auto& all = p.getParameters();
             auto at = [&] (const char* id) { return p.apvts.getParameter (id)->getParameterIndex(); };
             auto* first = p.apvts.getParameter ("sw1_ch1");
-            const bool t = at ("sw1_ch1") == at ("lf8_wave") + 1 && at ("lf1_rate") == at ("out_master") + 1 && all.size() == at ("sw1_ch1") + 32
-                           && dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID() == "sw4_ch8"
+            const bool t = at ("sw1_ch1") == at ("lf8_wave") + 1 && at ("lf1_rate") == at ("out_master") + 1 && at ("sw4_ch8") == at ("sw1_ch1") + 31   // the TMJ-13 comes after
                            && dynamic_cast<juce::AudioParameterBool*> (first) != nullptr && first->getDefaultValue() == 1.0f && ! p.isModulatable ("sw1_ch1");
             std::printf ("  parameters: sw1_ch1 at %d (lf8_wave %d), %d in all, last %s %s\n", at ("sw1_ch1"), at ("lf8_wave"), all.size(),
                          dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID().toRawUTF8(), t ? "ok" : "BAD");
@@ -2605,6 +2605,305 @@ int main (int argc, char** argv)
             good &= t;
         }
         std::printf ("  SW-108 %s\n", good ? "ok" : "BAD");
+        if (! good) ok = false;
+    }
+
+    // ---- TMJ-13 Tactile Matrix: proximity, SCALE, MODULATED, glides, the nodes as ASSIGN sources, demo, slots ----
+    {
+        std::printf ("TMJ-13 TACTILE MATRIX\n");
+        const int A = kInst013, B = kInst013 + 1;
+        auto fresh = [A] (WcProcessor& p)
+        {
+            p.license.status = License::Status::Licensed;
+            p.prepareToPlay (SR, 32);
+            p.resetAll();
+            p.setPresent (A, true);
+        };
+        // the module by hand, a control tick every 32 samples; the outputs of the last sample (X, Y, node 1..8)
+        auto once = [A] (WcProcessor& p, std::initializer_list<std::pair<int, float>> cv = {}, int n = 32)
+        {
+            auto* m = p.rack.module (A);
+            float in[Rack::kMaxJacks] {}, out[Rack::kMaxJacks] {};
+            for (auto& c : cv) in[M013::inCv (c.first)] = c.second;
+            for (int i = 0; i < n; ++i) { if (i % 32 == 0) m->beginBlock (32); m->tick (in, out); }
+            return std::vector<float> (out, out + 10);
+        };
+        auto node = [] (const std::vector<float>& o, int n) { return o[(size_t) (M013::Out_Node1 + n - 1)]; };
+        auto near = [] (float a, float b, float tol) { return std::abs (a - b) <= tol; };
+        bool good = true;
+
+        // 1. the formula at SENSITIVITY 50 % (r = 0.825), within 0.02 V: on node 1, at the centre, between 1 and 2
+        {
+            WcProcessor p; fresh (p);
+            setP (p, "xy1_mode", 0.0f);
+            auto at = [&] (float x, float y) { setP (p, "xy1_x", x); setP (p, "xy1_y", y); p.rack.module (A)->reset(); return once (p); };
+            const auto on1 = at (0.0f, 1.0f), mid = at (0.5f, 0.5f), half = at (0.25f, 1.0f);
+            bool t = near (node (on1, 1), 10.0f, 0.02f) && near (node (on1, 2), 3.36f, 0.02f) && near (node (on1, 8), 3.36f, 0.02f);
+            for (int n : { 3, 4, 5, 6, 7 }) t &= node (on1, n) == 0.0f;
+            for (int n : { 2, 4, 6, 8 }) t &= near (node (mid, n), 3.36f, 0.02f);
+            for (int n : { 1, 3, 5, 7 }) t &= near (node (mid, n), 0.50f, 0.02f);
+            t &= near (node (half, 1), 7.90f, 0.02f) && near (node (half, 2), 7.90f, 0.02f) && near (node (half, 8), 2.35f, 0.02f) && near (node (half, 3), 0.20f, 0.02f);
+            for (int n : { 4, 5, 6, 7 }) t &= node (half, n) == 0.0f;
+            std::printf ("  formula: on node 1 %.2f / %.2f / %.2f, centre %.2f / %.2f, at (0.25, 1) %.2f %.2f %.2f %.2f %s\n", node (on1, 1), node (on1, 2), node (on1, 8),
+                         node (mid, 2), node (mid, 1), node (half, 1), node (half, 2), node (half, 8), node (half, 3), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 2. SENSITIVITY at 0 (r = 0.15) with the point in the centre: the eight nodes exactly 0 V
+        {
+            WcProcessor p; fresh (p);
+            setP (p, "xy1_sens", 0.0f);
+            p.rack.module (A)->reset();
+            const auto o = once (p);
+            bool t = true;
+            for (int n = 1; n <= 8; ++n) t &= node (o, n) == 0.0f;
+            std::printf ("  r min, centre: all nodes 0 V %s\n", t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 3. SCALE around the centre on the base: X 1 at 50 % -> 7.5 V; X 0.8 at 200 % -> 10 V (clipped); Y does not move
+        {
+            WcProcessor p; fresh (p);
+            setP (p, "xy1_x", 1.0f); setP (p, "xy1_scalex", 0.5f);
+            p.rack.module (A)->reset();
+            const auto a = once (p);
+            setP (p, "xy1_x", 0.8f); setP (p, "xy1_scalex", 2.0f);
+            p.rack.module (A)->reset();
+            const auto b = once (p);
+            const bool t = near (a[M013::Out_X], 7.5f, 1.0e-4f) && b[M013::Out_X] == 10.0f && a[M013::Out_Y] == 5.0f && b[M013::Out_Y] == 5.0f;
+            std::printf ("  SCALE X: 50 %% -> %.3f V (7.5), 200 %% -> %.3f V (10), Y %.2f / %.2f V %s\n", a[M013::Out_X], b[M013::Out_X], a[M013::Out_Y], b[M013::Out_Y], t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 4. MODULATED, the base in the centre: CV 3 +10 V lands on node 3 exactly; +5 V half way; CV 1 and 3 at +10 share;
+        //    -10 V on CV 3 goes to the opposite corner; TACTILE with the same c.v.: the point stays on the base
+        {
+            WcProcessor p; fresh (p);
+            const auto full = once (p, { { 3, 10.0f } }), five = once (p, { { 3, 5.0f } }), two = once (p, { { 1, 10.0f }, { 3, 10.0f } }), away = once (p, { { 3, -10.0f } });
+            setP (p, "xy1_mode", 0.0f);
+            p.rack.module (A)->reset();
+            const auto tactile = once (p, { { 1, 10.0f }, { 3, -7.0f } });
+            const bool t = full[M013::Out_X] == 10.0f && full[M013::Out_Y] == 10.0f && node (full, 3) == 10.0f
+                           && near (five[M013::Out_X], 7.5f, 1.0e-4f) && near (five[M013::Out_Y], 7.5f, 1.0e-4f)
+                           && near (two[M013::Out_X], 5.0f, 1.0e-4f) && two[M013::Out_Y] == 10.0f && away[M013::Out_X] == 0.0f && away[M013::Out_Y] == 0.0f
+                           && tactile[M013::Out_X] == 5.0f && tactile[M013::Out_Y] == 5.0f;
+            std::printf ("  MODULATED: +10 V -> (%.2f, %.2f) node 3 %.2f V, +5 V -> (%.2f, %.2f), two corners -> (%.2f, %.2f), -10 V -> (%.2f, %.2f), TACTILE (%.2f, %.2f) %s\n",
+                         full[0], full[1], node (full, 3), five[0], five[1], two[0], two[1], away[0], away[1], tactile[0], tactile[1], t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 5. the mode changed with +10 V on CV 3: X glides 5 -> 10 V, no sample steps more than the 12 ms ramp allows
+        {
+            WcProcessor p; fresh (p);
+            setP (p, "xy1_mode", 0.0f);
+            p.rack.module (A)->reset();
+            once (p, { { 3, 10.0f } });
+            setP (p, "xy1_mode", 1.0f);
+            auto* m = p.rack.module (A);
+            float in[Rack::kMaxJacks] {}, out[Rack::kMaxJacks] {};
+            in[M013::inCv (3)] = 10.0f;
+            float was = 5.0f, step = 0.0f;
+            for (int i = 0; i < 4800; ++i) { if (i % 32 == 0) m->beginBlock (32); m->tick (in, out); step = std::max (step, std::abs (out[M013::Out_X] - was)); was = out[M013::Out_X]; }
+            const bool t = step < 0.05f && out[M013::Out_X] == 10.0f;
+            std::printf ("  mode change: largest step %.4f V a sample (< 0.05), lands on %.2f V %s\n", step, out[M013::Out_X], t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 6. node 1 on a knob (depth 100 %): what the 259 hears of it, tick by tick, with X written once a host block
+        //    (buffers of 32 and 2048). Jumping 0 / 1 every block: the 12 ms glide spreads a whole jump over 4 ticks at least (raw: 1.0). Swept 0 -> 1
+        //    in half a second (a new target every block), then still: it follows and lands. X and Y move every sample
+        {
+            bool t = true;
+            juce::String line;
+            for (int host : { 32, 2048 })
+            {
+                WcProcessor p; fresh (p);
+                p.setPresent (kInst259, true);
+                setP (p, "xy1_y", 1.0f); setP (p, "xy1_x", 0.0f); setP (p, "a_timbre", 0.0f);
+                p.assign (A, M013::Out_Node1, "a_timbre", 1.0f);
+                const int param = p.apvts.getParameter ("a_timbre")->getParameterIndex();
+                float jump = 0.0f, lag = 0.0f, prev = -1.0f;
+                int perTick = 0;
+                auto play = [&] (int samples, std::function<float (int)> xAt, std::function<float (int)> want)
+                {
+                    for (int s = 0; s < samples; s += 32)
+                    {
+                        if (s % host == 0) setP (p, "xy1_x", xAt (s));
+                        p.rack.beginBlock (32);
+                        float x0 = p.rack.jackValue (A, M013::Out_X);
+                        int moves = 0;
+                        for (int i = 0; i < 32; ++i) { p.rack.tick(); const float x = p.rack.jackValue (A, M013::Out_X); moves += x != x0 ? 1 : 0; x0 = x; }
+                        perTick = std::max (perTick, moves);
+                        const float e = p.rack.effective (param);
+                        if (prev >= 0.0f) jump = std::max (jump, std::abs (e - prev));
+                        prev = e;
+                        if (want) lag = std::max (lag, std::abs (e - want (s)));
+                    }
+                };
+                play (4800, [] (int) { return 0.0f; }, {});   // in the rack and still: from here on
+                jump = 0.0f;
+                play (48000, [host] (int s) { return (float) ((s / host) % 2); }, {});
+                const float jumpAlt = jump;
+                const int sweep = 24000;
+                auto target = [] (float x) { const float d = x;   // node 1 from (x, 1), r 0.825
+                                             return d < 0.825f ? 0.5f * (1.0f + std::cos (3.14159265f * d / 0.825f)) : 0.0f; };
+                setP (p, "xy1_x", 0.0f);
+                play (4800, [] (int) { return 0.0f; }, {});
+                lag = 0.0f;
+                play (sweep, [&] (int s) { return (float) s / (float) sweep; }, [&] (int s) { return target ((float) s / (float) sweep); });
+                const float lagSweep = lag;
+                play (4800, [] (int) { return 1.0f; }, {});
+                const float end = p.rack.effective (param);
+                const bool ok = jumpAlt < 0.3f && lagSweep < 0.2f && end == 0.0f && perTick > 1;
+                line << " buffer " << host << ": tick step " << juce::String (jumpAlt, 3) << " (< 0.3), lag in the sweep " << juce::String (lagSweep, 3)
+                     << " (< 0.2), lands " << juce::String (end, 3) << ", X moves " << perTick << " samples a tick;";
+                t &= ok;
+            }
+            std::printf ("  node on a knob:%s %s\n", line.toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 7. a project with the Matrix at (0.2, 0.9): its value from the first sample, no glide from the centre
+        {
+            WcProcessor p; fresh (p);
+            setP (p, "xy1_x", 0.2f); setP (p, "xy1_y", 0.9f);
+            juce::MemoryBlock st;
+            p.getStateInformation (st);
+            WcProcessor q;
+            q.license.status = License::Status::Licensed;
+            q.setStateInformation (st.getData(), (int) st.getSize());
+            q.prepareToPlay (SR, 32);
+            q.rack.beginBlock (32);
+            q.rack.tick();
+            const float x = q.rack.jackValue (A, M013::Out_X), y = q.rack.jackValue (A, M013::Out_Y);
+            const bool t = q.isPresent (A) && near (x, 2.0f, 1.0e-5f) && near (y, 9.0f, 1.0e-5f);
+            std::printf ("  first sample of a project at (0.2, 0.9): X %.4f V, Y %.4f V %s\n", x, y, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 8. MODULATED by an LFO on CV 3 for a second: the point moves, X and Y in the APVTS do not (nothing to record)
+        {
+            WcProcessor p; fresh (p);
+            p.setPresent (kInst111, true);
+            setP (p, "lf1_rate", 0.6f);
+            p.connect (kInst111, M111::Out_Lfo, A, M013::inCv (3));
+            float lo = 10.0f, hi = 0.0f;
+            for (int b = 0; b < 1500; ++b)
+            {
+                juce::AudioBuffer<float> buf (2, 32); buf.clear(); juce::MidiBuffer m;
+                p.processBlock (buf, m);
+                lo = std::min (lo, p.rack.jackValue (A, M013::Out_X)); hi = std::max (hi, p.rack.jackValue (A, M013::Out_X));
+            }
+            const float x = p.apvts.getRawParameterValue ("xy1_x")->load(), y = p.apvts.getRawParameterValue ("xy1_y")->load();
+            const bool t = hi - lo > 4.0f && x == 0.5f && y == 0.5f;
+            std::printf ("  LFO on CV 3: X out %.2f .. %.2f V, APVTS X %.3f Y %.3f (0.5) %s\n", lo, hi, x, y, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 9. the nodes have no jack: connect() refuses them, a hand-made patch with such a cable loads without it, X and
+        //    Y still take cables; with no cable at all an ASSIGN on node 1 moves its knob
+        {
+            WcProcessor p; fresh (p);
+            p.setPresent (kInst257, true);
+            const bool refused = ! p.connect (A, M013::Out_Node1 + 3, kInst257, M257::In_Va1) && p.getCables().empty();
+            const bool xy = p.connect (A, M013::Out_X, kInst257, M257::In_Va1) && p.connect (A, M013::Out_Y, kInst257, M257::In_Vb1);
+            auto tree = p.patchToTree();
+            juce::ValueTree ct ("CABLE");
+            ct.setProperty ("s", "xy1", nullptr); ct.setProperty ("sj", M013::Out_Node1 + 3, nullptr);
+            ct.setProperty ("d", "vp", nullptr); ct.setProperty ("dj", (int) M257::In_Vm1, nullptr);
+            tree.getChildWithName ("CABLES").appendChild (ct, nullptr);
+            WcProcessor q; fresh (q);
+            q.patchFromTree (tree);
+            const bool loaded = q.getCables().size() == 2 && std::none_of (q.getCables().begin(), q.getCables().end(), [] (const Cable& c) { return c.srcJack >= M013::Out_Node1; });
+            WcProcessor r; fresh (r);
+            r.setPresent (kInst259, true);
+            setP (r, "xy1_x", 0.0f); setP (r, "xy1_y", 1.0f); setP (r, "a_timbre", 0.25f);
+            const bool assigned = r.assign (A, M013::Out_Node1, "a_timbre", 0.5f);
+            run (r, 4800);
+            const float e = r.rack.effective (r.apvts.getParameter ("a_timbre")->getParameterIndex());
+            const bool t = refused && xy && loaded && assigned && near (e, 0.75f, 1.0e-4f) && r.getCables().empty();
+            std::printf ("  hidden nodes: connect refused %s, X / Y cables %s, hand-made cable left out %s (%d cables), ASSIGN with no cable -> %.3f (0.75) %s\n",
+                         refused ? "yes" : "NO", xy ? "yes" : "NO", loaded ? "yes" : "NO", (int) q.getCables().size(), e, t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 10. demo: the second Matrix is refused even with the other limits full; a patch with both loads A, without
+        //     B's cable
+        {
+            WcProcessor d; d.license = License(); d.prepareToPlay (SR, 32); d.resetAll();
+            for (int i = 0; i < 4; ++i) d.setPresent (kInst111 + i, true);
+            for (int i = 0; i < 2; ++i) d.setPresent (kInst259 + i, true);
+            for (int i = 0; i < 2; ++i) d.setPresent (kInst108 + i, true);
+            d.setPresent (A, true); d.setPresent (B, true);
+            const bool second = d.isPresent (A) && ! d.isPresent (B) && ! d.canAdd (B) && d.canAdd (kInst207);
+            WcProcessor l; fresh (l);
+            l.setPresent (B, true);
+            l.connect (B, M013::Out_X, kInstOutput, OutputModule::In_LevelCv);
+            WcProcessor e; e.license = License(); e.prepareToPlay (SR, 32); e.resetAll();
+            e.patchFromTree (l.patchToTree());
+            const bool both = e.isPresent (A) && ! e.isPresent (B) && e.getCables().empty();
+            std::printf ("  demo: second Matrix refused %s; a patch with A and B -> A only, cables %d %s\n", second ? "yes" : "NO", (int) e.getCables().size(), second && both ? "ok" : "BAD");
+            good &= second && both;
+        }
+
+        // 11. the 12 parameters come right after the Switches: no index of before moves. Names, texts, ranges, defaults,
+        //     what can be modulated, typed values
+        {
+            WcProcessor p;
+            const auto& all = p.getParameters();
+            auto at = [&] (const char* id) { return p.apvts.getParameter (id)->getParameterIndex(); };
+            auto* x = p.apvts.getParameter ("xy1_x");
+            auto* sc = p.apvts.getParameter ("xy2_scaley");
+            auto* md = p.apvts.getParameter ("xy1_mode");
+            auto typed = [&] (const char* id, const char* text) { auto v = wc::parseValueText (*p.apvts.getParameter (id), text); return v ? v->plain : -1.0f; };
+            const bool t = at ("xy1_x") == at ("sw4_ch8") + 1 && at ("sw1_ch1") == at ("lf8_wave") + 1 && at ("lf1_rate") == at ("out_master") + 1
+                           && all.size() == at ("sw4_ch8") + 13 && dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID() == "xy2_mode"
+                           && x->getName (64) == "Matrix A Pad X" && sc->getName (64) == "Matrix B Scale Y" && p.apvts.getParameter ("xy1_sens")->getName (64) == "Matrix A Sensitivity"
+                           && x->getText (0.42f, 64) == "0.42" && x->getDefaultValue() == 0.5f && sc->getText (0.75f, 64) == "150 %" && sc->getDefaultValue() == 0.5f
+                           && p.apvts.getParameter ("xy1_sens")->getText (0.5f, 64) == "50 %" && md->getText (md->getDefaultValue(), 64) == "Modulated" && md->getText (0.0f, 64) == "Tactile"
+                           && p.isModulatable ("xy1_x") && p.isModulatable ("xy1_y") && p.isModulatable ("xy1_sens") && p.isModulatable ("xy1_scalex") && ! p.isModulatable ("xy1_mode")
+                           && near (typed ("xy1_scalex", "150"), 1.5f, 1.0e-4f) && near (typed ("xy1_scalex", "150 %"), 1.5f, 1.0e-4f) && near (typed ("xy1_x", "0.42"), 0.42f, 1.0e-4f);
+            std::printf ("  parameters: xy1_x at %d (sw4_ch8 %d), %d in all, last %s, \"%s\", %s / %s, scale \"150\" -> %.2f %s\n", at ("xy1_x"), at ("sw4_ch8"), all.size(),
+                         dynamic_cast<juce::RangedAudioParameter*> (all.getLast())->getParameterID().toRawUTF8(), x->getName (64).toRawUTF8(), x->getText (0.42f, 64).toRawUTF8(),
+                         sc->getText (0.75f, 64).toRawUTF8(), typed ("xy1_scalex", "150"), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 12. slots: right after the LFOs, before the 218; names and keys; a patch with only the B keeps it
+        {
+            WcProcessor l; fresh (l);
+            l.setPresent (A, false); l.setPresent (B, true);
+            WcProcessor e; fresh (e);
+            e.patchFromTree (l.patchToTree());
+            const bool t = A == kInst111 + kMax111 && kInst218 == A + kMax013 && typeOfInst (A) == MT_013 && typeOfInst (B) == MT_013 && typeOfInst (A - 1) == MT_111 && typeOfInst (kInst218) == MT_218
+                           && instName (A) == "Matrix A" && instName (B) == "Matrix B" && instKey (A) == "xy1" && instFromKey ("xy2") == B && instName (kInst218) == "218" && instName (kInst111 + 7) == "LFO H"
+                           && e.isPresent (B) && ! e.isPresent (A);
+            std::printf ("  slots: Matrix A %d B %d (LFO H %d, 218 %d), \"%s\" / \"%s\", keys %s / %s, a patch with B -> B %s\n", A, B, kInst111 + 7, kInst218, instName (A).toRawUTF8(),
+                         instName (B).toRawUTF8(), instKey (A).toRawUTF8(), instKey (B).toRawUTF8(), t ? "ok" : "BAD");
+            good &= t;
+        }
+
+        // 13. with the audio stopped (no block for 100 ms) the panel's point and lights follow the knobs, without the
+        //     c.v.; with the audio running, what the audio does
+        {
+            WcProcessor p; fresh (p);
+            auto* m = p.rack.m013 (0);
+            float u, v, volts[8];
+            setP (p, "xy1_x", 0.0f); setP (p, "xy1_y", 1.0f);
+            m->view (u, v, volts);
+            const bool stopped = u == 0.0f && v == 1.0f && volts[0] == 10.0f && m->led (0) == 1.0f;
+            once (p, { { 5, 10.0f } }, 64);   // CV 5 pulls it to node 5 (a tick publishes what the one before left)
+            m->view (u, v, volts);
+            const bool running = u == 1.0f && v == 0.0f && volts[4] == 10.0f;
+            juce::Thread::sleep (150);
+            setP (p, "xy1_x", 1.0f);
+            m->view (u, v, volts);
+            const bool after = u == 1.0f && v == 1.0f && volts[2] == 10.0f && m->led (4) == 0.0f;
+            std::printf ("  audio stopped: point follows the knobs %s, running follows the audio %s, 150 ms later the knobs again %s %s\n", stopped ? "yes" : "NO",
+                         running ? "yes" : "NO", after ? "yes" : "NO", stopped && running && after ? "ok" : "BAD");
+            good &= stopped && running && after;
+        }
+        std::printf ("  TMJ-13 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }
 

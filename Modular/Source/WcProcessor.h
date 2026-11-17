@@ -93,7 +93,7 @@ public:
     // ---- licensing ----
     wc::License license;
     bool demo() const noexcept { return ! license.licensed(); }
-    // demo mode: may this slot come in? Two oscillators (259 and 258 together), four LFOs and two Switches; the rest always
+    // demo mode: may this slot come in? Two oscillators (259 and 258 together), four LFOs, two Switches and one Matrix; the rest always
     bool canAdd (int inst) const;
     void recheckLicense (const juce::File& extra = {});
     // factory library navigation (prev / next in the header)

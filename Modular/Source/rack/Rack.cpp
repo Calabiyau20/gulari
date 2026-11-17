@@ -26,6 +26,7 @@
 #include "../modules/M666.h"
 #include "../modules/M111.h"
 #include "../modules/M108.h"
+#include "../modules/M013.h"
 
 namespace wc
 {
@@ -34,7 +35,7 @@ juce::String instName (int inst)
     if (inst == kInstMidi) return "MIDI";
     if (inst == kInstOutput) return "OUTPUT";
     const auto letter = juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
-    switch (typeOfInst (inst)) { case MT_218: return "218"; case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_250: return "250"; case MT_252: return "252"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_267: return "267"; case MT_275: return "275"; case MT_284: return "284"; case MT_291: return "291"; case MT_666: return "SC-666 " + juce::String (subIndex (inst) + 1); case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; case MT_111: return "LFO " + letter; case MT_108: return "Switches " + letter; default: return "259 " + letter; }
+    switch (typeOfInst (inst)) { case MT_218: return "218"; case MT_242: return "242"; case MT_245: return "245"; case MT_248: return "248"; case MT_250: return "250"; case MT_252: return "252"; case MT_266: return "266"; case MT_230: return "230"; case MT_264: return "264"; case MT_257: return "257"; case MT_258: return "258 " + letter; case MT_285: return "285"; case MT_296: return "296"; case MT_277: return "277"; case MT_207: return "207"; case MT_267: return "267"; case MT_275: return "275"; case MT_284: return "284"; case MT_291: return "291"; case MT_666: return "SC-666 " + juce::String (subIndex (inst) + 1); case MT_281: return "281 " + letter; case MT_292: return "292 " + letter; case MT_111: return "LFO " + letter; case MT_108: return "Switches " + letter; case MT_013: return "Matrix " + letter; default: return "259 " + letter; }
 }
 
 std::atomic<float>* Params::getRawParameterValue (const juce::String& id) const
@@ -59,6 +60,7 @@ Rack::Rack (juce::AudioProcessorValueTreeState& state)
     const Params params { state, eff.get() };
     mods[(size_t) kInstMidi] = std::make_unique<MidiInterface> (params);
     for (int i = 0; i < kMax111; ++i) mods[(size_t) (kInst111 + i)] = std::make_unique<M111> (params, prefixLfo (i));
+    for (int i = 0; i < kMax013; ++i) mods[(size_t) (kInst013 + i)] = std::make_unique<M013> (params, prefix013 (i));
     mods[(size_t) kInst218] = std::make_unique<M218> (params, "kb_");
     mods[(size_t) kInst242] = std::make_unique<M242> (params, "pp_");
     mods[(size_t) kInst245] = std::make_unique<M245> (params, "sv_");
@@ -120,6 +122,7 @@ M284* Rack::m284() const { return static_cast<M284*> (mods[(size_t) kInst284].ge
 M291* Rack::m291() const { return static_cast<M291*> (mods[(size_t) kInst291].get()); }
 M666* Rack::m666 (int i) const { return static_cast<M666*> (mods[(size_t) (kInst666 + i)].get()); }
 M111* Rack::m111 (int i) const { return static_cast<M111*> (mods[(size_t) (kInst111 + i)].get()); }
+M013* Rack::m013 (int i) const { return static_cast<M013*> (mods[(size_t) (kInst013 + i)].get()); }
 M242* Rack::m242() const { return static_cast<M242*> (mods[(size_t) kInst242].get()); }
 MidiInterface& Rack::midi() const { return *static_cast<MidiInterface*> (mods[(size_t) kInstMidi].get()); }
 OutputModule& Rack::output() const { return *static_cast<OutputModule*> (mods[(size_t) kInstOutput].get()); }

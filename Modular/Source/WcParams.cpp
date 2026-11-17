@@ -986,6 +986,23 @@ static void add108 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int 
     l.add (std::move (g));
 }
 
+// TMJ-13 Tactile Matrix, after the Switches: the pad's base (X, Y), the reach of its nodes, the travel, the mode
+static void add013 (juce::AudioProcessorValueTreeState::ParameterLayout& l, int i)
+{
+    const juce::String p (prefix013 (i)), n ("Matrix " + juce::String::charToString ((juce::juce_wchar) ('A' + i)) + " ");
+    auto id = [&] (const char* s) { return juce::ParameterID (p + s, 1); };
+    auto g = std::make_unique<juce::AudioProcessorParameterGroup> (p + "grp", n.trim(), "|");
+    const Fmt pos { FA().withStringFromValueFunction ([] (float v, int) { return juce::String (v, 2); }), Readback::of (Unit::None) };
+    const Fmt pct { FA().withStringFromValueFunction ([] (float v, int) { return fixed (v * 100.0f, 0) + " %"; }), linRb (Unit::Pct, 0.0, 100.0) };
+    g->addChild (flt (id ("x"), n + "Pad X", NR (0.0f, 1.0f), 0.5f, pos));
+    g->addChild (flt (id ("y"), n + "Pad Y", NR (0.0f, 1.0f), 0.5f, pos));
+    g->addChild (flt (id ("sens"), n + "Sensitivity", NR (0.0f, 1.0f), 0.5f, pct));
+    g->addChild (flt (id ("scalex"), n + "Scale X", NR (0.0f, 2.0f), 1.0f, pct));
+    g->addChild (flt (id ("scaley"), n + "Scale Y", NR (0.0f, 2.0f), 1.0f, pct));
+    g->addChild (choice (id ("mode"), n + "Mode", juce::StringArray { "Tactile", "Modulated" }, 1));
+    l.add (std::move (g));
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout l;
@@ -1029,6 +1046,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     }
     for (int i = 0; i < kMax111; ++i) addLfo (l, i);   // last (H10)
     for (int i = 0; i < kMax108; ++i) add108 (l, i);   // after the LFOs: no index of before moves
+    for (int i = 0; i < kMax013; ++i) add013 (l, i);   // after the Switches: no index of before moves
     return l;
 }
 } // namespace wc

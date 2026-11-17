@@ -1981,6 +1981,70 @@ static ModuleSpec make108()
     return s;
 }
 
+// ---------------------------------------------------------------------------------------------
+// TMJ-13 Tactile Matrix - a Calabi Yau original, drawn at panel size (480 x 430, no scaleSpec).
+// The pad (sections[0], 192 x 192, the point travels 8 units inside it) in the middle of three rings, all on the
+// ray of its node: node LED on the frame rule (+6), ASSIGN n (+28), CV n (+66; a corner CV sits in its
+// button's column, 38 units out). Nodes clockwise from the top-left. Controls column right of x 376.
+// Bands: title 14, rules 26 / 400, footer 415 - the LF-111 / SW-108 skeleton.
+// ---------------------------------------------------------------------------------------------
+static ModuleSpec make013()
+{
+    using K = JackKind;
+    ModuleSpec s;
+    s.type = MT_013; s.name = "TACTILE MATRIX"; s.model = "TMJ-13"; s.engr = "";
+    s.width = 480; s.height = 430;
+    auto node = [] (float x, float y) { auto j = J ("", K::Banana, true, x, y); j.hidden = true; return j; };
+    s.jacks = {   // inputs 0-7: CV n pushes the point toward node n (MODULATED); outputs 0-1: X, Y; 2-9: the nodes
+        J ("cv 1", K::Banana, false, 68, 46),   // in 0, node top-left
+        J ("cv 2", K::Banana, false, 192, 46),   // in 1, node top
+        J ("cv 3", K::Banana, false, 316, 46),   // in 2, node top-right
+        J ("cv 4", K::Banana, false, 354, 208),   // in 3, node right
+        J ("cv 5", K::Banana, false, 316, 370),   // in 4, node bottom-right
+        J ("cv 6", K::Banana, false, 192, 370),   // in 5, node bottom
+        J ("cv 7", K::Banana, false, 68, 370),   // in 6, node bottom-left
+        J ("cv 8", K::Banana, false, 30, 208),   // in 7, node left
+        J ("x out", K::Banana, true, 404, 370),   // out 0
+        J ("y out", K::Banana, true, 452, 370),   // out 1
+        // outputs 2-9, the eight nodes: no jack, no cable (H1); their ASSIGN buttons take them. At their LEDs
+        node (90, 106), node (192, 106), node (294, 106), node (294, 208), node (294, 310), node (192, 310), node (90, 310), node (90, 208),
+    };
+    s.controls = {
+        C ("sens", "sensitivity", CtrlStyle::Knob, 428, 72, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("scalex", "scale x", CtrlStyle::Knob, 428, 164, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("scaley", "scale y", CtrlStyle::Knob, 428, 256, kSkirt, "*|*|*|*|*|*|*|*|*|*|*"),
+        C ("mode", "tactile|modulated", CtrlStyle::Toggle, 404, 330, kSkirt),
+    };
+    // ASSIGN n = node n (output 2 + n - 1); its label is the number printed on it and appended to the instance name
+    // in the menus ("Matrix A 3")
+    { auto a = C ("assign1", "1", CtrlStyle::Assign, 68, 84); a.jack = 2; s.controls.push_back (a); }   // node top-left
+    { auto a = C ("assign2", "2", CtrlStyle::Assign, 192, 84); a.jack = 3; s.controls.push_back (a); }   // node top
+    { auto a = C ("assign3", "3", CtrlStyle::Assign, 316, 84); a.jack = 4; s.controls.push_back (a); }   // node top-right
+    { auto a = C ("assign4", "4", CtrlStyle::Assign, 316, 208); a.jack = 5; s.controls.push_back (a); }   // node right
+    { auto a = C ("assign5", "5", CtrlStyle::Assign, 316, 332); a.jack = 6; s.controls.push_back (a); }   // node bottom-right
+    { auto a = C ("assign6", "6", CtrlStyle::Assign, 192, 332); a.jack = 7; s.controls.push_back (a); }   // node bottom
+    { auto a = C ("assign7", "7", CtrlStyle::Assign, 68, 332); a.jack = 8; s.controls.push_back (a); }   // node bottom-left
+    { auto a = C ("assign8", "8", CtrlStyle::Assign, 68, 208); a.jack = 9; s.controls.push_back (a); }   // node left
+    s.sections = { { "pad", 96, 112, 192, 192 } };   // the XY pad component: its bounds
+    s.leds = {   // node n level = node voltage / 10; red as D() and every LED of the plugin
+        D (90, 106, 0), D (192, 106, 1), D (294, 106, 2), D (294, 208, 3), D (294, 310, 4), D (192, 310, 5), D (90, 310, 6), D (90, 208, 7)
+    };
+    s.lines = {
+        L (4, 26, 476, 26),
+        L (4, 400, 476, 400),
+        L (376, 26, 376, 400),
+        L (90, 106, 294, 106, 1.2f),
+        L (294, 106, 294, 310, 1.2f),
+        L (294, 310, 90, 310, 1.2f),
+        L (90, 310, 90, 106, 1.2f),
+    };
+    s.texts = {
+        T ("TACTILE MATRIX  TMJ-13", 240, 14, 10.5f, 4),
+        T ("@foot", 240, 415, 9.0f, 1),
+    };
+    return s;
+}
+
 // Each layout marks where its footer sits with a "@foot" placeholder text: finish() takes that height
 // and removes the placeholder, and RackView engraves CALABI YAU - isologo - model there instead.
 static ModuleSpec finish (ModuleSpec s)
@@ -2005,7 +2069,7 @@ const ModuleSpec& specFor (ModuleType t)
     static const ModuleSpec specs[MT_Count] = { finish (makeMidi()), finish (make259()), finish (makeOutput()), finish (make281()), finish (make292()), finish (make266()), finish (make245()),
                                                 finish (make242()), finish (make257()), finish (make258()), finish (make264()), finish (make230()), finish (make285()), finish (make207()),
                                                 finish (make277()), finish (make296()), finish (make248()), finish (make218()), finish (make250()), finish (make252()),
-                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()), finish (make111()), finish (make108()) };
+                                                finish (make267()), finish (make275()), finish (make284()), finish (make291()), finish (make666()), finish (make111()), finish (make108()), finish (make013()) };
     return specs[t];
 }
 } // namespace wc

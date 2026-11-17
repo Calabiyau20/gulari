@@ -9,7 +9,7 @@ namespace wc
 // Banana jacks carry control (DC, 0..10 V, pulses), mini jacks carry audio, exactly like a Series 200 system.
 enum class JackKind { Banana, Mini };
 
-enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_267, MT_275, MT_284, MT_291, MT_666, MT_111, MT_108, MT_Count };
+enum ModuleType { MT_Midi = 0, MT_259, MT_Output, MT_281, MT_292, MT_266, MT_245, MT_242, MT_257, MT_258, MT_264, MT_230, MT_285, MT_207, MT_277, MT_296, MT_248, MT_218, MT_250, MT_252, MT_267, MT_275, MT_284, MT_291, MT_666, MT_111, MT_108, MT_013, MT_Count };
 
 struct JackSpec
 {
@@ -19,13 +19,14 @@ struct JackSpec
     float x, y;          // panel position, in panel units (1 unit = 1 px at 100% zoom)
     bool pulse = false;  // timing signal (gates, triggers): red jack, as on the 200 series
     juce::uint32 tint = 0;   // explicit jack colour (0 = by role: red pulse, black c.v. in, blue c.v. out)
+    bool hidden = false;     // an output with no jack on the panel (TMJ-13 nodes): no cable, only an ASSIGN button takes it
 };
 
 // Push = momentary button (not a parameter); Button = white button that steps a parameter
 enum class CtrlStyle { BigKnob, Knob, SmallKnob, Toggle, Switch3, Push, Button, Fader, Prog, Assign };   // Fader: vertical, 26 x 120
 // Prog: 248 programming lever (momentary up / down) acting on the stage being edited
 // Assign: modulation source button (26 x 26) for the output jack `jack`; label = the source's name (12 characters at
-// most: "LFO", "Matrix 3"). Drag it onto a knob or fader to modulate it.
+// most: "LFO A", "Matrix A 3"). Drag it onto a knob or fader to modulate it.
 
 struct ControlSpec
 {

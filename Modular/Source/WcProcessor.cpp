@@ -365,7 +365,7 @@ bool WcProcessor::connect (int srcInst, int srcJack, int dstInst, int dstJack, i
     if (srcJack < 0 || srcJack >= ss.numOut() || dstJack < 0 || dstJack >= ds.numIn()) return false;
     const auto& sj = ss.jacks[(size_t) ss.jackIndex (true, srcJack)];
     const auto& dj = ds.jacks[(size_t) ds.jackIndex (false, dstJack)];
-    if (sj.kind != dj.kind) return false;          // banana to banana, mini to mini
+    if (sj.kind != dj.kind || sj.hidden) return false;   // banana to banana, mini to mini; a node with no jack takes no cable
     cables.erase (std::remove_if (cables.begin(), cables.end(), [&] (const Cable& c) { return c.dstInst == dstInst && c.dstJack == dstJack; }), cables.end());
     Cable c { srcInst, srcJack, dstInst, dstJack, colour >= 0 ? colour : nextColour (sj.kind == JackKind::Banana) };
     cables.push_back (c);
@@ -388,7 +388,7 @@ void WcProcessor::disconnectOutput (int inst, int outJack)
 void WcProcessor::setPresent (int inst, bool on, int preferRow)
 {
     if (! isRemovable (inst)) return;
-    if (on && ! canAdd (inst)) return;               // demo mode: two oscillators, four LFOs, two Switches
+    if (on && ! canAdd (inst)) return;               // demo mode: two oscillators, four LFOs, two Switches, one Matrix
     if (on && ! present[(size_t) inst])
     {
         auto r = (size_t) juce::jlimit (0, (int) rows.size() - 1, preferRow < 0 ? (int) rows.size() - 1 : preferRow);
@@ -968,6 +968,14 @@ juce::ValueTree WcProcessor::patchToTree() const
     return t;
 }
 
+// an output with no jack on the panel (the TMJ-13 nodes)
+static bool hiddenOut (int inst, int jack)
+{
+    const auto& s = specFor (typeOfInst (inst));
+    const int k = jack >= 0 && jack < s.numOut() ? s.jackIndex (true, jack) : -1;
+    return k >= 0 && s.jacks[(size_t) k].hidden;
+}
+
 void WcProcessor::patchFromTree (const juce::ValueTree& t)
 {
     if (! t.hasType ("WCPATCH")) return;
@@ -1009,7 +1017,7 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             if (s >= 0) present[(size_t) s] = (bool) mods.getProperty ("m" + juce::String (i), false);
         }
     present[(size_t) kInstMidi] = present[(size_t) kInstOutput] = true;
-    if (demo())   // demo mode keeps the first two oscillators, four LFOs and two Switches of a patch, in slot order, and leaves the rest out
+    if (demo())   // demo mode keeps the first two oscillators, four LFOs, two Switches and one Matrix of a patch, in slot order, and leaves the rest out
     {
         auto keep = present;
         for (int i = 0; i < kNumInst; ++i) present[(size_t) i] = false;
@@ -1031,7 +1039,7 @@ void WcProcessor::patchFromTree (const juce::ValueTree& t)
             si = oldSlot ((int) ct["si"]); di = oldSlot ((int) ct["di"]);
             if (version == 2 && di >= 0 && typeOfInst (di) == MT_281) dj = M281::inFromV2 (dj);   // 281 gained CYCLE inputs
         }
-        if (si >= 0 && di >= 0 && present[(size_t) si] && present[(size_t) di])
+        if (si >= 0 && di >= 0 && present[(size_t) si] && present[(size_t) di] && ! hiddenOut (si, sj))   // a hand-made cable from a TMJ-13 node: left out (H1)
             cables.push_back ({ si, sj, di, dj, (int) ct["col"] });
     }
     colourCounter = (int) cables.size();
@@ -1129,17 +1137,17 @@ void WcProcessor::marfLoad (int slot)
 }
 
 // ------------------------------------------------------------------------------------------------
-// licensing: without a key file the rack holds two oscillators, four LFOs and two Switches and keeps its presets to itself
+// licensing: without a key file the rack holds two oscillators, four LFOs, two Switches and one Matrix and keeps its presets to itself
 // ------------------------------------------------------------------------------------------------
 bool WcProcessor::canAdd (int inst) const
 {
     if (! demo()) return true;
-    auto kind = [] (ModuleType t) { return t == MT_259 || t == MT_258 ? 1 : (t == MT_111 ? 2 : (t == MT_108 ? 3 : 0)); };
+    auto kind = [] (ModuleType t) { return t == MT_259 || t == MT_258 ? 1 : (t == MT_111 ? 2 : (t == MT_108 ? 3 : (t == MT_013 ? 4 : 0))); };
     const int k = kind (typeOfInst (inst));
     if (k == 0) return true;
     int n = 0;
     for (int i = 0; i < kNumInst; ++i) if (present[(size_t) i] && kind (typeOfInst (i)) == k) ++n;
-    return n < (k == 1 ? wc::License::kDemoMaxOscillators : (k == 2 ? wc::License::kDemoMaxLfos : wc::License::kDemoMaxSwitches));
+    return n < (k == 1 ? wc::License::kDemoMaxOscillators : (k == 2 ? wc::License::kDemoMaxLfos : (k == 3 ? wc::License::kDemoMaxSwitches : wc::License::kDemoMaxMatrices)));
 }
 
 void WcProcessor::recheckLicense (const juce::File& extra)
