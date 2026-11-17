@@ -1986,6 +1986,19 @@ int main (int argc, char** argv)
                    && inX.contains ("200 MIDI Learn") && inY.contains ("1200 MIDI Learn") && close (reset, { 0.8f, 0.5f }),
                    "menu: " + top.joinIntoString ("|") + " / X " + inX.joinIntoString (", ") + " / Y " + inY.joinIntoString (", ") + " / Reset Y -> " + reset.toString());
         }
+        // SENSITIVITY says how many nodes the point reaches (spec 7)
+        {
+            wc::ui::WcKnob* sens = nullptr;
+            for (auto* ch : pa->getChildren()) if (auto* k = dynamic_cast<wc::ui::WcKnob*> (ch)) if (k->paramId == "xy1_sens") sens = k;
+            setP ("xy1_x", 0.5f); setP ("xy1_y", 0.5f);
+            wc::ui::ReadoutText all, none;
+            setP ("xy1_sens", 1.0f);
+            if (sens != nullptr) sens->readoutText (all);
+            setP ("xy1_sens", 0.0f);
+            if (sens != nullptr) sens->readoutText (none);
+            setP ("xy1_sens", 0.5f);
+            check (sens != nullptr && all.note == "Reaches 8 of 8 nodes from the point" && none.note == "No node in reach from the point", "SENSITIVITY: " + all.note + " / " + none.note);
+        }
         // the readout over the pad: the base, the node with the most volts (a tie: the lower number), the point when the
         // c.v. took it away, nothing in reach, the CCs learned
         auto text = [&] { wc::ui::ReadoutText t; pad->readoutText (t); return t; };
@@ -2074,6 +2087,7 @@ int main (int argc, char** argv)
         proc.connect (wc::kInst257, wc::M257::Out_1, A, wc::M013::inCv (3));
         for (int i = 0; i < 6; ++i) { run (4); pump (15); }
         float u = 0.0f, v = 0.0f, volts[8];
+        run (1);   // right before: a slow runner's pump may pass the 100 ms after which the panel shows the knobs
         m->view (u, v, volts);
         const bool pushed = std::abs (u - (0.5375f + 0.5f * (1.0f - 0.5375f))) < 0.01f && std::abs (v - (0.47f + 0.5f * 0.53f)) < 0.01f;
         run (2);

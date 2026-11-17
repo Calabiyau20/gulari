@@ -1142,6 +1142,18 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
             auto* mode = proc.apvts.getRawParameterValue (prefix + "mode");
             s->amend = [m, k, mode] (ReadoutText& t) { lfoRateNote (*m, k->load(), (int) std::lround (mode->load()), t); };
         }
+        if (typeOfInst (inst) == MT_013 && juce::String (c.suffix) == "sens")   // spec 7: how many nodes the point reaches
+        {
+            auto* m = proc.rack.m013 (subIndex (inst));
+            s->amend = [m] (ReadoutText& t)
+            {
+                float u, v, volts[wc::M013::kNodes];
+                m->view (u, v, volts);
+                const auto n = std::count_if (volts, volts + wc::M013::kNodes, [] (float x) { return x >= 0.05f; });
+                t.note = n == 0 ? juce::String ("No node in reach from the point") : "Reaches " + juce::String ((int) n) + " of 8 nodes from the point";
+                t.warn = false;
+            };
+        }
         sliders.push_back (std::move (s));
         sliderIds.push_back (c.suffix);
         boundIds.push_back (resolveId (c.suffix));
