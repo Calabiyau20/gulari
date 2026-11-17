@@ -30,7 +30,7 @@ void M013::compute (float bx, float by, float s, float scx, float scy, const flo
     const float r = 0.15f + 1.35f * s;
     for (int n = 0; n < kNodes; ++n)
     {
-        const float dist = std::hypot (u - nodeU[n], v - nodeV[n]);
+        const float dx = u - nodeU[n], dy = v - nodeV[n], dist = std::sqrt (dx * dx + dy * dy);   // hypot guards an overflow these 0-1 distances never reach
         volts[n] = dist < r ? 5.0f * (1.0f + std::cos (dsp::kPi * dist / r)) : 0.0f;
     }
 }
