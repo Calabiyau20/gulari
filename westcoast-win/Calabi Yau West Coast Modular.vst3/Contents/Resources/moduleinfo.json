@@ -1,0 +1,48 @@
+{
+  "Name": "Calabi Yau West Coast Modular",
+  "Version": "1.0.0",
+  "Factory Info": {
+    "Vendor": "Calabi Yau",
+    "URL": "",
+    "E-Mail": "",
+    "Flags": {
+      "Unicode": true,
+      "Classes Discardable": false,
+      "Component Non Discardable": false,
+    },
+  },
+  "Classes": [
+    {
+      "CID": "ABCDEF019182FAEB4362597543795763",
+      "Category": "Audio Module Class",
+      "Name": "Calabi Yau West Coast Modular",
+      "Vendor": "Calabi Yau",
+      "Version": "1.0.0",
+      "SDKVersion": "VST 3.7.12",
+      "Sub Categories": [
+        "Instrument",
+        "Synth",
+      ],
+      "Class Flags": 2,
+      "Cardinality": 2147483647,
+      "Snapshots": [
+      ],
+    },
+    {
+      "CID": "ABCDEF011234ABCD4362597543795763",
+      "Category": "Component Controller Class",
+      "Name": "Calabi Yau West Coast Modular",
+      "Vendor": "Calabi Yau",
+      "Version": "1.0.0",
+      "SDKVersion": "VST 3.7.12",
+      "Sub Categories": [
+        "Instrument",
+        "Synth",
+      ],
+      "Class Flags": 2,
+      "Cardinality": 2147483647,
+      "Snapshots": [
+      ],
+    },
+  ],
+}
