@@ -4,6 +4,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "../WcProcessor.h"
 #include "../modules/M666.h"
+#include "../modules/M013.h"
 #include "WcLook.h"
 #include "ValueReadout.h"
 
@@ -165,10 +166,53 @@ public:
     juce::Rectangle<float> readoutAnchor() override { return juce::Rectangle<float> (21.0f, 21.0f).withCentre (getLocalBounds().toFloat().getCentre()); }
     const int inst, jack;
     const juce::String name;
+    juce::String cap;                 // printed on the button when its panel asks (the TMJ-13 node number); none on the LF-111
 private:
     RackView& rack;
     juce::Point<float> downAt;        // screen
     bool pressed = false, dragging = false, menuClick = false;
+};
+
+// TMJ-13: the XY pad, a child of its panel over spec.sections[0]. The mouse moves the base (X, Y, host parameters);
+// the point is where the audio puts it (MODULATED: the c.v. push it), or where the knobs do with the audio stopped.
+// Left click on the grab zone (radius 12 round the base): no jump; elsewhere the base jumps under the cursor; Shift:
+// no jump, x0.1, also halfway. Double click on the grab zone: the centre. Right click: the menu of X and of Y.
+// One host gesture of X and of Y per drag, closed by the destructor if a rebuild cuts it short.
+class MatrixPad : public juce::Component, public ReadoutSource
+{
+public:
+    MatrixPad (RackView& rv, WcProcessor& p, int inst);
+    ~MatrixPad() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseEnter (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    bool readoutText (ReadoutText&) override;
+    juce::Rectangle<float> readoutAnchor() override { return getLocalBounds().toFloat(); }
+    void refresh();                   // the rack's 30 Hz timer: repaint when the point or a knob moved
+    juce::Point<float> toPad (juce::Point<float> uv) const;   // 0..1 (v up) -> units in the pad
+    juce::Point<float> base() const;  // X, Y as the APVTS holds them, 0..1
+    juce::RangedAudioParameter& px;
+    juce::RangedAudioParameter& py;
+    const juce::String title;         // "Matrix A Pad"
+    static constexpr float kInset = 8.0f;   // the point travels in a square this far inside the face
+private:
+    RackView& rack;
+    WcProcessor& proc;
+    wc::M013& m;
+    std::atomic<float>* knobs[3] {};  // sens, scale x, scale y as the APVTS holds them
+    bool gesture = false, menuClick = false, fine = false, hoverGrab = false, firstGrab = false;
+    juce::Point<float> fromBase, fromMouse;   // where the drag (re)started: the base and the mouse, 0..1
+    juce::Point<float> shownP;
+    float shownK[5] {};               // x, y, sens, scale x, scale y as last painted
+    juce::Point<float> uvOf (juce::Point<float> local) const;
+    bool onGrab (juce::Point<float> local) const;
+    void set (juce::Point<float> uv);
+    void endGesture();
 };
 
 class ModulePanel;
@@ -210,6 +254,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void updateLeds();
     void touch218 (juce::Point<float> p, bool down);
+    std::unique_ptr<MatrixPad> pad;          // TMJ-13 only
     void toggleMatrixCell (int row, int col);   // 242: row 0 = stages, rows 1..3 = A B C
     juce::Component* controlFor (const juce::String& paramId) const;   // the knob, fader, lever or button showing it
     const int inst;
@@ -309,6 +354,9 @@ public:
     bool menuOpen = false;
     bool readoutSuppressed() const { return isDragging() || menuOpen; }
     void paramMenu (juce::Component& control, const juce::String& paramId, bool knob);
+    void padMenu (MatrixPad&);                     // the TMJ-13 pad: "Pad X" and "Pad Y", the knob menu of each (Y's IDs + 1000)
+    juce::PopupMenu buildPadMenu (MatrixPad&) const;
+    void padChoice (const juce::String& idX, const juce::String& idY, int result, bool waiting, juce::Component* pad);   // what its menu does
     // knob: Type and positions. cc: the parameter's learned CC (-1 none); waiting: it is the one waiting for a CC.
     // mod: the Modulation block of a knob or fader (none: no block). IDs 300 + i set the depth of row i, 332 + i
     // remove it, 364 + j modulate with the free source j, 399 remove them all
@@ -418,6 +466,7 @@ private:
 
     std::map<juce::String, std::pair<int, int>> currentSource;   // knob -> (inst, jack) chosen for it
     juce::Component* controlAt (juce::Point<float> screen) const;
+    ModMenu modMenuOf (const juce::String& paramId) const;   // the Modulation block of a knob's menu
     Drop dropKind (const juce::Component&) const;
     void holdAssignReadout();
     void showAssigned (juce::Component* control, const juce::String& paramId, int inst, int jack);   // "LFO: +25 %"

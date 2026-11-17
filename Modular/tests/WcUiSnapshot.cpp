@@ -6,6 +6,7 @@
 #include "modules/M281.h"
 #include "modules/MidiInterface.h"
 #include "modules/M111.h"
+#include "modules/M257.h"
 #include "ui/RackView.h"
 #include <set>
 #if JUCE_LINUX
@@ -1823,6 +1824,308 @@ int main (int argc, char** argv)
             ed->toFront (false);
         }
         std::printf ("SW-108: 8 levers left to right, each its own column, readouts and clicks, jacks by kind, captures, demo menu and tooltip  %s\n",
+                     bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
+        if (! bad.isEmpty()) return 1;
+    }
+
+    // ---- TMJ-13 Tactile Matrix: the panel (10 jacks, 8 numbered ASSIGN), the pad's gestures, host gestures, readouts,
+    //      menu, MIDI Learn, the point with the audio stopped and running; captures ----
+    {
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        const auto left = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+        const auto shift = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier);
+        auto at = [] (juce::Component& c, juce::Point<float> screen, juce::ModifierKeys mods, int clicks = 1)
+        {
+            const auto pos = c.getLocalPoint (nullptr, screen);
+            const auto now = juce::Time::getCurrentTime();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, clicks, false);
+        };
+        const int A = wc::kInst013, B = wc::kInst013 + 1;
+        WcProcessor proc;
+        proc.license.status = wc::License::Status::Licensed;
+        proc.prepareToPlay (48000.0, 512);
+        proc.resetAll();
+        for (int i : { A, B, wc::kInst259, wc::kInst257 }) proc.setPresent (i, true);
+        auto setP = [&proc] (const juce::String& id, float plain) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (plain)); };
+        auto raw = [&proc] (const juce::String& id) { return proc.apvts.getRawParameterValue (id)->load(); };
+        auto run = [&proc] (int blocks) { for (int b = 0; b < blocks; ++b) { juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer m; proc.processBlock (buf, m); } };
+        std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+        ed->setSize (1400, 1300);
+        pump (40);
+        wc::ui::RackView* rv = nullptr;
+        wc::ui::ValueReadout* ro = nullptr;
+        juce::Viewport* vp = nullptr;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* r = dynamic_cast<wc::ui::RackView*> (&c)) rv = r;
+            if (auto* r = dynamic_cast<wc::ui::ValueReadout*> (&c)) ro = r;
+            if (auto* v = dynamic_cast<juce::Viewport*> (&c)) if (vp == nullptr) vp = v;
+            for (auto* ch : c.getChildren()) walk (*ch);
+        };
+        walk (*ed);
+        auto panelOf = [&] (int inst) -> wc::ui::ModulePanel*
+        {
+            for (auto* c : rv->content.getChildren()) if (auto* p = dynamic_cast<wc::ui::ModulePanel*> (c)) if (p->inst == inst) return p;
+            return nullptr;
+        };
+        auto* pa = rv != nullptr ? panelOf (A) : nullptr;
+        auto* pb = rv != nullptr ? panelOf (B) : nullptr;
+        if (rv == nullptr || ro == nullptr || vp == nullptr || pa == nullptr || pb == nullptr || pa->pad == nullptr) { std::printf ("TMJ-13: no panel  BAD\n"); return 1; }
+        juce::StringArray bad;
+        auto check = [&] (bool ok, const juce::String& what) { if (! ok) bad.add (what); };
+        auto* m = proc.rack.m013 (0);
+        // 10 jacks (8 CV in, X and Y out), no jack for the nodes; 8 ASSIGN, "Matrix A 1".."8" with their number, jacks 2..9
+        int jacks = 0, knobs = 0, levers = 0;
+        juce::String names, caps;
+        std::vector<wc::ui::AssignButton*> assigns;
+        for (auto* ch : pa->getChildren())
+        {
+            jacks += dynamic_cast<wc::ui::JackComp*> (ch) != nullptr ? 1 : 0;
+            knobs += dynamic_cast<wc::ui::WcKnob*> (ch) != nullptr ? 1 : 0;
+            levers += dynamic_cast<wc::ui::ParamSwitch*> (ch) != nullptr ? 1 : 0;
+            if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) { assigns.push_back (a); names << a->name << "=" << a->jack << " "; caps << a->cap; }
+        }
+        juce::String namesB;
+        for (auto* ch : pb->getChildren()) if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) namesB << a->name << " ";
+        check (jacks == 10 && pa->jacks.size() == 10 && knobs == 3 && levers == 1 && pa->pad->getBounds() == juce::Rectangle<int> (96, 112, 192, 192),
+               "panel: " + juce::String (jacks) + " jacks, " + juce::String (knobs) + " knobs, " + juce::String (levers) + " levers, pad " + pa->pad->getBounds().toString());
+        check (names.trim() == "Matrix A 1=2 Matrix A 2=3 Matrix A 3=4 Matrix A 4=5 Matrix A 5=6 Matrix A 6=7 Matrix A 7=8 Matrix A 8=9" && caps == "12345678"
+               && namesB.contains ("Matrix B 3") && rv->sourceName (A, wc::M013::Out_Node1 + 2) == "Matrix A 3", "ASSIGN names: " + names + "| " + caps + " | " + namesB);
+        auto* pad = pa->pad.get();
+        auto uvAt = [&] (float u, float v) { return pad->localPointToGlobal (pad->toPad ({ u, v })); };
+        auto base = [&] { return juce::Point<float> (raw ("xy1_x"), raw ("xy1_y")); };
+        auto close = [] (juce::Point<float> a, juce::Point<float> b) { return a.getDistanceFrom (b) < 0.003f; };
+        // the host's gestures on X and Y, counted
+        struct Gestures : juce::AudioProcessorParameter::Listener
+        {
+            int begins = 0, ends = 0;
+            void parameterValueChanged (int, float) override {}
+            void parameterGestureChanged (int, bool starting) override { (starting ? begins : ends)++; }
+        } gx, gy;
+        auto* prmX = proc.apvts.getParameter ("xy1_x");
+        auto* prmY = proc.apvts.getParameter ("xy1_y");
+        prmX->addListener (&gx); prmY->addListener (&gy);
+        // a click away from the base: it jumps under the cursor and follows 1:1; Shift halfway: x0.1 from there, no
+        // jump; out of the pad: clipped. One begin / end of X and of Y for the whole drag
+        {
+            pad->mouseDown (at (*pad, uvAt (0.2f, 0.3f), left));
+            const auto jumped = base();
+            pad->mouseDrag (at (*pad, uvAt (0.3f, 0.4f), left));
+            const auto followed = base();
+            pad->mouseDrag (at (*pad, uvAt (0.3f, 0.4f), shift));
+            pad->mouseDrag (at (*pad, uvAt (0.5f, 0.4f), shift));
+            const auto fine = base();
+            pad->mouseDrag (at (*pad, uvAt (0.5f, 0.4f), left));   // Shift let go: 1:1 again from here, no jump
+            pad->mouseDrag (at (*pad, uvAt (3.0f, -2.0f), left));
+            const auto clipped = base();
+            pad->mouseUp (at (*pad, uvAt (3.0f, -2.0f), left));
+            check (close (jumped, { 0.2f, 0.3f }) && close (followed, { 0.3f, 0.4f }) && close (fine, { 0.32f, 0.4f }) && clipped == juce::Point<float> (1.0f, 0.0f)
+                   && gx.begins == 1 && gx.ends == 1 && gy.begins == 1 && gy.ends == 1,
+                   "drag: jump " + jumped.toString() + ", 1:1 " + followed.toString() + ", Shift " + fine.toString() + ", out " + clipped.toString()
+                   + ", gestures X " + juce::String (gx.begins) + "/" + juce::String (gx.ends) + " Y " + juce::String (gy.begins) + "/" + juce::String (gy.ends));
+        }
+        // on the grab zone (radius 12 round the base): no jump, the offset kept; Shift + click elsewhere: no jump
+        {
+            setP ("xy1_x", 0.5f); setP ("xy1_y", 0.5f);
+            const auto grab = pad->localPointToGlobal (pad->toPad ({ 0.5f, 0.5f }) + juce::Point<float> (8.0f, 0.0f));
+            pad->mouseDown (at (*pad, grab, left));
+            const auto still = base();
+            pad->mouseDrag (at (*pad, grab + juce::Point<float> (17.6f, 0.0f), left));
+            const auto moved = base();
+            pad->mouseUp (at (*pad, grab + juce::Point<float> (17.6f, 0.0f), left));
+            pad->mouseDown (at (*pad, uvAt (0.9f, 0.9f), shift));
+            const auto shifted = base();
+            pad->mouseUp (at (*pad, uvAt (0.9f, 0.9f), shift));
+            check (close (still, { 0.5f, 0.5f }) && close (moved, { 0.6f, 0.5f }) && close (shifted, moved), "grab: " + still.toString() + " -> " + moved.toString() + ", Shift click " + shifted.toString());
+        }
+        // destroyed halfway through a drag (a rebuild): its gestures are closed all the same
+        {
+            const int bx = gx.begins, ex = gx.ends, by = gy.begins, ey = gy.ends;
+            pad->mouseDown (at (*pad, uvAt (0.7f, 0.7f), left));
+            pad->mouseDrag (at (*pad, uvAt (0.75f, 0.7f), left));
+            rv->rebuild();
+            pump (20);
+            pa = panelOf (A);
+            pad = pa->pad.get();
+            check (gx.begins == bx + 1 && gx.ends == ex + 1 && gy.begins == by + 1 && gy.ends == ey + 1, "rebuild mid-drag: X " + juce::String (gx.begins - bx) + "/" + juce::String (gx.ends - ex)
+                   + " Y " + juce::String (gy.begins - by) + "/" + juce::String (gy.ends - ey));
+        }
+        // a double click on the base: the centre, in one gesture; a double click away: two jumps, no centre
+        {
+            auto dbl = [&] (juce::Point<float> uv)
+            {
+                const auto p = uvAt (uv.x, uv.y);
+                pad->mouseDown (at (*pad, p, left, 1)); pad->mouseUp (at (*pad, p, left, 1));
+                pad->mouseDown (at (*pad, p, left, 2)); pad->mouseUp (at (*pad, p, left, 2));
+                pad->mouseDoubleClick (at (*pad, p, left, 2));
+            };
+            setP ("xy1_x", 0.3f); setP ("xy1_y", 0.7f);
+            dbl ({ 0.3f, 0.7f });
+            const auto centred = base();
+            dbl ({ 0.9f, 0.2f });
+            const auto away = base();
+            check (close (centred, { 0.5f, 0.5f }) && close (away, { 0.9f, 0.2f }), "double click: on the base -> " + centred.toString() + ", away -> " + away.toString());
+        }
+        // the menu: "Matrix A Pad", "Pad X" and "Pad Y" with the knob menu of each, Y's IDs + 1000 and back to Y
+        {
+            const auto menu = rv->buildPadMenu (*pad);
+            juce::StringArray top, inX, inY;
+            for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+            {
+                const auto& item = it.getItem();
+                top.add (item.text);
+                if (item.subMenu != nullptr)
+                    for (juce::PopupMenu::MenuItemIterator s (*item.subMenu); s.next();)
+                        if (s.getItem().itemID > 0) (item.text == "Pad X" ? inX : inY).add (juce::String (s.getItem().itemID) + " " + s.getItem().text);
+            }
+            setP ("xy1_x", 0.8f); setP ("xy1_y", 0.9f);
+            rv->padChoice ("xy1_x", "xy1_y", 1002, false, pad);
+            const auto reset = base();
+            check (top.joinIntoString ("|") == "Matrix A Pad|Pad X|Pad Y" && inX.contains ("2 Reset to default") && inY.contains ("1002 Reset to default")
+                   && inX.contains ("200 MIDI Learn") && inY.contains ("1200 MIDI Learn") && close (reset, { 0.8f, 0.5f }),
+                   "menu: " + top.joinIntoString ("|") + " / X " + inX.joinIntoString (", ") + " / Y " + inY.joinIntoString (", ") + " / Reset Y -> " + reset.toString());
+        }
+        // the readout over the pad: the base, the node with the most volts (a tie: the lower number), the point when the
+        // c.v. took it away, nothing in reach, the CCs learned
+        auto text = [&] { wc::ui::ReadoutText t; pad->readoutText (t); return t; };
+        {
+            setP ("xy1_x", 0.5f); setP ("xy1_y", 0.5f); setP ("xy1_mode", 0.0f);
+            const auto centre = text();
+            setP ("xy1_sens", 0.0f);
+            const auto none = text();
+            setP ("xy1_sens", 0.5f);
+            proc.assignCc (74, "xy1_x"); proc.assignCc (75, "xy1_y");
+            const auto ccs = text();
+            proc.forgetCc ("xy1_x"); proc.forgetCc ("xy1_y");
+            const juce::String dot (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+            check (centre.name == "Matrix A Pad" && centre.value == "X 0.50" + dot + "Y 0.50" && centre.note == "Node 2: 3.4 V" && none.note == "No node in reach - turn SENSITIVITY up"
+                   && ccs.note == "X: CC 74" + dot + "Y: CC 75" + dot + "Node 2: 3.4 V", "readout: " + centre.name + " / " + centre.value + " / " + centre.note + " | " + none.note + " | " + ccs.note);
+        }
+        // the audio stopped (no block yet): moving the base moves the point and the lights (H5)
+        auto pixel = [&] (juce::Component& c, juce::Point<float> local)
+        {
+            auto* pn = c.getParentComponent();
+            const auto pt = pn->getLocalPoint (&c, local).roundToInt();
+            return pn->createComponentSnapshot (pn->getLocalBounds(), true, 1.0f).getPixelAt (pt.x, pt.y);
+        };
+        {
+            pad->mouseDown (at (*pad, uvAt (0.0f, 1.0f), left));
+            pad->mouseUp (at (*pad, uvAt (0.0f, 1.0f), left));
+            pump (80);
+            const auto dot = pixel (*pad, pad->toPad ({ 0.0f, 1.0f }));
+            const auto led = pixel (*pa, { 90.0f, 106.0f });
+            check (m->led (0) == 1.0f && dot.getBrightness() > 0.85f && led.getRed() > 200 && led.getGreen() < 120, "audio stopped: led " + juce::String (m->led (0)) + ", point "
+                   + dot.toDisplayString (false) + ", LED " + led.toDisplayString (false));
+        }
+        // MIDI Learn of Pad X: the pad is its control (H4), the readout says so over it
+        {
+            rv->startLearn ("xy1_x");
+            pump (40);
+            check (rv->controlFor ("xy1_x") == pad && rv->controlFor ("xy1_y") == pad && ro->isHolding() && ro->targetComponent() == pad
+                   && ro->current().value == juce::String (juce::CharPointer_UTF8 ("Move a MIDI control\xe2\x80\xa6")) && ro->current().name == "Matrix A Pad X",
+                   "MIDI Learn: " + ro->current().name + " / " + ro->current().value);
+        }
+        const juce::File shots = out.getChildFile ("captures");
+        shots.createDirectory();
+        auto save = [&] (const juce::Image& img, const juce::String& name)
+        {
+            auto file = shots.getChildFile (name);
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        auto shoot = [&] (juce::Component& c, int margin, float scale) { return ed->createComponentSnapshot (ed->getLocalArea (&c, c.getLocalBounds()).expanded (margin).getIntersection (ed->getLocalBounds()), true, scale); };
+        auto show = [&] (juce::Component& c, float z)
+        {
+            rv->setZoom (z);
+            pump (20);
+            vp->setViewPosition (juce::roundToInt ((float) c.getX() * z) - 10, juce::roundToInt ((float) c.getY() * z) - 10);
+            for (auto* ch : rv->content.getChildren()) ch->repaint();
+        };
+        show (*pa, 1.0f); pump (60);
+        save (shoot (*pad, 30, 2.0f), "tmj_learn_pad_x.png");
+        rv->cancelLearn();
+        pump (20);
+        // captures. 1: the panel in both skins at 100 % and 50 %, as the boceto (TACTILE, the point at (0.80, 0.68),
+        // node 3 assigned)
+        setP ("xy1_x", 0.8f); setP ("xy1_y", 0.68f); setP ("xy1_mode", 0.0f);
+        proc.assign (A, wc::M013::Out_Node1 + 2, "a_timbre", 0.25f);
+        for (float z : { 1.0f, 0.5f })
+            for (int sk : { 0, 1 })
+            {
+                wc::ui::skin::current = sk;
+                show (*pa, z);
+                pump (60);
+                const auto area = ed->getLocalArea (pa, pa->getLocalBounds()).expanded (8).getIntersection (ed->getLocalBounds());
+                save (ed->createComponentSnapshot (area, true, 1.0f), juce::String ("tmj_panel_") + (sk ? "neon" : "classic") + "_" + juce::String (juce::roundToInt (z * 100)) + ".png");
+            }
+        wc::ui::skin::current = 0;
+        show (*pa, 1.0f); pump (60);
+        // 2: the point on node 3
+        setP ("xy1_x", 1.0f); setP ("xy1_y", 1.0f);
+        pump (80);
+        check (m->led (2) == 1.0f, "point on node 3: led " + juce::String (m->led (2)));
+        for (auto* ch : pa->getChildren()) if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) if (a->cap == "3") save (shoot (*a, 70, 2.0f), "tmj_point_on_node3.png");
+        // 3: MODULATED with 5 V on CV 3 (the 257's offset): base ring at (0.55, 0.45), SENSITIVITY ring, SCALE 75 % x 60 %.
+        //    The audio runs right up to the capture (100 ms without it and the panel shows the knobs only)
+        setP ("xy1_x", 0.55f); setP ("xy1_y", 0.45f); setP ("xy1_mode", 1.0f); setP ("xy1_scalex", 0.75f); setP ("xy1_scaley", 0.6f);
+        setP ("xy1_sens", (0.55f - 0.15f) / 1.35f); setP ("vp_off1", 0.5f); setP ("vp_k1", 0.0f);
+        proc.connect (wc::kInst257, wc::M257::Out_1, A, wc::M013::inCv (3));
+        for (int i = 0; i < 6; ++i) { run (4); pump (15); }
+        float u = 0.0f, v = 0.0f, volts[8];
+        m->view (u, v, volts);
+        const bool pushed = std::abs (u - (0.5375f + 0.5f * (1.0f - 0.5375f))) < 0.01f && std::abs (v - (0.47f + 0.5f * 0.53f)) < 0.01f;
+        run (2);
+        save (shoot (*pad, 50, 2.0f), "tmj_modulated_cv.png");
+        check (pushed, "MODULATED with 5 V on CV 3: the point at " + juce::Point<float> (u, v).toString() + " (0.77, 0.74)");
+        // and its readout, hovered
+        {
+            run (2);
+            const auto t = text();
+            check (t.note.startsWith ("Point at X 0.77") && t.note.endsWith ("node 4: 3.5 V"), "readout with the point away: " + t.note);   // node 4 is nearer than 3 there
+        }
+        proc.disconnectInput (A, wc::M013::inCv (3));
+        // 4: node 3 assigned to the 259's TIMBRE: its ring and the orange ASSIGN; "Matrix A 3" in the knob's readout
+        wc::ui::WcKnob* timbre = nullptr;
+        if (auto* p259 = panelOf (wc::kInst259)) for (auto* c : p259->getChildren()) if (auto* k = dynamic_cast<wc::ui::WcKnob*> (c)) if (k->paramId == "a_timbre") timbre = k;
+        if (timbre != nullptr)
+        {
+            setP ("xy1_mode", 0.0f); setP ("xy1_scalex", 1.0f); setP ("xy1_scaley", 1.0f); setP ("xy1_sens", 0.5f); setP ("a_timbre", 0.3f);
+            setP ("xy1_x", 0.8f); setP ("xy1_y", 0.9f);
+            show (*timbre, 1.0f);
+            for (int i = 0; i < 6; ++i) { run (4); pump (15); }
+            save (shoot (*timbre, 40, 2.0f), "tmj_node3_on_timbre.png");
+            float lo, hi; bool cl, ch;
+            rv->modRange (*proc.apvts.getParameter ("a_timbre"), false, lo, hi, cl, ch);
+            check (std::abs (lo - 0.3f) < 1.0e-5f && std::abs (hi - 0.55f) < 1.0e-5f, "range of node 3 at +25 %: " + juce::String (lo, 3) + " .. " + juce::String (hi, 3) + " (0.3 .. 0.55, upward only)");
+        }
+        check (timbre != nullptr, "no TIMBRE knob");
+        proc.unassignSource (A, wc::M013::Out_Node1 + 2);
+        // dropping "Matrix A 3" on a knob: the row is node 3 (jack 4), named "Matrix A 3"; B's names its own
+        {
+            wc::ui::AssignButton* a3 = nullptr;
+            for (auto* ch : pa->getChildren()) if (auto* a = dynamic_cast<wc::ui::AssignButton*> (ch)) if (a->cap == "3") a3 = a;
+            if (a3 != nullptr && timbre != nullptr)
+            {
+                show (*a3, 1.0f); pump (20);
+                const auto from = a3->localPointToGlobal (juce::Point<float> (13.0f, 13.0f));
+                a3->mouseDown (at (*a3, from, left));
+                a3->mouseDrag (at (*a3, from + juce::Point<float> (6.0f, 0.0f), left));
+                show (*timbre, 1.0f); pump (20);
+                const auto to = timbre->localPointToGlobal (timbre->getLocalBounds().toFloat().getCentre());
+                a3->mouseDrag (at (*a3, to, left));
+                a3->mouseUp (at (*a3, to, left));
+                pump (20);
+                const auto& rows = proc.getAssignments();
+                check (rows.size() == 1 && rows[0].srcInst == A && rows[0].srcJack == 4 && rv->sourceName (A, 4) == "Matrix A 3" && rv->sourceName (B, 4) == "Matrix B 3",
+                       "drop of Matrix A 3: " + juce::String ((int) rows.size()) + " rows, jack " + (rows.empty() ? juce::String ("-") : juce::String (rows[0].srcJack)));
+                proc.unassignSource (A, 4);
+            }
+            check (a3 != nullptr, "no ASSIGN 3");
+        }
+        prmX->removeListener (&gx); prmY->removeListener (&gy);
+        std::printf ("TMJ-13: 10 jacks, 8 numbered ASSIGN, pad (jump, 1:1, Shift, clip, grab, double click, host gestures, rebuild), menu, readouts, audio stopped, MIDI Learn, MODULATED, range, drop, captures  %s\n",
                      bad.isEmpty() ? "ok" : ("BAD: " + bad.joinIntoString ("; ")).toRawUTF8());
         if (! bad.isEmpty()) return 1;
     }

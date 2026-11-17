@@ -383,6 +383,8 @@ void AssignButton::paint (juce::Graphics& g)
     const float r = pressed ? 7.5f : 9.0f;
     g.setColour (pressed ? colour.withMultipliedBrightness (0.85f) : colour);
     g.fillEllipse (c.x - r, c.y - r, 2.0f * r, 2.0f * r);
+    if (cap.isNotEmpty())   // decision 7 (E3): the node number on the button
+        drawItalic (g, cap, { c.x - 13.0f, c.y + 0.3f - 11.0f, 26.0f, 22.0f }, juce::Justification::centred, WcLook::title (11.0f), juce::Colour (0xff121316));
     if (isMouseOver())
     {
         g.setColour (juce::Colours::white.withAlpha (0.25f));
@@ -421,6 +423,203 @@ void AssignButton::mouseUp (const juce::MouseEvent& e)
     pressed = dragging = false;
     repaint();
     if (click) rack.assignClick (*this);
+}
+
+// =================================================================================================
+// MatrixPad (TMJ-13)
+// =================================================================================================
+MatrixPad::MatrixPad (RackView& rv, WcProcessor& p, int inst)
+    : px (*p.apvts.getParameter (instPrefix (inst) + "x")), py (*p.apvts.getParameter (instPrefix (inst) + "y")), title (instName (inst) + " Pad"),
+      rack (rv), proc (p), m (*p.rack.m013 (subIndex (inst)))
+{
+    int i = 0;
+    for (auto* s : { "sens", "scalex", "scaley" }) knobs[i++] = p.apvts.getRawParameterValue (instPrefix (inst) + s);
+    setMouseCursor (juce::MouseCursor::CrosshairCursor);
+}
+
+MatrixPad::~MatrixPad() { endGesture(); }
+
+void MatrixPad::endGesture()
+{
+    if (! gesture) return;
+    gesture = false;
+    px.endChangeGesture();
+    py.endChangeGesture();
+}
+
+juce::Point<float> MatrixPad::toPad (juce::Point<float> uv) const
+{
+    const float side = (float) getWidth() - 2.0f * kInset;
+    return { kInset + side * uv.x, kInset + side * (1.0f - uv.y) };
+}
+
+juce::Point<float> MatrixPad::uvOf (juce::Point<float> l) const
+{
+    const float side = (float) getWidth() - 2.0f * kInset;
+    return { (l.x - kInset) / side, 1.0f - (l.y - kInset) / side };
+}
+
+juce::Point<float> MatrixPad::base() const { return { px.convertFrom0to1 (px.getValue()), py.convertFrom0to1 (py.getValue()) }; }
+
+bool MatrixPad::onGrab (juce::Point<float> l) const
+{
+    return l.getDistanceFrom (toPad (base())) <= juce::jmax (12.0f, 8.0f / rack.getZoom());   // never less than 8 px on screen
+}
+
+void MatrixPad::set (juce::Point<float> uv)
+{
+    px.setValueNotifyingHost (px.convertTo0to1 (juce::jlimit (0.0f, 1.0f, uv.x)));
+    py.setValueNotifyingHost (py.convertTo0to1 (juce::jlimit (0.0f, 1.0f, uv.y)));
+}
+
+void MatrixPad::mouseDown (const juce::MouseEvent& e)
+{
+    menuClick = e.mods.isPopupMenu();
+    if (menuClick) { rack.padMenu (*this); return; }
+    const bool grab = onGrab (e.position);
+    if (e.getNumberOfClicks() == 1) firstGrab = grab;   // a double click centres only if it began on the base
+    endGesture();
+    gesture = true;
+    px.beginChangeGesture();
+    py.beginChangeGesture();
+    fine = e.mods.isShiftDown();
+    fromMouse = uvOf (e.position);
+    if (! grab && ! fine) set (fromMouse);   // the base jumps under the cursor and follows it 1:1
+    fromBase = base();
+    if (auto* r = RackView::readoutFor (*this)) r->dragStart (*this);
+    repaint();
+}
+
+void MatrixPad::mouseDrag (const juce::MouseEvent& e)
+{
+    if (menuClick || ! gesture) return;
+    const auto uv = uvOf (e.position);
+    if (e.mods.isShiftDown() != fine) { fine = e.mods.isShiftDown(); fromBase = base(); fromMouse = uv; }   // the new scale from here, no jump
+    set (fromBase + (uv - fromMouse) * (fine ? 0.1f : 1.0f));
+    if (auto* r = RackView::readoutFor (*this)) r->refresh();
+    repaint();
+}
+
+void MatrixPad::mouseUp (const juce::MouseEvent& e)
+{
+    if (menuClick) { menuClick = false; return; }
+    endGesture();
+    if (auto* r = RackView::readoutFor (*this)) r->dragEnd (*this, getLocalBounds().contains (e.getPosition()));
+}
+
+void MatrixPad::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || ! firstGrab) return;   // away from the base: two jumps, no centre
+    px.beginChangeGesture(); py.beginChangeGesture();
+    set ({ 0.5f, 0.5f });
+    px.endChangeGesture(); py.endChangeGesture();
+    repaint();
+}
+
+void MatrixPad::mouseEnter (const juce::MouseEvent& e) { mouseMove (e); if (auto* r = RackView::readoutFor (*this)) r->hoverEnter (*this); }
+
+void MatrixPad::mouseMove (const juce::MouseEvent& e)
+{
+    const bool g = onGrab (e.position);
+    if (g != hoverGrab) { hoverGrab = g; repaint(); }
+    setMouseCursor (g ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::CrosshairCursor);
+    if (auto* r = RackView::readoutFor (*this)) r->hoverMove (*this);
+}
+
+void MatrixPad::mouseExit (const juce::MouseEvent&)
+{
+    if (hoverGrab) { hoverGrab = false; repaint(); }
+    if (auto* r = RackView::readoutFor (*this)) r->hoverExit (*this);
+}
+
+bool MatrixPad::readoutText (ReadoutText& t)
+{
+    const juce::String dot (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+    float u, v, volts[wc::M013::kNodes];
+    m.view (u, v, volts);
+    int best = 0;
+    for (int n = 1; n < wc::M013::kNodes; ++n) if (volts[n] > volts[best]) best = n;   // a tie: the lower number
+    t.name = title;
+    t.value = "X " + px.getCurrentValueAsText() + dot + "Y " + py.getCurrentValueAsText();
+    const auto node = "ode " + juce::String (best + 1) + ": " + juce::String (volts[best], 1) + " V";
+    if (volts[best] < 0.05f) t.note = "No node in reach - turn SENSITIVITY up";
+    else if (toPad ({ u, v }).getDistanceFrom (toPad (base())) > 3.0f)
+        t.note = "Point at X " + juce::String (u, 2) + dot + "Y " + juce::String (v, 2) + dot + "n" + node;
+    else t.note = "N" + node;
+    juce::String ccs;
+    for (auto* p : { &px, &py })
+        if (const int cc = proc.ccOf (p->getParameterID()); cc >= 0) ccs << (p == &px ? "X: CC " : "Y: CC ") << cc << dot;
+    t.note = ccs + t.note;
+    t.warn = false;
+    return true;
+}
+
+void MatrixPad::refresh()
+{
+    float u, v, volts[wc::M013::kNodes];
+    m.view (u, v, volts);
+    const float k[5] { px.getValue(), py.getValue(), knobs[0]->load(), knobs[1]->load(), knobs[2]->load() };
+    if (juce::Point<float> (u, v) == shownP && std::equal (k, k + 5, shownK)) return;
+    repaint();
+}
+
+// pad.py of the visual auditor: the scope's bezel colours, its graticule on the travel square, axis heads; inside, the
+// SCALE rectangle (the travel the base has), the base ring where the mouse left it (only when the point is away from
+// it), the SENSITIVITY ring round the point (the reach of a node), the point. The face clips them all.
+void MatrixPad::paint (juce::Graphics& g)
+{
+    float u, v, volts[wc::M013::kNodes];
+    m.view (u, v, volts);
+    shownP = { u, v };
+    shownK[0] = px.getValue(); shownK[1] = py.getValue();
+    for (int i = 0; i < 3; ++i) shownK[i + 2] = knobs[i]->load();
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (juce::Colour (0xff17181c));
+    g.fillRect (r);
+    g.setColour (juce::Colour (0xff3a3d44));
+    g.drawRect (r, 1.0f);
+    const auto t = r.reduced (kInset);
+    for (int i = 0; i <= 8; ++i)
+    {
+        g.setColour (col::textDim.withAlpha (i == 4 ? 0.45f : 0.22f));
+        const float w = i == 4 ? 1.1f : 0.6f, gx = t.getX() + t.getWidth() * (float) i / 8.0f, gy = t.getY() + t.getHeight() * (float) i / 8.0f;
+        g.drawLine (gx, t.getY(), gx, t.getBottom(), w);
+        g.drawLine (t.getX(), gy, t.getRight(), gy, w);
+    }
+    const auto c = r.getCentre();
+    juce::Path heads;   // x grows to the right, y upward; 7 x 7 as drawArrowLine
+    heads.addTriangle (r.getRight() - 2.0f, c.y, r.getRight() - 9.0f, c.y - 3.5f, r.getRight() - 9.0f, c.y + 3.5f);
+    heads.addTriangle (c.x, r.getY() + 2.0f, c.x - 3.5f, r.getY() + 9.0f, c.x + 3.5f, r.getY() + 9.0f);
+    g.setColour (col::textDim.withAlpha (0.45f));
+    g.fillPath (heads);
+    drawItalic (g, "x", { r.getRight() - 18.0f, c.y - 18.0f, 20.0f, 18.0f }, juce::Justification::centred, WcLook::label (9.0f), col::textDim.withAlpha (0.7f));
+    drawItalic (g, "y", { c.x - 1.0f, r.getY() - 1.0f, 20.0f, 18.0f }, juce::Justification::centred, WcLook::label (9.0f), col::textDim.withAlpha (0.7f));
+    const float sx = shownK[3], sy = shownK[4];
+    const auto s0 = toPad ({ 0.5f - 0.5f * sx, 0.5f - 0.5f * sy }), s1 = toPad ({ 0.5f + 0.5f * sx, 0.5f + 0.5f * sy });
+    g.setColour (col::textDim.withAlpha (0.6f));
+    const float dashes[] = { 4.0f, 3.0f };
+    for (auto l : { juce::Line<float> (s0.x, s1.y, s1.x, s1.y), juce::Line<float> (s1.x, s1.y, s1.x, s0.y), juce::Line<float> (s1.x, s0.y, s0.x, s0.y), juce::Line<float> (s0.x, s0.y, s0.x, s1.y) })
+        g.drawDashedLine (l, dashes, 2, 1.0f);
+    const auto p = toPad (shownP), b = toPad (base());
+    if (p.getDistanceFrom (b) > 3.0f)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawEllipse (juce::Rectangle<float> (16.0f, 16.0f).withCentre (b), 1.5f);
+    }
+    const float reach = (0.15f + 1.35f * shownK[2]) * t.getWidth();   // as M013::compute
+    g.setColour (col::accent.withAlpha (0.35f));
+    g.drawEllipse (juce::Rectangle<float> (2.0f * reach, 2.0f * reach).withCentre (p), 1.0f);
+    g.setColour (col::accent.withAlpha (0.10f));
+    g.fillEllipse (juce::Rectangle<float> (16.0f, 16.0f).withCentre (p));
+    g.setColour (col::accent.withAlpha (0.28f));
+    g.fillEllipse (juce::Rectangle<float> (14.0f, 14.0f).withCentre (p));
+    g.setColour (col::text);
+    g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre (p));
+    if (hoverGrab)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.drawEllipse (juce::Rectangle<float> (24.0f, 24.0f).withCentre (b), 1.5f);
+    }
 }
 
 // =================================================================================================
@@ -676,7 +875,9 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
     {
         if (c.style == CtrlStyle::Assign)
         {
-            auto b = std::make_unique<AssignButton> (rack, inst, c.jack, typeOfInst (inst) == MT_111 ? instName (inst) : juce::String (c.label));   // "LFO A" (H3)
+            const auto t = typeOfInst (inst);
+            auto b = std::make_unique<AssignButton> (rack, inst, c.jack, t == MT_111 ? instName (inst) : (t == MT_013 ? instName (inst) + " " + c.label : juce::String (c.label)));   // "LFO A", "Matrix A 3" (H3, H8)
+            if (t == MT_013) b->cap = c.label;
             b->setBounds ((int) c.x - 13, (int) c.y - 13, 26, 26);
             addAndMakeVisible (*b);
             assigns.push_back (std::move (b));
@@ -956,6 +1157,13 @@ ModulePanel::ModulePanel (RackView& rv, WcProcessor& p, int i)
         addAndMakeVisible (*jc);
         jacks.push_back (std::move (jc));
     }
+    if (typeOfInst (inst) == MT_013)
+    {
+        const auto& sc = spec.sections[0];
+        pad = std::make_unique<MatrixPad> (rack, proc, inst);
+        pad->setBounds ((int) sc.x, (int) sc.y, (int) sc.w, (int) sc.h);
+        addAndMakeVisible (*pad);
+    }
     if (isRemovable (i))
     {
         removeButton.setTooltip ("Remove this module from the rack");
@@ -1055,6 +1263,7 @@ juce::Component* ModulePanel::controlFor (const juce::String& id) const
     for (auto& k : sliders) if (k->param != nullptr && k->paramId == id) return k.get();
     for (auto& w : switches) if (w->paramId() == id) return w.get();
     for (auto& b : buttons) if (b->paramId() == id) return b.get();
+    if (pad != nullptr && (pad->px.getParameterID() == id || pad->py.getParameterID() == id)) return pad.get();   // H4
     return nullptr;
 }
 
@@ -1098,6 +1307,7 @@ void ModulePanel::paintMidi (juce::Graphics& g)
     for (auto& k : sliders) if (k->param != nullptr) mark (*k, *k, k->paramId, k->isRotary());
     for (auto& w : switches) mark (*w, *w, w->paramId(), false);
     for (auto& b : buttons) mark (*b, *b, b->paramId(), false);
+    if (pad != nullptr) for (auto* p : { &pad->px, &pad->py }) mark (*pad, *pad, p->getParameterID(), false);   // shortcut: X's and Y's dots share the corner, split them if both are learned often
 }
 
 // Modulation on the panel: an arc on the circle kr + 5 around a modulated knob, from the lowest value it reaches to
@@ -1684,7 +1894,7 @@ void ModulePanel::paint (juce::Graphics& g)
     for (auto& t : spec.texts)
     {
         juce::String txt (t.text);
-        if (t.style == 4 && isRemovable (inst) && (typeOfInst (inst) == MT_281 || typeOfInst (inst) == MT_258 || typeOfInst (inst) == MT_259 || typeOfInst (inst) == MT_292 || typeOfInst (inst) == MT_111 || typeOfInst (inst) == MT_108)) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
+        if (t.style == 4 && isRemovable (inst) && (typeOfInst (inst) == MT_281 || typeOfInst (inst) == MT_258 || typeOfInst (inst) == MT_259 || typeOfInst (inst) == MT_292 || typeOfInst (inst) == MT_111 || typeOfInst (inst) == MT_108 || typeOfInst (inst) == MT_013)) txt << "  " << juce::String::charToString ((juce::juce_wchar) ('A' + subIndex (inst)));
         const auto f = t.style == 0 ? WcLook::label (t.size) : WcLook::title (t.size);
         const float w = juce::GlyphArrangement::getStringWidth (f, txt) + 10.0f;
         juce::Rectangle<float> box;
@@ -1859,6 +2069,7 @@ void ModulePanel::updateLeds()
         }
     }
     const auto type = typeOfInst (inst);
+    if (pad != nullptr) pad->refresh();
     if (! spec.leds.empty())
     {
         auto* m = proc.rack.module (inst);
@@ -2423,6 +2634,7 @@ float RackView::midiMarkMargin (juce::Component& c) const
     if (auto* k = dynamic_cast<WcKnob*> (&c)) id = k->param != nullptr ? k->paramId : juce::String();
     else if (auto* w = dynamic_cast<ParamSwitch*> (&c)) id = w->paramId();
     else if (auto* b = dynamic_cast<ParamButton*> (&c)) id = b->paramId();
+    else if (auto* pd = dynamic_cast<MatrixPad*> (&c)) id = learnId == pd->py.getParameterID() || proc.ccOf (pd->py.getParameterID()) >= 0 ? pd->py.getParameterID() : pd->px.getParameterID();
     float alpha = 0.0f;
     if (id.isEmpty() || (! learnRing (id, alpha) && proc.ccOf (id) < 0 && modsOf (id).empty())) return 0.0f;
     return juce::jmax (6.0f, 6.0f * zoom);   // the ring's outer edge, 6 px off the control (it keeps its size below 100 %); the modulation arc too
@@ -2569,21 +2781,7 @@ void RackView::paramMenu (juce::Component& c, const juce::String& id, bool knob)
     // a menu ends a MIDI Learn; the waiting control's own menu offers to cancel it (and ends it when it closes)
     if (learnId != id) cancelLearn();
     const bool waiting = learnId == id;
-    ModMenu mod;
-    if (knob)   // a knob or a fader: its Modulation block
-    {
-        mod.can = proc.isModulatable (id);
-        const auto rows = modsOf (id);
-        const auto* cur = currentMod (id);
-        for (size_t i = 0; i < rows.size() && i < 32; ++i)   // shortcut: 32 rows shown per knob, past that it needs a submenu
-        {
-            mod.names.add (sourceName (rows[i].srcInst, rows[i].srcJack));
-            mod.depths.add (depthText (rows[i].depth));
-            if (cur != nullptr && rows[i] == *cur) mod.current = (int) i;
-        }
-        for (auto* b : sourcesFree (id)) mod.with.add (b->name);
-        mod.full = (int) proc.getAssignments().size() >= wc::Rack::kMaxAssignments;
-    }
+    const auto mod = knob ? modMenuOf (id) : ModMenu();   // a knob or a fader: its Modulation block
     auto m = buildParamMenu (*p, knob, proc.ccOf (id), waiting, knob ? &mod : nullptr);
     m.setLookAndFeel (&c.getLookAndFeel());
     menuOpen = true;
@@ -2596,6 +2794,62 @@ void RackView::paramMenu (juce::Component& c, const juce::String& id, bool knob)
         self->menuOpen = false;
         self->menuChoice (id, r, waiting, ctl.getComponent());
     });
+}
+
+RackView::ModMenu RackView::modMenuOf (const juce::String& id) const
+{
+    ModMenu mod;
+    mod.can = proc.isModulatable (id);
+    const auto rows = modsOf (id);
+    const auto* cur = currentMod (id);
+    for (size_t i = 0; i < rows.size() && i < 32; ++i)   // shortcut: 32 rows shown per knob, past that it needs a submenu
+    {
+        mod.names.add (sourceName (rows[i].srcInst, rows[i].srcJack));
+        mod.depths.add (depthText (rows[i].depth));
+        if (cur != nullptr && rows[i] == *cur) mod.current = (int) i;
+    }
+    for (auto* b : sourcesFree (id)) mod.with.add (b->name);
+    mod.full = (int) proc.getAssignments().size() >= wc::Rack::kMaxAssignments;
+    return mod;
+}
+
+// the pad's menu: the knob menu of X and of Y in two submenus; Y's IDs are moved up by 1000 (every ID is below 1000)
+juce::PopupMenu RackView::buildPadMenu (MatrixPad& pad) const
+{
+    const auto idX = pad.px.getParameterID(), idY = pad.py.getParameterID();
+    const auto modX = modMenuOf (idX), modY = modMenuOf (idY);
+    auto mx = buildParamMenu (pad.px, true, proc.ccOf (idX), learnId == idX, &modX);
+    auto my = buildParamMenu (pad.py, true, proc.ccOf (idY), learnId == idY, &modY);
+    for (juce::PopupMenu::MenuItemIterator it (my, true); it.next();) if (it.getItem().itemID > 0) it.getItem().itemID += 1000;
+    juce::PopupMenu m;
+    m.addSectionHeader (pad.title);
+    m.addSubMenu ("Pad X", mx);
+    m.addSubMenu ("Pad Y", my);
+    return m;
+}
+
+void RackView::padMenu (MatrixPad& pad)
+{
+    if (learnId != pad.px.getParameterID() && learnId != pad.py.getParameterID()) cancelLearn();
+    const bool waiting = learning();
+    auto m = buildPadMenu (pad);
+    m.setLookAndFeel (&pad.getLookAndFeel());
+    menuOpen = true;
+    if (readout != nullptr) readout->refresh();
+    juce::Component::SafePointer<RackView> self (this);
+    juce::Component::SafePointer<juce::Component> ctl (&pad);
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [self, ctl, idX = pad.px.getParameterID(), idY = pad.py.getParameterID(), waiting] (int r)
+    {
+        if (self == nullptr) return;
+        self->menuOpen = false;
+        self->padChoice (idX, idY, r, waiting, ctl.getComponent());
+    });
+}
+
+void RackView::padChoice (const juce::String& idX, const juce::String& idY, int r, bool waiting, juce::Component* pad)
+{
+    if (r > 1000) menuChoice (idY, r - 1000, waiting, pad);
+    else menuChoice (idX, r, waiting, pad);   // 0: closed (a waiting learn ends, as on a knob)
 }
 
 void RackView::menuChoice (const juce::String& id, int r, bool waiting, juce::Component* ctl)
