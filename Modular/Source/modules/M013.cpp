@@ -63,8 +63,8 @@ void M013::view (float& pu, float& pv, float* volts) const
     const auto now = juce::Time::getMillisecondCounter();
     const auto b = blocks.load (std::memory_order_relaxed);
     if (b != seenBlocks) { seenBlocks = b; seenAt = now; }
-    // shortcut: a host block longer than 100 ms (8192 samples at 44.1 kHz) makes the panel flicker between the audio and the knobs, measure the block length if it is seen
-    if (now - seenAt > 100)
+    // shortcut: a host block longer than 250 ms (16384 samples at 44.1 kHz) makes the panel flicker between the audio and the knobs, measure the block length if it is seen
+    if (now - seenAt > 250)
     {
         compute (knob[0]->load(), knob[1]->load(), knob[2]->load(), knob[3]->load(), knob[4]->load(), nullptr, pu, pv, volts);
         return;

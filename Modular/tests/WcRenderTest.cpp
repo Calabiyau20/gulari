@@ -2901,7 +2901,7 @@ int main (int argc, char** argv)
             good &= t;
         }
 
-        // 13. with the audio stopped (no block for 100 ms) the panel's point and lights follow the knobs, without the
+        // 13. with the audio stopped (no block for 250 ms) the panel's point and lights follow the knobs, without the
         //     c.v.; with the audio running, what the audio does
         {
             WcProcessor p; fresh (p);
@@ -2913,11 +2913,11 @@ int main (int argc, char** argv)
             once (p, { { 5, 10.0f } }, 64);   // CV 5 pulls it to node 5 (a tick publishes what the one before left)
             m->view (u, v, volts);
             const bool running = u == 1.0f && v == 0.0f && volts[4] == 10.0f;
-            juce::Thread::sleep (150);
+            juce::Thread::sleep (300);
             setP (p, "xy1_x", 1.0f);
             m->view (u, v, volts);
             const bool after = u == 1.0f && v == 1.0f && volts[2] == 10.0f && m->led (4) == 0.0f;
-            std::printf ("  audio stopped: point follows the knobs %s, running follows the audio %s, 150 ms later the knobs again %s %s\n", stopped ? "yes" : "NO",
+            std::printf ("  audio stopped: point follows the knobs %s, running follows the audio %s, 300 ms later the knobs again %s %s\n", stopped ? "yes" : "NO",
                          running ? "yes" : "NO", after ? "yes" : "NO", stopped && running && after ? "ok" : "BAD");
             good &= stopped && running && after;
         }

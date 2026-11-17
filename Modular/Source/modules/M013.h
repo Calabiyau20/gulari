@@ -31,7 +31,7 @@ public:
     void tick (const float* in, float* out) noexcept override;
     float led (int id) const noexcept override;   // node id + 1, its volts / 10
 
-    // UI thread: the point and the node voltages as the audio left them, or, when it has not run for 100 ms (a host
+    // UI thread: the point and the node voltages as the audio left them, or, when it has not run for 250 ms (a host
     // with the transport stopped), from the knobs without c.v. (H5)
     void view (float& pu, float& pv, float* volts) const;
 
