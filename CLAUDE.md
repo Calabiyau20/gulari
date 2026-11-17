@@ -60,8 +60,8 @@ Otros targets: `WcPresetGen` (la librería de fábrica), `WcPackGen` (packs de p
 
 Ranuras en `Modular/Source/rack/Rack.h`: `kInstMidi`, `kInst111` (×8), `218`, `242`, `245`, `248`,
 `250`, `252`, `266`, `230`, `264`, `257`, `281` (×2), `284`, `258` (×2), `259` (×4), `285`, `267`,
-`291`, `296`, `277`, `292` (×2), `275`, `207`, `666` (×4), `kInstOutput`. Las cantidades están en
-`WcParams.h` (`kMax259 = 4`, `kMax111 = 8`…).
+`291`, `296`, `277`, `292` (×2), `275`, `kInst108` (×4), `207`, `666` (×4), `kInstOutput`. Las
+cantidades están en `WcParams.h` (`kMax259 = 4`, `kMax111 = 8`, `kMax108 = 4`…).
 
 **Agregar ranuras corre los números de todas las de atrás.** Cualquier cosa que use el número de
 ranura como dato (la semilla del pincelado de los paneles, por ejemplo) cambia en silencio: hay que
@@ -83,10 +83,10 @@ Prefijo de parámetros e `instKey` por ranura — **no son el número del módul
 | 257 | `vp_` | 292 A/B | `la_` / `lb_` |
 | 285 | `fs_` | 666 ×4 | `s1_`…`s4_` |
 | 207 | `mx_` | salida | `out_` |
-| LFO A-H | `lf1_`…`lf8_` | | |
+| LFO A-H | `lf1_`…`lf8_` | Switches A-D | `sw1_`…`sw4_` (`swN_ch1`…`ch8`) |
 
 Helpers: `prefix259(i)`, `prefix281(i)`, `prefix292(i)`, `prefix258(i)`, `prefix666(i)`,
-`prefixLfo(i)`.
+`prefixLfo(i)`, `prefix108(i)`.
 
 **Parámetros nuevos van siempre AL FINAL de `createLayout`.** Hay hosts que indexan por posición y
 la tabla de modulación guarda el índice del parámetro: insertar en el medio corre todos los de atrás.
@@ -127,7 +127,7 @@ Las que costaron compilaciones. Ante la duda, `--params`.
 ## Comportamientos que no se ven leyendo el código
 
 **Modo demo.** Sin archivo de licencia válido, `setPresent()` **rechaza en silencio** lo que pase los
-límites (`License::kDemoMaxOscillators` = 2 osciladores 259, `kDemoMaxLfos` = 4 LFO; la regla está
+límites (`License::kDemoMaxOscillators` = 2 osciladores 259, `kDemoMaxLfos` = 4 LFO, `kDemoMaxSwitches` = 2 SW-108; la regla está
 en `WcProcessor::canAdd`) y `savePatchFile()` devuelve false. Al cargar en demo se quedan los primeros
 presentes en orden de ranura; los demás se van con sus cables. Por eso la
 librería de 300 presets de fábrica no usa nunca el 259 C ni el D: el generador corría sin licencia
@@ -198,8 +198,11 @@ El isologo oficial es un PNG. **Nunca se escribe el nombre de la marca con una f
 - `WcUiSnapshot` deja un PNG por panel. Compararlos contra una referencia sirve para cazar
   desalineaciones — **pero no todo es determinístico** entre dos corridas del mismo binario: los
   paneles 242, 252 y 266 (LEDs que parpadean, voltajes al azar), `panel_OUTPUT` (su medidor depende
-  del audio), `patch22`, `patch99` y las capturas con un anillo de MIDI Learn que pulsa. Antes de
+  del audio), `patch22`, `patch99`, `lfo_sync_*`, `midi_zoom150` y las capturas con un anillo de MIDI Learn que
+  pulsa. Antes de
   culpar a un cambio, correr dos veces el binario sin cambios y comparar.
+- Para comparar PNG, contar píxeles distintos: en Pillow `getbbox()` sobre RGBA mira solo el alfa y
+  da "idéntico" aunque cambie el color.
 - Los renders de `WcRenderTest` que usan el 266 (y los 75 presets de fábrica que lo tienen) cambian
   entre corridas: su azar toma la semilla del reloj. Para comparar sonido bit a bit hay que fijarla.
 - **Un suavizador o una rampa se prueba con el objetivo en movimiento**, no solo con un salto: la
