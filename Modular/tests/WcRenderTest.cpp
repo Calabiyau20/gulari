@@ -2257,6 +2257,47 @@ int main (int argc, char** argv)
             std::printf ("  RATE texts %s, host \"1/8 D\" -> %.3f, \"400 ms\" -> %.4f (%.4f) %s\n", got.joinIntoString (" | ").toRawUTF8(), back, hostMs, k25, t ? "ok" : "BAD");
             good &= t;
         }
+
+        // 11. under CLOCK IN the random waves draw once a cycle, the lock's restart draws nothing (audit): LFO B's SYNC OUT
+        //     into the other five, AMOUNT 10 % (+-1 V), at PHASE 90 and at PHASE 0 with a clock of a fractional period
+        //     (7 Hz at 48 kHz, 8 Hz at 44.1 kHz). Stepped changes once a cycle at x1, x2 and x1/2; smooth and walk never jump
+        for (double sr : { 48000.0, 44100.0 })
+            for (float ph : { 0.0f, 90.0f })
+            {
+                WcProcessor p; p.license.status = License::Status::Licensed; p.prepareToPlay (sr, 1); p.resetAll();
+                const int wave[6] = { 5, 0, 6, 7, 5, 5 };
+                const float rate[6] = { 0.5f, 0.0f, 0.5f, 0.5f, 0.6f, 0.4f };   // x1 (B is the clock), x1, x1, x2, x1/2
+                bool t = true;
+                for (int i = 0; i < 6; ++i)
+                {
+                    p.setPresent (A + i, true);
+                    if (i == 1) continue;
+                    const juce::String pre (prefixLfo (i));
+                    setP (p, pre + "wave", (float) wave[i]); setP (p, pre + "rate", rate[i]); setP (p, pre + "amount", 0.1f); setP (p, pre + "phase", ph);
+                    t &= p.connect (B, M111::Out_Sync, A + i, M111::In_Clock);
+                }
+                setP (p, "lf2_rate", (float) (std::log10 ((sr == 48000.0 ? 7.0 : 8.0) / 0.01) / 4.0));
+                std::vector<float> o[6], clk;
+                juce::AudioBuffer<float> b (2, 1); juce::MidiBuffer m;
+                for (int n = 0; n < (int) sr * 8; ++n)
+                {
+                    p.processBlock (b, m);
+                    for (int i = 0; i < 6; ++i) o[i].push_back (p.rack.jackValue (A + i, M111::Out_Lfo));
+                    clk.push_back (p.rack.jackValue (B, M111::Out_Sync));
+                }
+                const int from = (int) sr, pulses = (int) rises (clk, from).size();
+                int ch[6] = {}; float jump[6] = {};
+                for (int i = 0; i < 6; ++i)
+                    for (size_t s = (size_t) from; s < o[i].size(); ++s)
+                    {
+                        const float d = std::abs (o[i][s] - o[i][s - 1]);
+                        ch[i] += d != 0.0f ? 1 : 0; jump[i] = std::max (jump[i], d);
+                    }
+                t &= pulses > 40 && std::abs (ch[0] - pulses) <= 1 && std::abs (ch[4] - 2 * pulses) <= 1 && std::abs (ch[5] - pulses / 2) <= 1 && jump[2] < 0.02f && jump[3] < 0.02f;
+                std::printf ("  clocked random at %.1f kHz, PHASE %.0f: %d pulses, stepped changes x1 %d x2 %d x1/2 %d, largest step smooth %.4f walk %.4f V %s\n",
+                             sr / 1000.0, ph, pulses, ch[0], ch[4], ch[5], jump[2], jump[3], t ? "ok" : "BAD");
+                good &= t;
+            }
         std::printf ("  LF-111 %s\n", good ? "ok" : "BAD");
         if (! good) ok = false;
     }

@@ -87,7 +87,8 @@ void M111::tick (const float* in, float* out) noexcept
     else if (clockSeen) { clockSeen = clockWas = false; clockPeriod = pulses = 0; }   // unplugged: its mode, the phase goes on
 
     const bool rt = in[In_Retrig] > 3.0f;
-    if ((rt && ! retrigWas) || (noteHit && retrigOn)) { restart = true; pulses = 0; }
+    const bool retrig = (rt && ! retrigWas) || (noteHit && retrigOn);   // draws; the clock's lock only realigns the phase
+    if (retrig) { restart = true; pulses = 0; }
     retrigWas = rt;
     noteHit = false;
 
@@ -102,7 +103,9 @@ void M111::tick (const float* in, float* out) noexcept
     if (restart) { acc = 0.0; cycle = true; }   // this very sample is the wave at PHASE
     float phi = (float) acc + phaseK / 360.0f + in[In_PhaseCv] * 0.1f;        // 36 degrees per volt, all the way round
     phi -= std::floor (phi);
-    if (restart || phi - phiWas < -0.5f) pick();   // forward through 0; backwards (PHASE c.v.) draws nothing
+    // forward through 0; backwards (PHASE c.v.) draws nothing.
+    // shortcut: a clock that slows by more than (360 - PHASE) degrees of a cycle still draws twice, fix if it is heard
+    if (retrig || phi - phiWas < -0.5f) pick();
     phiWas = phi;
 
     const float glide = 0.5f * (1.0f - std::cos (dsp::kPi * phi));            // cosine, landing as the next cycle starts
